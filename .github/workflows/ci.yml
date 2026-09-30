@@ -35,6 +35,7 @@ jobs:
             exit 0
           fi
           xcodebuild -version
+          ls -d /Applications/Xcode* || true
           pbx=""
           for f in project.pbxproj project.xcproj; do
             [ -f "$proj/$f" ] && pbx="$proj/$f" && break
