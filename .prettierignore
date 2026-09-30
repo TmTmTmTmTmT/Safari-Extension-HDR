@@ -1,0 +1,9 @@
+node_modules
+xcode
+fixtures
+results
+playwright-report
+test-results
+PLAN.md
+GUIDELINES.md
+CLAUDE.md
