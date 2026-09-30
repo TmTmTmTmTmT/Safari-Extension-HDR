@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "0a probe result (PLAN.md E-section reply format)",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "milestone",
+    "createdAt",
+    "env",
+    "api",
+    "edr",
+    "perf",
+    "flags",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "milestone": { "type": "string" },
+    "createdAt": { "type": ["string", "null"] },
+    "env": {
+      "type": "object",
+      "required": ["macOS", "safari", "chip", "display", "power", "sdrBrightness"],
+      "properties": {
+        "macOS": { "type": ["string", "null"] },
+        "safari": { "type": ["string", "null"] },
+        "chip": { "type": ["string", "null"] },
+        "display": { "type": ["string", "null"] },
+        "power": { "type": ["string", "null"], "enum": ["ac", "battery", null] },
+        "sdrBrightness": { "type": ["string", "null"], "enum": ["low", "mid", "max", null] },
+        "windowMode": { "type": ["string", "null"], "enum": ["window", "fullscreen", null] },
+        "ua": { "type": ["string", "null"] },
+        "screen": { "type": ["object", "null"] }
+      }
+    },
+    "api": {
+      "type": "object",
+      "required": ["navigatorGpu", "configure", "getConfiguration", "mediaQueries"],
+      "properties": {
+        "secureContext": { "type": "boolean" },
+        "navigatorGpu": { "type": "boolean" },
+        "adapter": { "type": ["object", "null"] },
+        "timestampQuery": { "type": "boolean" },
+        "preferredFormat": { "type": ["string", "null"] },
+        "configure": {
+          "type": "object",
+          "required": ["ok", "error"],
+          "properties": {
+            "ok": { "type": ["boolean", "null"] },
+            "error": { "type": ["string", "null"] }
+          }
+        },
+        "getConfiguration": {
+          "type": "object",
+          "required": ["supported", "toneMappingMode"],
+          "properties": {
+            "supported": { "type": "boolean" },
+            "format": { "type": ["string", "null"] },
+            "colorSpace": { "type": ["string", "null"] },
+            "toneMappingMode": { "type": ["string", "null"] },
+            "error": { "type": ["string", "null"] }
+          }
+        },
+        "mediaQueries": {
+          "type": "object",
+          "required": ["dynamicRangeHigh", "colorGamutP3"],
+          "properties": {
+            "dynamicRangeHigh": { "type": "boolean" },
+            "colorGamutP3": { "type": "boolean" }
+          }
+        },
+        "canvas2dFloat16": { "type": "object" },
+        "webgl": { "type": "object" },
+        "batteryApi": { "type": "boolean" }
+      }
+    },
+    "edr": {
+      "type": "object",
+      "required": ["maxDistinctStep", "encodingMatch"],
+      "properties": {
+        "maxDistinctStep": { "type": ["number", "null"] },
+        "encodingMatch": {
+          "type": ["string", "null"],
+          "enum": ["nonlinear", "linear", "neither", null]
+        },
+        "refHdrImage": { "type": ["string", "null"] }
+      }
+    },
+    "perf": {
+      "type": "object",
+      "required": ["srcRes", "canvasRes", "fps", "dropRate", "jsP50", "jsP95", "runs"],
+      "properties": {
+        "srcRes": { "type": ["string", "null"] },
+        "canvasRes": { "type": ["string", "null"] },
+        "fps": { "type": ["number", "null"] },
+        "dropRate": { "type": ["number", "null"] },
+        "jsP50": { "type": ["number", "null"] },
+        "jsP95": { "type": ["number", "null"] },
+        "gpuMs": { "type": ["number", "null"] },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "fixture",
+              "itm",
+              "srcRes",
+              "canvasRes",
+              "fullscreen",
+              "frames",
+              "fps",
+              "dropRate",
+              "jsP50",
+              "jsP95"
+            ],
+            "properties": {
+              "fixture": { "type": "string" },
+              "itm": { "type": "boolean" },
+              "srcRes": { "type": ["string", "null"] },
+              "canvasRes": { "type": ["string", "null"] },
+              "fullscreen": { "type": "boolean" },
+              "frames": { "type": "integer", "minimum": 0 },
+              "durationSec": { "type": ["number", "null"] },
+              "fps": { "type": ["number", "null"] },
+              "dropRate": { "type": ["number", "null"] },
+              "dropRatePresented": { "type": ["number", "null"] },
+              "jsP50": { "type": ["number", "null"] },
+              "jsP95": { "type": ["number", "null"] },
+              "jsMax": { "type": ["number", "null"] },
+              "gpuMs": { "type": ["number", "null"] },
+              "gpuSamples": { "type": "integer", "minimum": 0 },
+              "videoQuality": { "type": ["object", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "required": ["drm", "hdrSource", "fullscreen"],
+      "properties": {
+        "drm": { "type": "boolean" },
+        "hdrSource": { "type": "boolean" },
+        "fullscreen": { "type": "boolean" }
+      }
+    },
+    "errors": { "type": "array", "items": { "type": "string" } }
+  }
+}

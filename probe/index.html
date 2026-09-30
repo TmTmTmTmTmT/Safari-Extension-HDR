@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDR to HDR(EDR) 0a 프로브</title>
+    <style>
+      body {
+        background: #202020;
+        color: #ddd;
+        font:
+          14px/1.5 -apple-system,
+          sans-serif;
+        margin: 16px auto;
+        max-width: 1000px;
+        padding: 0 12px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        border-top: 1px solid #555;
+        font-size: 16px;
+        margin-top: 28px;
+        padding-top: 12px;
+      }
+      section p,
+      .note {
+        color: #aaa;
+        margin: 4px 0;
+      }
+      button,
+      select,
+      input[type='text'] {
+        font: inherit;
+      }
+      pre {
+        background: #111;
+        max-height: 320px;
+        overflow: auto;
+        padding: 8px;
+        white-space: pre-wrap;
+      }
+      table {
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+      th,
+      td {
+        border: 1px solid #555;
+        padding: 2px 8px;
+        text-align: right;
+      }
+      .row {
+        align-items: stretch;
+        display: flex;
+        gap: 8px;
+        margin: 8px 0;
+      }
+      .css-white {
+        background: #fff;
+        flex: 0 0 90px;
+      }
+      #stripes {
+        flex: 1;
+        height: 160px;
+        min-width: 0;
+      }
+      .labels {
+        display: flex;
+        margin-left: 98px;
+      }
+      .labels span {
+        flex: 1;
+        text-align: center;
+      }
+      .patch {
+        height: 120px;
+        width: 200px;
+      }
+      #stage {
+        align-items: flex-start;
+        background: #000;
+        display: flex;
+      }
+      #stage:fullscreen {
+        align-items: center;
+      }
+      #stage:-webkit-full-screen {
+        align-items: center;
+      }
+      #stage > * {
+        background: #000;
+        height: auto;
+        min-width: 0;
+        width: 50%;
+      }
+      .opts label {
+        margin-right: 16px;
+      }
+      textarea {
+        background: #111;
+        color: #ddd;
+        height: 200px;
+        width: 100%;
+      }
+      .err {
+        color: #f88;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>0a 프로브 (PLAN B절)</h1>
+    <p class="note">
+      localhost(secure context)에서 열어야 한다. 측정 조건(전원, SDR 밝기, 창/전체화면)을 바꿀
+      때마다 P0-2~P0-4를 다시 하고 JSON을 따로 저장한다. 절차는 docs/manual-checklist.md 참고.
+    </p>
+
+    <section>
+      <h2>P0-5 환경 (먼저 입력)</h2>
+      <div class="opts">
+        <label>macOS <input type="text" id="envMacos" value="27.2" size="8" /></label>
+        <label>칩 <input type="text" id="envChip" value="Apple M1 Pro" size="14" /></label>
+        <label
+          >디스플레이 <input type="text" id="envDisplay" value="Liquid Retina XDR" size="18"
+        /></label>
+        <br />
+        <label
+          >전원
+          <select id="envPower">
+            <option value="">(선택)</option>
+            <option value="ac">전원 연결</option>
+            <option value="battery">배터리</option>
+          </select>
+        </label>
+        <label
+          >SDR 밝기
+          <select id="envBrightness">
+            <option value="">(선택)</option>
+            <option value="low">낮음</option>
+            <option value="mid">중간</option>
+            <option value="max">최대</option>
+          </select>
+        </label>
+        <label
+          >창 모드
+          <select id="envWindow">
+            <option value="">(선택)</option>
+            <option value="window">창</option>
+            <option value="fullscreen">전체화면</option>
+          </select>
+        </label>
+      </div>
+      <p>Safari 버전, UA, screen/DPR은 자동으로 기록한다.</p>
+    </section>
+
+    <section>
+      <h2>P0-1 API</h2>
+      <button id="btnApi">API 프로브 실행</button>
+      <pre id="apiOut">(대기)</pre>
+    </section>
+
+    <section>
+      <h2>P0-2 EDR 램프</h2>
+      <p>
+        왼쪽 흰색 패치는 CSS #fff(SDR white)다. 오른쪽 줄무늬는 왼쪽부터 1.0, 1.25, 1.5, 2, 3, 4, 6,
+        8, 16이다. 줄무늬 중 SDR white보다 밝게 구분되는 가장 오른쪽 단계를 고른다.
+      </p>
+      <div class="row">
+        <div class="css-white"></div>
+        <canvas id="stripes" width="1800" height="320"></canvas>
+      </div>
+      <div class="labels" id="stepLabels"></div>
+      <div class="opts" id="stepChoices"></div>
+      <button id="btnStripes">다시 그리기</button>
+      <p>
+        참조 HDR 이미지(선택): 파일을 열어 같은 화면에서 줄무늬와 밝기를 비교한다.
+        <input type="file" id="refFile" accept="image/*" />
+      </p>
+      <img id="refImg" alt="" style="max-width: 320px; display: none" />
+      <p>
+        <label
+          >참조 HDR 이미지와 비교
+          <select id="refChoice">
+            <option value="not_checked">사용 안 함</option>
+            <option value="brighter_than_stripes">이미지가 줄무늬 최고 단계보다 밝음</option>
+            <option value="not_brighter">이미지가 줄무늬보다 밝지 않음</option>
+          </select>
+        </label>
+      </p>
+    </section>
+
+    <section>
+      <h2>P0-3 인코딩</h2>
+      <p>
+        각 행의 왼쪽은 셰이더가 캔버스에 0.5를 기록한 패치, 오른쪽은 CSS 색이다. 경계가 가장 안
+        보이는(일치하는) 쪽을 고른다.
+      </p>
+      <div class="row">
+        <canvas class="patch" id="patchA" width="200" height="120"></canvas>
+        <div class="patch" style="background: #808080"></div>
+        <span>CSS #808080 (0.5를 비선형 값으로 해석하면 일치)</span>
+      </div>
+      <div class="row">
+        <canvas class="patch" id="patchB" width="200" height="120"></canvas>
+        <div class="patch" style="background: #bcbcbc"></div>
+        <span>CSS #BCBCBC (0.5를 선형 값으로 해석하면 일치)</span>
+      </div>
+      <div class="opts">
+        <label><input type="radio" name="enc" value="nonlinear" /> #808080과 일치</label>
+        <label><input type="radio" name="enc" value="linear" /> #BCBCBC와 일치</label>
+        <label><input type="radio" name="enc" value="neither" /> 둘 다 아님</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>P0-4 비디오</h2>
+      <p>
+        왼쪽은 원본 video, 오른쪽은 importExternalTexture + 셰이더 출력이다. 실행은 최대 10초이고
+        재생이 끝나면 함께 끝난다. 결과 표의 수치는 측정 조건(위 P0-5)과 함께 저장된다.
+      </p>
+      <div class="opts">
+        <label
+          >셰이더
+          <select id="vmode">
+            <option value="identity">identity</option>
+            <option value="itm">ITM (균형 프리셋 초안)</option>
+          </select>
+        </label>
+        <button id="btnFull">비교 영역 전체화면</button>
+        <button id="btnFixtures">픽스처 다시 확인</button>
+      </div>
+      <div id="fixtureList"></div>
+      <div id="stage">
+        <video id="origVideo" muted playsinline></video>
+        <canvas id="vidCanvas" width="16" height="9"></canvas>
+      </div>
+      <p id="runStatus">(대기)</p>
+      <table id="runTable"></table>
+    </section>
+
+    <section>
+      <h2>결과 JSON</h2>
+      <button id="btnExport">JSON export (다운로드)</button>
+      <p>다운로드가 막히면 아래 내용을 복사해 result-*.json 파일로 저장한다.</p>
+      <textarea id="jsonOut" readonly></textarea>
+      <p class="err" id="errOut"></p>
+    </section>
+
+    <script src="probe-core.js"></script>
+    <script src="shaders.js"></script>
+    <script src="probe.js"></script>
+  </body>
+</html>
