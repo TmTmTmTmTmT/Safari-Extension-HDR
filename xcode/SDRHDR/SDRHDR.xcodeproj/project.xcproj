@@ -74,15 +74,15 @@
       "kind": "group",
       "name": "Products",
       "children": [
-        { "path": "<PRODUCTS>/SDRHDR.app", "id": "F2A71EDF306D381D00EB08F9", "type": "wrapper.application", "index": false },
-        { "path": "<PRODUCTS>/SDRHDR Extension.appex", "id": "F2A71EFA306D381E00EB08F9", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "SDRHDR/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
+        { "path": "<PRODUCTS>/SDRHDR.app", "id": "F261501F306D3ECF00C6F987", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/SDRHDR Extension.appex", "id": "F261503A306D3ED000C6F987", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "SDRHDR/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
       ],
     },
   ],
   "targets": [
     {
       "name": "SDRHDR",
-      "id": "F2A71EDE306D381D00EB08F9",
+      "id": "F261501E306D3ECF00C6F987",
       "product": "Products/SDRHDR.app",
       "product-type": "application",
       "dependencies": [
@@ -138,7 +138,7 @@
       },
     }, {
       "name": "SDRHDR Extension",
-      "id": "F2A71EF9306D381E00EB08F9",
+      "id": "F2615039306D3ED000C6F987",
       "product": "Products/SDRHDR Extension.appex",
       "product-type": "app-extension",
       "build-phases": [
@@ -167,7 +167,7 @@
           "-framework",
           "SafariServices",
         ],
-        "PRODUCT_BUNDLE_IDENTIFIER": "io.github.tmtmtmtmtmt.sdrhdr.Extension",
+        "PRODUCT_BUNDLE_IDENTIFIER": "io.github.tmtmtmtmtmt.SDRHDR.Extension",
         "PRODUCT_NAME": "$(TARGET_NAME)",
         "SKIP_INSTALL": "YES",
         "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
