@@ -45,8 +45,8 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 ## M2 CI 진행 (7edf085 이후)
 
 - 러너 converter 임시 프로젝트 생성·컴파일까지 성공, `ValidateEmbeddedBinary`에서 실패: 앱 ID `io.github.tmtmtmtmtmt.SDRHDR`, 확장 ID `io.github.tmtmtmtmtmt.sdrhdr.Extension`(대소문자 불일치로 접두 검증 실패). 원인 추정: converter가 앱 ID 마지막 요소를 앱 이름으로 만듦. 조치: 기본 `--bundle-identifier`를 `io.github.tmtmtmtmtmt.SDRHDR`로 변경(make-xcode.sh, ci.yml). PLAN.md M2-3의 기본값 표기(`…sdrhdr`)와 달라짐, Opus 확인 필요
-- 사용자 Mac의 커밋된 `xcode/`는 소문자 ID로 생성돼 같은 검증에 실패할 가능성이 큼. 재생성 필요(`rm -rf xcode` 후 `bash scripts/make-xcode.sh`). CI가 통과하기 전에는 재생성하지 말고 대기
-- 미검증: 변경 후 CI 결과 / (2)
+- 사용자 Mac의 커밋된 `xcode/`는 소문자 ID로 생성돼 같은 검증에 실패할 가능성이 큼. 재생성 필요(`rm -rf xcode` 후 `bash scripts/make-xcode.sh`).
+- → verify: c6fc106에서 CI ubuntu(test:dom 포함)·macos(러너 converter 임시 프로젝트 무서명 빌드) 모두 success / (2). 다음: 사용자 Mac에서 `rm -rf xcode` 후 재생성·push
 
 ## Opus 판정 반영 (FIX_GUIDE L1~L6, 구현 완료 · 검증 대기)
 
