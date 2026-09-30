@@ -1,0 +1,310 @@
+{
+  "schemaVersion": 2,
+  "milestone": "M1",
+  "createdAt": "2026-09-30T08:30:52.691Z",
+  "env": {
+    "macOS": "27.2",
+    "safari": "27.2",
+    "chip": "Apple M1 Pro",
+    "display": "Liquid Retina XDR",
+    "power": "ac",
+    "sdrBrightness": "max",
+    "windowMode": "mixed",
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+    "screen": {
+      "width": 1800,
+      "height": 1169,
+      "availWidth": 1740,
+      "availHeight": 1129,
+      "dpr": 2,
+      "colorDepth": 24
+    }
+  },
+  "api": {
+    "secureContext": true,
+    "navigatorGpu": true,
+    "adapter": {
+      "features": [
+        "bgra8unorm-storage",
+        "clip-distances",
+        "core-features-and-limits",
+        "depth-clip-control",
+        "depth32float-stencil8",
+        "float16-renderable",
+        "float32-blendable",
+        "float32-filterable",
+        "float32-renderable",
+        "indirect-first-instance",
+        "primitive-index",
+        "rg11b10ufloat-renderable",
+        "shader-f16",
+        "texture-compression-astc",
+        "texture-compression-astc-sliced-3d",
+        "texture-compression-bc",
+        "texture-compression-bc-sliced-3d",
+        "texture-compression-etc2",
+        "texture-formats-tier1",
+        "texture-formats-tier2",
+        "timestamp-query"
+      ],
+      "vendor": "apple",
+      "architecture": "apple",
+      "device": "apple",
+      "description": "apple"
+    },
+    "timestampQuery": true,
+    "preferredFormat": "bgra8unorm",
+    "configure": {
+      "ok": true,
+      "error": null
+    },
+    "getConfiguration": {
+      "supported": true,
+      "format": "rgba16float",
+      "colorSpace": "display-p3",
+      "toneMappingMode": "extended",
+      "error": null
+    },
+    "mediaQueries": {
+      "dynamicRangeHigh": true,
+      "colorGamutP3": true
+    },
+    "canvas2dFloat16": {
+      "supported": false,
+      "colorType": null,
+      "error": null
+    },
+    "webgl": {
+      "webgl2": true,
+      "drawingBufferStorage": false,
+      "error": null
+    },
+    "batteryApi": false
+  },
+  "edr": {
+    "maxDistinctStep": 2,
+    "encodingMatch": "nonlinear",
+    "refHdrImage": "not_checked"
+  },
+  "perf": {
+    "srcRes": "3840x2160",
+    "canvasRes": "1800x1013",
+    "fps": 45.51,
+    "dropRate": 0.24374,
+    "jsP50": 1,
+    "jsP95": 1,
+    "g3": {
+      "1920x1080": {
+        "runs": 2,
+        "dropRateMax": 0.23333,
+        "jsP95Max": 1
+      },
+      "3840x2160": {
+        "runs": 2,
+        "dropRateMax": 0.24374,
+        "jsP95Max": 1
+      }
+    },
+    "runs": [
+      {
+        "fixture": "ramp-1080p60",
+        "itm": false,
+        "srcRes": "1920x1080",
+        "canvasRes": "1000x563",
+        "fullscreen": false,
+        "frames": 614,
+        "durationSec": 11,
+        "warmupSec": 1,
+        "windowSec": 9.98,
+        "windowFrames": 558,
+        "fps": 55.82,
+        "dropRate": 0.07,
+        "dropRatePresented": 0.02452,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 3,
+        "gpuMs": 0.116,
+        "gpuSamples": 56,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 1
+        }
+      },
+      {
+        "fixture": "ramp-1080p60",
+        "itm": false,
+        "srcRes": "1920x1080",
+        "canvasRes": "1800x1013",
+        "fullscreen": true,
+        "frames": 520,
+        "durationSec": 11.01,
+        "warmupSec": 1,
+        "windowSec": 9.98,
+        "windowFrames": 468,
+        "fps": 47.23,
+        "dropRate": 0.22,
+        "dropRatePresented": 0.1271,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 5,
+        "gpuMs": 0.372,
+        "gpuSamples": 46,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 0
+        }
+      },
+      {
+        "fixture": "ramp-2160p60",
+        "itm": false,
+        "srcRes": "3840x2160",
+        "canvasRes": "1000x563",
+        "fullscreen": false,
+        "frames": 606,
+        "durationSec": 11.01,
+        "warmupSec": 1,
+        "windowSec": 9.98,
+        "windowFrames": 549,
+        "fps": 55.04,
+        "dropRate": 0.085,
+        "dropRatePresented": 0.02664,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 2,
+        "gpuMs": 0.136,
+        "gpuSamples": 55,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 0
+        }
+      },
+      {
+        "fixture": "ramp-2160p60",
+        "itm": false,
+        "srcRes": "3840x2160",
+        "canvasRes": "1800x1013",
+        "fullscreen": true,
+        "frames": 587,
+        "durationSec": 11.01,
+        "warmupSec": 1,
+        "windowSec": 9.97,
+        "windowFrames": 536,
+        "fps": 53.31,
+        "dropRate": 0.10518,
+        "dropRatePresented": 0.02904,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 3,
+        "gpuMs": 0.409,
+        "gpuSamples": 54,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 0
+        }
+      },
+      {
+        "fixture": "colorbars-1080p60",
+        "itm": false,
+        "srcRes": "1920x1080",
+        "canvasRes": "1000x563",
+        "fullscreen": false,
+        "frames": 361,
+        "durationSec": 11.01,
+        "warmupSec": 1,
+        "windowSec": 9.95,
+        "windowFrames": 330,
+        "fps": 32.78,
+        "dropRate": 0.44816,
+        "dropRatePresented": 0.39299,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 5,
+        "gpuMs": 0.106,
+        "gpuSamples": 33,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 0
+        }
+      },
+      {
+        "fixture": "colorbars-1080p60",
+        "itm": false,
+        "srcRes": "1920x1080",
+        "canvasRes": "1800x1013",
+        "fullscreen": true,
+        "frames": 511,
+        "durationSec": 11.02,
+        "warmupSec": 1,
+        "windowSec": 9.98,
+        "windowFrames": 460,
+        "fps": 46.38,
+        "dropRate": 0.23333,
+        "dropRatePresented": 0.16241,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 2,
+        "gpuMs": 0.364,
+        "gpuSamples": 46,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 1
+        }
+      },
+      {
+        "fixture": "colorbars-2160p60",
+        "itm": false,
+        "srcRes": "3840x2160",
+        "canvasRes": "1000x563",
+        "fullscreen": false,
+        "frames": 411,
+        "durationSec": 11.01,
+        "warmupSec": 1,
+        "windowSec": 9.98,
+        "windowFrames": 378,
+        "fps": 37.32,
+        "dropRate": 0.37,
+        "dropRatePresented": 0.33156,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 2,
+        "gpuMs": 0.144,
+        "gpuSamples": 37,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 0
+        }
+      },
+      {
+        "fixture": "colorbars-2160p60",
+        "itm": false,
+        "srcRes": "3840x2160",
+        "canvasRes": "1800x1013",
+        "fullscreen": true,
+        "frames": 501,
+        "durationSec": 11.01,
+        "warmupSec": 1,
+        "windowSec": 9.97,
+        "windowFrames": 453,
+        "fps": 45.51,
+        "dropRate": 0.24374,
+        "dropRatePresented": 0.17064,
+        "jsP50": 1,
+        "jsP95": 1,
+        "jsMax": 2,
+        "gpuMs": 0.406,
+        "gpuSamples": 45,
+        "videoQuality": {
+          "dropped": 0,
+          "total": 0
+        }
+      }
+    ],
+    "gpuMs": 0.406
+  },
+  "flags": {
+    "drm": false,
+    "hdrSource": false,
+    "fullscreen": true
+  },
+  "errors": []
+}

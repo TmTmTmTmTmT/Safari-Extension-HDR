@@ -25,11 +25,11 @@
 |---|---|---|---|---|
 | A1 | Safari 26.0+에서 WebGPU 기본 활성화 | [사실] | WebKit Safari 26.0 블로그, Apple 릴리스 노트. 사용자 macOS 27.2(Safari 버전은 프로브가 기록) | 0a |
 | A2 | Safari 26.0이 WebGPU Canvas 내 HDR **이미지** 지원 | [사실] | WebKit 26.0 블로그 문구 | — |
-| A3 | WebGPU `toneMapping:{mode:"extended"}` + rgba16float가 Safari에서 EDR로 출력됨 | [2차] | pixijs 이슈 주장, 2024-10 WebKit 커밋 "Make HDR canvas testable via Safari"(당시 unstable 플래그). 기본 활성 여부 1차 근거 없음 | **0a 핵심** |
+| A3 | WebGPU `toneMapping:{mode:"extended"}` + rgba16float가 Safari에서 EDR로 출력됨 | [확인(0a)] 2026-09-30 사용자 Mac: configure 성공, 되읽기 extended, 스트라이프 2.0까지 구분. 이전 근거: | pixijs 이슈 주장, 2024-10 WebKit 커밋 "Make HDR canvas testable via Safari"(당시 unstable 플래그). 기본 활성 여부 1차 근거 없음 | **0a 핵심** |
 | A4 | WebGPU 캔버스 colorSpace는 `srgb`/`display-p3`만 지원(rec2100 없음) | [사실(스펙)] | webgpu-hdr explainer. 출력은 display-p3로 고정, BT.2020 출력은 불필요 | 0a |
-| A5 | rgba16float 캔버스 값은 비선형(감마 인코딩) 확장값으로 해석됨 | [추정] | 틀리면 출력 인코딩을 반대로 적용 | 0a P0-3 |
-| A6 | WebGL HDR(`drawingBufferStorage`/ToneMapping)은 Safari 미지원 | [2차] | 2023년 WebKit "No signal". 존재 여부만 프로브 | 0a |
-| A7 | Canvas2D `colorType:"float16"` HDR은 WebKit에서 구현 진행 중 | [2차] | WebKit PR #71719. 보조 폴백 | 0a |
+| A5 | rgba16float 캔버스 값은 비선형(감마 인코딩) 확장값으로 해석됨 | [확인(0a)] P0-3 `nonlinear` | 틀리면 출력 인코딩을 반대로 적용 | 0a P0-3 |
+| A6 | WebGL HDR(`drawingBufferStorage`/ToneMapping)은 Safari 미지원 | [확인(0a)] `drawingBufferStorage` 없음 | 2023년 WebKit "No signal". 존재 여부만 프로브 | 0a |
+| A7 | Canvas2D `colorType:"float16"` HDR은 WebKit에서 구현 진행 중 | [확인(0a)] Safari 27.2 미지원 → G1/G2 1차 폴백 경로 없음 | WebKit PR #71719. 보조 폴백 | 0a |
 | A8 | `importExternalTexture` 샘플은 descriptor colorSpace(기본 srgb) 기준 인코딩 RGB | [추정] | BT.709 transfer 처리 방식 미확인 | 0a P0-4 |
 | A9 | content script(isolated world)에서 `navigator.gpu` 사용 가능 | [미확인] | — | **0b** |
 | A10 | YouTube MSE(blob:) video는 origin-clean이라 SecurityError가 나지 않음 | [추정] | — | **0b** |
@@ -40,8 +40,9 @@
 | A15 | GH Actions macOS 러너에서 커밋된 Safari 확장 프로젝트를 `CODE_SIGNING_ALLOWED=NO`로 빌드 가능 | [2차] | 커뮤니티 사례 | M2 CI |
 | A16 | converter 기본 동작(`--copy-resources` 미사용)은 extension 폴더를 **참조**하며, 저장소 루트 기준 상대경로라면 CI에서도 유효 | [추정] | 절대경로가 박히면 CI 실패 | M2 CI |
 | A17 | JS에서 EDR 헤드룸 수치 조회 불가(`dynamic-range: high`는 boolean) | [사실(스펙)] | 배율 파라미터의 근거 | — |
-| A18 | 내장 XDR 헤드룸은 SDR 밝기 설정에 따라 변동(밝기를 낮출수록 커짐) | [추정] | 프리셋 기본 P 결정에 0a 측정값 사용 | 0a P0-2/P0-5 |
+| A18 | 내장 XDR 헤드룸은 SDR 밝기 설정에 따라 변동(밝기를 낮출수록 커짐) | [확인(0a 2차)] 전원 연결, 안정 후 P0-2: 밝기 낮음 4 / 중간 3 / 최대 2. 밝기 변경·재그리기 직후에는 약 30초 동안 2로 보이다가 안정값에 도달 | 0a P0-2/P0-5 |
 | A19 | (F-A) Safari 확장 appex ↔ 헬퍼 앱 통신은 App Group/XPC 또는 localhost 소켓으로 가능하며, 무료 개인 팀 서명에서도 해당 capability 사용 가능 | [미확인] | F-A 착수 시 FA-0 프로브로 확인 | FA-0 |
+| A20 | Safari `requestVideoFrameCallback`은 video가 표시하는 모든 프레임마다 호출됨 | [반증(0a 3차)] 60Hz 디스플레이에서 60fps video의 콜백이 약 30회/s(모든 모드, 캔버스 없는 B0 포함). ProMotion에서도 51~56회/s. 같은 run의 presentedFrames 기준 video 표시율은 약 54~57회/s로 video 자체는 정상 표시. 즉 rVFC 구동 오버레이는 60Hz에서 약 30fps로만 갱신됨. 4차(rVFC 비교 run V3)에서는 60Hz 53~56회/s, ProMotion 54~56회/s로 3차의 30회/s는 재현되지 않았으나(원인 미확인), 갱신 누락은 여전히 11~32%. 구동 수단으로 신뢰할 수 없다는 결론은 유지 | 0a 3·4차 |
 
 **해석이 갈리는 지점 → 결정**
 - 색 방향: 측색적 변환(709→P3 행렬)을 기반으로 하고, 채도·하이라이트 확장은 **프리셋 + 상세 슬라이더**로 둔다(사용자 답변 반영). 프리셋 수치는 S2/S4 시뮬레이션과 0a 헤드룸 측정 후 Opus가 확정한다.
@@ -69,7 +70,7 @@
 ### 통과/실패 기준
 - **G1 API**: configure 예외 없음, 되읽기가 가능하면 `toneMapping.mode==='extended'`.
 - **G2 EDR**: SDR white보다 밝은 단계가 **2개 이상 구분**됨. 참조 HDR 이미지는 밝은데 스트라이프가 1.0에서 포화되면 실패.
-- **G3 성능**: 소스 해상도 기준 **2160p60과 1080p60 모두** 드롭 < 1%, content script JS p95 < 4 ms(전체화면, 전원 연결).
+- **G3 성능** (2026-09-30 3차 개정): 전체화면 오버레이 배치(video 위 단일 캔버스, 캔버스 = min(원본, 표시×DPR)), 전원 연결, 1080p60과 2160p60, 60Hz와 ProMotion 모두에서 (1) **구동 루프의 디스플레이 갱신 누락률(R3) − 기준선(R0) < 1%p**, (2) JS p95 < 4 ms, (3) 움직이는 박스 끊김 육안 "없음". 디스플레이 갱신 누락률 = 측정 창에서 구동 콜백 간격이 디스플레이 갱신 간격의 1.5배를 넘어 놓친 갱신 수 / 기대 갱신 수(기대 갱신 수 = 측정 창 초 × 디스플레이 Hz). 이력: 1차 개정(rVFC 콜백 드롭률)은 rVFC가 표시 프레임보다 적게 호출돼(A20) 폐기. 2차 개정(소스 프레임 슬롯 누락률)은 구동 루프 주기와 소스 fps가 같은 60Hz에서 위상 지터만으로 거짓 누락이 생겨(캔버스 없는 R0가 콜백 600/600인데 5.67%) 폐기.
 - **G4 확장 컨텍스트(0b)**: content script에서 `navigator.gpu` 사용 가능, YouTube video SecurityError 없음, 오버레이 EDR이 G2와 동등.
 
 ### 실패 분기 (Opus가 FIX_GUIDE.md 또는 PLAN.md 개정으로 지시)
@@ -105,7 +106,7 @@ extension/                     # MV3, 번들러 없음
     ns.js                      # globalThis.__sdrhdr 네임스페이스
     detect.js                  # isDrm, isHdrSource, contentRect, 셀렉터 집중
     overlay.js                 # canvas 배치(ResizeObserver, fullscreenchange), pointer-events:none
-    renderer.js                # WebGPU device/pipeline, rVFC 루프, importExternalTexture
+    renderer.js                # WebGPU device/pipeline, 렌더 루프(C절 "렌더 루프"), importExternalTexture
     itm.wgsl.js                # WGSL 문자열
     params.js                  # 프리셋·기본값, storage 동기화
     hud.js                     # 디버그 HUD + JSON export
@@ -123,7 +124,7 @@ results/                       # 사용자 회신 JSON
 
 **역할**
 - **content script**: 런타임 로직 전체를 맡는다. 메인 플레이어 video 1개만 대상이다. 캔버스는 `.html5-video-container` 안 video 바로 뒤에 둔다. 컨트롤은 DOM상 뒤에 있으므로 z-index를 유지한다. letterbox는 `videoWidth/Height`로 콘텐츠 사각형을 계산한다. 캔버스 해상도는 `min(videoWidth×videoHeight, contentRect×DPR)`다.
-- **렌더 루프**: rVFC마다 `importExternalTexture`(프레임마다 재import) → 풀스크린 삼각형 1패스. 일시정지·seek 시 1회 렌더, 탭 비가시 시 정지.
+- **렌더 루프** (2026-09-30 확정, 0a 4차): `requestAnimationFrame`마다 `importExternalTexture`(매번 재import) → 풀스크린 삼각형 1패스. rVFC는 Safari에서 표시 프레임보다 적게 호출되므로(A20) 구동에 쓰지 않는다. video가 재생 중이 아니면(일시정지·seek 완료·ended) 1회 렌더 후 루프를 멈추고 `play`/`seeked` 이벤트로 재개한다. 탭 비가시 시 정지. ProMotion(120Hz)에서는 60fps 소스에 대해 프레임당 2회 렌더한다. 비용 여유(2160p ITM GPU 약 2.4 ms)로 허용하고, 같은 프레임 재렌더 생략은 M6에서 검토한다.
 - **DRM 가드**: `mediaKeys`, `webkitKeys`, `encrypted`/`webkitneedkey` → 즉시 detach, 해당 video는 영구 no-op. 검은 프레임이 연속되면 보조로 detach.
 - **popup**: `storage.local`에 쓰기만 하고, content script가 `storage.onChanged`로 반영한다.
 - **background**: 두지 않는다(필요 시 Opus 승인).
@@ -148,6 +149,8 @@ results/                       # 사용자 회신 JSON
 
 popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고, 슬라이더를 움직이면 "사용자 지정"으로 전환한다.
 
+**0a 헤드룸 제약 (2026-09-30, M4에서 수치 확정)**: 안정 후 헤드룸은 밝기 최대 약 2, 중간 약 3, 낮음 약 4이고 JS에서 조회할 수 없다. 헤드룸을 넘는 값은 시스템이 잘라 하이라이트 계조가 사라진다. M4 결정 조건: 기본(균형) 프리셋은 밝기 최대(헤드룸 2)에서 하드 클리핑으로 잃는 입력 코드가 없어야 한다. 방법은 (a) 균형 P ≤ 2.0 또는 (b) 헤드룸 추정값 근처 소프트 롤오프 중에서 S10 결과로 고른다.
+
 ---
 
 ## D. 마일스톤
@@ -167,6 +170,8 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
+
+**M1 판정 완료 (2026-09-30)**: G1·G2·G3 통과. M2(최소 확장 + Xcode) 착수 가능. M2의 렌더러는 C절 확정 렌더 루프(rAF)로 구현한다.
 
 ---
 
@@ -216,6 +221,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | S7 | 프레임 예산 모델: 캔버스 해상도×8B×fps, 합성 레이어, 16.6 ms | 1080p/1440p/2160p(XDR 14"/16" 전체화면 캔버스 크기 포함) 표 | Sonnet | sim-runner | 0a 실측과 2배 괴리 → Opus |
 | S8 | DOM 감지 픽스처 테스트 | Playwright WebKit 통과(범위 한정) | impl-worker | sim-runner | 실제 DOM 불일치 → Sonnet |
 | S9 | 픽스처 생성(ffmpeg 1080p60/2160p60 램프·컬러바, bt709 태그) | 해상도·fps·태그 검사 | Sonnet(스크립트) | sim-runner | 태그 오류 → Sonnet |
+| S10 | 헤드룸 클리핑: 프리셋 3종 × 헤드룸 H∈{2,3,4}에서 H를 넘는 출력으로 잘리는 8bit 입력 코드 수, 잘리는 구간의 입력 휘도 범위 | 값만 출력(M4에서 Opus가 선택 기준으로 사용) | Sonnet | sim-runner | → Opus |
 
 ---
 
@@ -224,7 +230,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | 위험 | 완화 |
 |---|---|
 | Safari extended toneMapping 미지원(A3) | 0a 최우선 게이트 → F-A |
-| 2160p60 합성 부하(rgba16f 추가 레이어) | 캔버스 = min(원본, 표시×DPR), rVFC 구동, 비가시·일시정지 시 정지, S7 모델로 예측 |
+| 2160p60 합성 부하(rgba16f 추가 레이어) | 캔버스 = min(원본, 표시×DPR), rAF 구동(C절 렌더 루프), 비가시·일시정지 시 정지, S7 모델로 예측 |
 | 배터리(EDR 백라이트 + GPU) | popup 원클릭 off, HUD 전력 조건 기록. 자동 off는 불가(API 없음) |
 | 색 왜곡(피부톤, hue shift) | 휘도 기반 비율 스케일, 정확 프리셋 = 측색적, S4 |
 | 8bit 밴딩 확대 | S5로 곡선 기울기 제한. 디더링은 필요 판정 시에만 |
@@ -297,6 +303,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 
 ## 확정된 사용자 환경·결정 (질문 회신 반영)
 - Mac: **Apple M1 Pro 10-core CPU, 내장 XDR(Liquid Retina XDR)**, macOS 27.2, **Safari 27.2**. A1 전제(WebGPU 기본 활성)는 충족한다. S7 예산 모델은 M1 Pro GPU(14/16코어, 약 200 GB/s 메모리 대역폭)와 XDR 네이티브 해상도(14" 3024×1964 / 16" 3456×2234)를 기준으로 한다. 14"/16" 여부는 0a 프로브의 `screen` 값으로 확정한다.
+- 0a 1차(2026-09-30) 확정: `screen` 1800×1169 @ DPR 2 → **16" 모델**, 스케일 해상도 설정(백킹 3600×2338, 패널 3456×2234로 다운샘플). 전체화면 16:9 캔버스 상한은 3600×2025다. S7은 이 행을 추가해 갱신한다(FIX_GUIDE.md F5).
 - 성능: 소스 해상도 추종, 최대 2160p60.
 - 색: 프리셋 3종 + 상세 슬라이더(채도 부스트 포함).
 - Xcode: 사용자 Mac에서 생성 후 push.
@@ -315,9 +322,9 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 
 | 게이트 | 일자 | 근거 파일 | 판정 | 후속 지시 |
 |---|---|---|---|---|
-| G1 API | — | — | 대기 | — |
-| G2 EDR | — | — | 대기 | — |
-| G3 성능 | — | — | 대기 | — |
+| G1 API | 2026-09-30 | results/result-M1-20260930-battery-max-fullscreen.json | **통과** | configure 예외 없음, 되읽기 `rgba16float`/`display-p3`/`extended`. 조건 무관 항목이라 재측정 불필요 |
+| G2 EDR | 2026-09-30 | results/result-M1-20260930-ac-{low,mid,max}-mixed.json | **통과** | 전원 연결 3단계 밝기 모두 SDR white 위 2단계 이상 구분(안정 후 4 / 3 / 2, 최소 조건인 밝기 최대에서도 1.25·1.5·2). 1차 잠정 판정 확정. 헤드룸 제약은 C절 "0a 헤드룸 제약"으로 M4에 넘김 |
+| G3 성능 | 2026-09-30 | 4차: results/result-M1-20260930-ac-mid-actual60hz-raf.json, …-actualpromotion-raf.json (이전 회차 이력은 git) | **통과** | B절 3차 개정 기준. rAF 구동 run 전부 콜백 수 = 기대 갱신 수(60Hz 600/599~600, ProMotion 1200~1201/1199~1200) → 디스플레이 갱신 누락 0, R3−R0 = 0%p(두 해상도·두 주사율). JS p95 ≤ 1.05 ms. GPU(2160p ITM, 3600×2025) 60Hz 5.3 ms / ProMotion 2.4 ms로 예산 내. 끊김 육안 "없음"(두 주사율). 비교용 rVFC 구동(V3)은 11~32% 누락. 주: 사용자 보고로 4차 두 파일의 refreshRate 표기가 뒤바뀜(loopFps 60/120으로 확인, 파일명은 실제 주사율로 저장). 제한: 픽스처 기준이며 YouTube 실제 재생은 G4(0b)에서 함께 확인 |
 | G4 확장 컨텍스트 | — | — | 대기 | — |
 
 ---

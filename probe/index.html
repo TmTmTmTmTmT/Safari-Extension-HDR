@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDR to HDR(EDR) 0a 프로브</title>
+    <style>
+      body {
+        background: #202020;
+        color: #ddd;
+        font:
+          14px/1.5 -apple-system,
+          sans-serif;
+        margin: 16px auto;
+        max-width: 1000px;
+        padding: 0 12px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        border-top: 1px solid #555;
+        font-size: 16px;
+        margin-top: 28px;
+        padding-top: 12px;
+      }
+      section p,
+      .note {
+        color: #aaa;
+        margin: 4px 0;
+      }
+      button,
+      select,
+      input[type='text'] {
+        font: inherit;
+      }
+      pre {
+        background: #111;
+        max-height: 320px;
+        overflow: auto;
+        padding: 8px;
+        white-space: pre-wrap;
+      }
+      table {
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+      th,
+      td {
+        border: 1px solid #555;
+        padding: 2px 8px;
+        text-align: right;
+      }
+      .row {
+        align-items: stretch;
+        display: flex;
+        gap: 8px;
+        margin: 8px 0;
+      }
+      .css-white {
+        background: #fff;
+        flex: 0 0 90px;
+      }
+      #stripes {
+        flex: 1;
+        height: 160px;
+        min-width: 0;
+      }
+      .labels {
+        display: flex;
+        margin-left: 98px;
+      }
+      .labels span {
+        flex: 1;
+        text-align: center;
+      }
+      .patch {
+        height: 120px;
+        width: 200px;
+      }
+      #stage {
+        align-items: flex-start;
+        background: #000;
+        display: flex;
+      }
+      #stage:fullscreen {
+        align-items: center;
+      }
+      #stage:-webkit-full-screen {
+        align-items: center;
+      }
+      #stage > * {
+        background: #000;
+        height: auto;
+        min-width: 0;
+        width: 50%;
+      }
+      .opts label {
+        margin-right: 16px;
+      }
+      textarea {
+        background: #111;
+        color: #ddd;
+        height: 200px;
+        width: 100%;
+      }
+      .err {
+        color: #f88;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      #errBanner {
+        background: #6b1111;
+        border: 2px solid #f88;
+        color: #fff;
+        margin: 0 0 12px;
+        padding: 8px 12px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      #errBannerText {
+        margin: 4px 0 0;
+        max-height: 8em;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      /* H2 overlay 배치: video를 contain으로 채우고 같은 위치·크기로 캔버스를 겹친다. */
+      #stage.overlay {
+        aspect-ratio: 16 / 9;
+        display: block;
+        position: relative;
+        width: 100%;
+      }
+      #stage.overlay:fullscreen {
+        aspect-ratio: auto;
+        height: 100vh;
+        width: 100vw;
+      }
+      #stage.overlay:-webkit-full-screen {
+        aspect-ratio: auto;
+        height: 100vh;
+        width: 100vw;
+      }
+      #stage.overlay > video,
+      #stage.overlay > canvas {
+        height: 100%;
+        inset: 0;
+        object-fit: contain;
+        position: absolute;
+        width: 100%;
+      }
+      #stage > #matrixProgress {
+        background: rgba(0, 0, 0, 0.6);
+        color: #ccc;
+        font-size: 11px;
+        height: auto;
+        left: 4px;
+        padding: 1px 6px;
+        pointer-events: none;
+        position: absolute;
+        top: 4px;
+        width: auto;
+        z-index: 2;
+      }
+      #stage > #judderPrompt {
+        background: rgba(0, 0, 0, 0.75);
+        color: #eee;
+        height: auto;
+        left: 50%;
+        padding: 16px 24px;
+        position: absolute;
+        text-align: center;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: auto;
+        z-index: 3;
+      }
+      #judderPrompt button {
+        font-size: 18px;
+        margin: 8px 6px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="errBanner" role="alert" hidden>
+      <strong>오류 발생</strong>
+      <pre id="errBannerText"></pre>
+    </div>
+    <h1>0a 프로브 (PLAN B절)</h1>
+    <p class="note">
+      localhost(secure context)에서 열어야 한다. 측정 조건(전원, SDR 밝기)을 바꿀 때마다 P0-2~P0-4를
+      다시 하고 JSON을 따로 저장한다. 절차는 docs/manual-checklist.md 참고.
+    </p>
+
+    <section>
+      <h2>P0-5 환경 (먼저 입력)</h2>
+      <div class="opts">
+        <label>macOS <input type="text" id="envMacos" value="27.2" size="8" /></label>
+        <label>칩 <input type="text" id="envChip" value="Apple M1 Pro" size="14" /></label>
+        <label
+          >디스플레이 <input type="text" id="envDisplay" value="Liquid Retina XDR" size="18"
+        /></label>
+        <br />
+        <label
+          >전원
+          <select id="envPower">
+            <option value="">(선택)</option>
+            <option value="ac">전원 연결</option>
+            <option value="battery">배터리</option>
+          </select>
+        </label>
+        <label
+          >SDR 밝기
+          <select id="envBrightness">
+            <option value="">(선택)</option>
+            <option value="low">낮음</option>
+            <option value="mid">중간</option>
+            <option value="max">최대</option>
+          </select>
+        </label>
+        <label
+          >주사율
+          <select id="envRefresh">
+            <option value="">(선택)</option>
+            <option value="promotion">ProMotion(기본)</option>
+            <option value="60hz">60Hz</option>
+          </select>
+        </label>
+      </div>
+      <p>Safari 버전, UA, screen/DPR은 자동으로 기록한다.</p>
+    </section>
+
+    <section>
+      <h2>P0-1 API</h2>
+      <button id="btnApi">API 프로브 실행</button>
+      <pre id="apiOut">(대기)</pre>
+    </section>
+
+    <section>
+      <h2>P0-2 EDR 램프</h2>
+      <p>
+        왼쪽 흰색 패치는 CSS #fff(SDR white)다. 오른쪽 줄무늬는 왼쪽부터 1.0, 1.25, 1.5, 2, 3, 4, 6,
+        8, 16이다. 줄무늬 중 SDR white보다 밝게 구분되는 가장 오른쪽 단계를 고른다.
+      </p>
+      <div class="row">
+        <div class="css-white"></div>
+        <canvas id="stripes" width="1800" height="320"></canvas>
+      </div>
+      <div class="labels" id="stepLabels"></div>
+      <div class="opts" id="stepChoices"></div>
+      <p>
+        마지막 그리기 후 경과: <strong id="drawAge">-</strong>초. 밝기를 바꾼 뒤 30초 이상 기다린
+        다음, 다시 그리기를 누르지 말고 선택한다.
+      </p>
+      <button id="btnStripes">다시 그리기</button>
+      <p>
+        참조 HDR 이미지(선택): 파일을 열어 같은 화면에서 줄무늬와 밝기를 비교한다.
+        <input type="file" id="refFile" accept="image/*" />
+      </p>
+      <img id="refImg" alt="" style="max-width: 320px; display: none" />
+      <p>
+        <label
+          >참조 HDR 이미지와 비교
+          <select id="refChoice">
+            <option value="not_checked">사용 안 함</option>
+            <option value="brighter_than_stripes">이미지가 줄무늬 최고 단계보다 밝음</option>
+            <option value="not_brighter">이미지가 줄무늬보다 밝지 않음</option>
+          </select>
+        </label>
+      </p>
+    </section>
+
+    <section>
+      <h2>P0-3 인코딩</h2>
+      <p>
+        각 행의 왼쪽은 셰이더가 캔버스에 0.5를 기록한 패치, 오른쪽은 CSS 색이다. 경계가 가장 안
+        보이는(일치하는) 쪽을 고른다.
+      </p>
+      <div class="row">
+        <canvas class="patch" id="patchA" width="200" height="120"></canvas>
+        <div class="patch" style="background: #808080"></div>
+        <span>CSS #808080 (0.5를 비선형 값으로 해석하면 일치)</span>
+      </div>
+      <div class="row">
+        <canvas class="patch" id="patchB" width="200" height="120"></canvas>
+        <div class="patch" style="background: #bcbcbc"></div>
+        <span>CSS #BCBCBC (0.5를 선형 값으로 해석하면 일치)</span>
+      </div>
+      <div class="opts">
+        <label><input type="radio" name="enc" value="nonlinear" /> #808080과 일치</label>
+        <label><input type="radio" name="enc" value="linear" /> #BCBCBC와 일치</label>
+        <label><input type="radio" name="enc" value="neither" /> 둘 다 아님</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>P0-4 비디오</h2>
+      <p>
+        왼쪽은 원본 video, 오른쪽은 importExternalTexture + 셰이더 출력이다. 첫 프레임 후 1초는
+        워밍업으로 버리고 최대 10초를 측정한다. G3용 수치는 "전체화면 측정" 버튼으로만
+        얻는다(전체화면 진입 후 자동 시작, 종료 시 자동 해제). 창 모드는 "창 실행" 버튼이다.
+      </p>
+      <div class="opts">
+        <label
+          >셰이더
+          <select id="vmode">
+            <option value="identity">identity</option>
+            <option value="itm">ITM (균형 프리셋 초안)</option>
+          </select>
+        </label>
+        <button id="btnFixtures">픽스처 다시 확인</button>
+      </div>
+      <div id="fixtureList"></div>
+      <p>
+        <button id="btnMatrix" disabled>G3 진단 일괄 측정</button>
+        전체화면 overlay 배치(video 위 단일 캔버스)에서 ramp-1080p60, ramp-2160p60 각각 R0(rAF
+        루프만, 캔버스 없음) → R2(rAF + EDR identity) → R3(rAF + EDR ITM) → V3(rVFC + EDR ITM,
+        비교용)를 자동 실행한다(총 8 run, run 사이 1초). 끝나면 전체화면 안에서 끊김 질문이 뜬다.
+        도중에 전체화면을 나가면 중단되고 완료된 run만 남는다. 전원 연결 + 밝기 중간에서 실행한다.
+      </p>
+      <div id="stage">
+        <video id="origVideo" muted playsinline></video>
+        <canvas id="vidCanvas" width="16" height="9"></canvas>
+        <div id="matrixProgress" hidden></div>
+        <div id="judderPrompt" hidden>
+          <div>R3 실행 중 우하단 움직이는 박스가 끊겼나?</div>
+          <button type="button" data-judder="none">없음</button>
+          <button type="button" data-judder="sometimes">가끔</button>
+          <button type="button" data-judder="often">자주</button>
+        </div>
+      </div>
+      <p>
+        <label
+          >끊김(R3 실행 중 우하단 움직이는 박스)
+          <select id="judderChoice">
+            <option value="">(선택 안 함)</option>
+            <option value="none">없음</option>
+            <option value="sometimes">가끔</option>
+            <option value="often">자주</option>
+          </select>
+        </label>
+        전체화면 안 질문에 답하지 못했으면 여기서 고른다.
+      </p>
+      <p id="runStatus">(대기)</p>
+      <table id="runTable"></table>
+    </section>
+
+    <section>
+      <h2>결과 JSON</h2>
+      <button id="btnExport">JSON export (다운로드)</button>
+      <p>다운로드가 막히면 아래 내용을 복사해 result-*.json 파일로 저장한다.</p>
+      <textarea id="jsonOut" readonly></textarea>
+      <p class="err" id="g3Warn"></p>
+      <p class="err" id="errOut"></p>
+    </section>
+
+    <script src="probe-core.js"></script>
+    <script src="shaders.js"></script>
+    <script src="probe.js"></script>
+  </body>
+</html>

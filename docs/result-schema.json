@@ -1,0 +1,230 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "0a probe result (PLAN.md E-section reply format)",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "milestone",
+    "createdAt",
+    "env",
+    "api",
+    "edr",
+    "perf",
+    "flags",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "v1: 창 모드를 사용자가 선택, run 전체 집계. v2: 워밍업 제외 측정 창 집계, windowMode는 run에서 파생, perf.g3 추가. v3: run.mode/layout, env.refreshRate, edr.secondsSinceDraw, perf.g3를 해상도별 {baselineDrop,itmDrop,delta,jsP95Max}로 개정. v4: run.driver/missRate/loopFps/videoPresentedFps, mode R0/R2/R3/V3, perf.visualJudder, perf.g3를 해상도별 {baselineMiss,itmMiss,delta,rvfcMiss,loopFps,videoPresentedFps,jsP95Max,gpuMsMax}로 개정. v1~v3 파일도 유효."
+    },
+    "milestone": { "type": "string" },
+    "createdAt": { "type": ["string", "null"] },
+    "env": {
+      "type": "object",
+      "required": ["macOS", "safari", "chip", "display", "power", "sdrBrightness"],
+      "properties": {
+        "macOS": { "type": ["string", "null"] },
+        "safari": { "type": ["string", "null"] },
+        "chip": { "type": ["string", "null"] },
+        "display": { "type": ["string", "null"] },
+        "power": { "type": ["string", "null"], "enum": ["ac", "battery", null] },
+        "sdrBrightness": { "type": ["string", "null"], "enum": ["low", "mid", "max", null] },
+        "refreshRate": {
+          "type": ["string", "null"],
+          "enum": ["promotion", "60hz", null],
+          "description": "v3: 사용자가 P0-5에서 선택한 디스플레이 주사율. v1/v2에는 없음."
+        },
+        "windowMode": {
+          "type": ["string", "null"],
+          "enum": ["window", "fullscreen", "mixed", null],
+          "description": "v2: runs[].fullscreen에서 파생 (전부 true=fullscreen, 전부 false=window, 혼재=mixed, run 없음=null)"
+        },
+        "ua": { "type": ["string", "null"] },
+        "screen": { "type": ["object", "null"] }
+      }
+    },
+    "api": {
+      "type": "object",
+      "required": ["navigatorGpu", "configure", "getConfiguration", "mediaQueries"],
+      "properties": {
+        "secureContext": { "type": "boolean" },
+        "navigatorGpu": { "type": "boolean" },
+        "adapter": { "type": ["object", "null"] },
+        "timestampQuery": { "type": "boolean" },
+        "preferredFormat": { "type": ["string", "null"] },
+        "configure": {
+          "type": "object",
+          "required": ["ok", "error"],
+          "properties": {
+            "ok": { "type": ["boolean", "null"] },
+            "error": { "type": ["string", "null"] }
+          }
+        },
+        "getConfiguration": {
+          "type": "object",
+          "required": ["supported", "toneMappingMode"],
+          "properties": {
+            "supported": { "type": "boolean" },
+            "format": { "type": ["string", "null"] },
+            "colorSpace": { "type": ["string", "null"] },
+            "toneMappingMode": { "type": ["string", "null"] },
+            "error": { "type": ["string", "null"] }
+          }
+        },
+        "mediaQueries": {
+          "type": "object",
+          "required": ["dynamicRangeHigh", "colorGamutP3"],
+          "properties": {
+            "dynamicRangeHigh": { "type": "boolean" },
+            "colorGamutP3": { "type": "boolean" }
+          }
+        },
+        "canvas2dFloat16": { "type": "object" },
+        "webgl": { "type": "object" },
+        "batteryApi": { "type": "boolean" }
+      }
+    },
+    "edr": {
+      "type": "object",
+      "required": ["maxDistinctStep", "encodingMatch"],
+      "properties": {
+        "maxDistinctStep": { "type": ["number", "null"] },
+        "encodingMatch": {
+          "type": ["string", "null"],
+          "enum": ["nonlinear", "linear", "neither", null]
+        },
+        "refHdrImage": { "type": ["string", "null"] },
+        "secondsSinceDraw": {
+          "type": ["number", "null"],
+          "description": "v3: 줄무늬를 마지막으로 그린 뒤 최고 단계를 선택한 시점까지의 경과 초."
+        }
+      }
+    },
+    "perf": {
+      "type": "object",
+      "required": ["srcRes", "canvasRes", "fps", "dropRate", "jsP50", "jsP95", "runs"],
+      "properties": {
+        "srcRes": { "type": ["string", "null"] },
+        "canvasRes": { "type": ["string", "null"] },
+        "fps": { "type": ["number", "null"] },
+        "dropRate": { "type": ["number", "null"] },
+        "jsP50": { "type": ["number", "null"] },
+        "jsP95": { "type": ["number", "null"] },
+        "gpuMs": { "type": ["number", "null"] },
+        "visualJudder": {
+          "type": ["string", "null"],
+          "enum": ["none", "sometimes", "often", null],
+          "description": "v4: 일괄 측정 후 끊김 질문 답(없음/가끔/자주). 답하지 않으면 null. v1~v3에는 없음."
+        },
+        "g3": {
+          "type": ["object", "null"],
+          "description": "G3 대상 run(env.power=ac, runs[].fullscreen=true, runs[].layout=overlay)의 해상도별 요약. v4: R0 또는 R3가 없는 해상도는 null, 대상 없으면 전체 null. v3는 {baselineDrop,itmDrop,delta,jsP95Max}(B0/B3 기준). v2는 {runs, dropRateMax, jsP95Max} 형태(v1은 g3 없음).",
+          "additionalProperties": {
+            "type": ["object", "null"],
+            "properties": {
+              "baselineMiss": { "type": ["number", "null"], "description": "v4: R0 missRate" },
+              "itmMiss": { "type": ["number", "null"], "description": "v4: R3 missRate" },
+              "rvfcMiss": { "type": ["number", "null"], "description": "v4: V3 missRate" },
+              "loopFps": { "type": ["number", "null"], "description": "v4: R3 loopFps" },
+              "videoPresentedFps": {
+                "type": ["number", "null"],
+                "description": "v4: R3 videoPresentedFps"
+              },
+              "gpuMsMax": {
+                "type": ["number", "null"],
+                "description": "v4: 대상 run gpuMs 최댓값"
+              },
+              "baselineDrop": { "type": ["number", "null"], "description": "v3: B0 dropRate" },
+              "itmDrop": { "type": ["number", "null"], "description": "v3: B3 dropRate" },
+              "delta": {
+                "type": ["number", "null"],
+                "description": "v4: itmMiss - baselineMiss. v3: itmDrop - baselineDrop"
+              },
+              "jsP95Max": { "type": ["number", "null"] },
+              "runs": { "type": "integer", "minimum": 1, "description": "v2 전용" },
+              "dropRateMax": { "type": ["number", "null"], "description": "v2 전용" }
+            }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "fixture",
+              "itm",
+              "srcRes",
+              "canvasRes",
+              "fullscreen",
+              "frames",
+              "fps",
+              "dropRate",
+              "jsP50",
+              "jsP95"
+            ],
+            "properties": {
+              "fixture": { "type": "string" },
+              "mode": {
+                "type": "string",
+                "enum": ["R0", "R2", "R3", "V3", "B0", "B1", "B2", "B3", "split"],
+                "description": "v3/v4. v4: R0 raf 캔버스 없음, R2 raf + EDR identity, R3 raf + EDR ITM, V3 rvfc + EDR ITM. v3: B0 video만, B1 bgra8unorm/srgb identity, B2 EDR identity, B3 EDR ITM(모두 rvfc), split 좌우 분할. 없으면 split로 간주."
+              },
+              "driver": {
+                "type": "string",
+                "enum": ["raf", "rvfc"],
+                "description": "v4. 렌더 구동 방식. 없으면 rvfc로 간주."
+              },
+              "layout": {
+                "type": "string",
+                "enum": ["overlay", "split"],
+                "description": "v3. 없으면 split로 간주."
+              },
+              "itm": { "type": "boolean" },
+              "srcRes": { "type": ["string", "null"] },
+              "canvasRes": { "type": ["string", "null"] },
+              "fullscreen": { "type": "boolean" },
+              "frames": { "type": "integer", "minimum": 0 },
+              "durationSec": { "type": ["number", "null"] },
+              "warmupSec": { "type": ["number", "null"] },
+              "windowSec": { "type": ["number", "null"] },
+              "windowFrames": { "type": ["integer", "null"] },
+              "fps": { "type": ["number", "null"] },
+              "dropRate": { "type": ["number", "null"] },
+              "dropRatePresented": { "type": ["number", "null"] },
+              "missRate": {
+                "type": ["number", "null"],
+                "description": "v4. 갱신 누락률: 측정 창을 소스 프레임 간격 슬롯으로 나눴을 때 캔버스가 한 번도 렌더되지 않은 슬롯 비율(R0는 구동 콜백 시각 기준)."
+              },
+              "loopFps": {
+                "type": ["number", "null"],
+                "description": "v4. 측정 창의 구동 콜백 회/s."
+              },
+              "videoPresentedFps": {
+                "type": ["number", "null"],
+                "description": "v4. 관측 rVFC presentedFrames 증가량 / 관측 구간 초."
+              },
+              "jsP50": { "type": ["number", "null"] },
+              "jsP95": { "type": ["number", "null"] },
+              "jsMax": { "type": ["number", "null"] },
+              "gpuMs": { "type": ["number", "null"] },
+              "gpuSamples": { "type": "integer", "minimum": 0 },
+              "videoQuality": { "type": ["object", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "required": ["drm", "hdrSource", "fullscreen"],
+      "properties": {
+        "drm": { "type": "boolean" },
+        "hdrSource": { "type": "boolean" },
+        "fullscreen": { "type": "boolean" }
+      }
+    },
+    "errors": { "type": "array", "items": { "type": "string" } }
+  }
+}
