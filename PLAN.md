@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1 (2026-09-30 승인)
+> 버전: v1.1 (2026-09-30, D-M2 상세 계획 추가)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -162,7 +162,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | D0 | 문서 세트 | PLAN.md, GUIDELINES.md, CLAUDE.md, .claude/rules·skills·agents(md) | **Opus**(계획·가이드라인 전용) | → verify: 파일 존재, 사용자 검토 |
 | M0 | 골격 + 훅 | .claude/hooks/require-plan.sh, settings.json, package.json(devDeps: eslint, prettier, playwright), pytest, ci.yml(ubuntu), STATUS.md 시작 | Sonnet 본 세션(설정·스크립트) | → verify: 부록 M0-A 훅 검증 절차 1~3 통과. `npm test`, `pytest sim` 통과(빈 테스트 포함). CI ubuntu green |
 | M1 | 0a 프로브 + 픽스처 + 시뮬레이션 | probe/, scripts/make-fixtures.sh, fixtures/, sim/ S1~S7 | Sonnet이 스크립트 작성, sim-runner(haiku)가 픽스처 생성·스윕 실행(반복·장출력), impl-worker ×2 병렬(probe/ ↔ sim/, 파일 비중첩) | → verify: 클라우드 단위 테스트·pytest·픽스처 검사 통과 → **사용자 Mac 0a 실행** → results/ JSON → Opus G1~G3 판정 |
-| M2 | 최소 확장 + Xcode | extension 최소판(고정 균형 프리셋), scripts/make-xcode.sh, ci.yml macOS job | Sonnet(코드) → **사용자 Mac에서 make-xcode.sh 실행 후 push** | → verify: GH Actions macOS `xcodebuild CODE_SIGNING_ALLOWED=NO` 성공(A15/A16) → 사용자 설치 → 0b G4 판정(Opus) |
+| M2 | 최소 확장 + Xcode | extension 최소판(고정 균형 프리셋), scripts/make-xcode.sh, ci.yml macOS job | Sonnet(코드, 상세는 D-M2) → **사용자 Mac에서 make-xcode.sh 실행 후 push** | → verify: GH Actions macOS `xcodebuild CODE_SIGNING_ALLOWED=NO` 성공(A15/A16) → 사용자 설치 → 0b G4 판정(Opus) |
 | M3 | 감지·수명주기 | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
 | M4 | 알고리즘·프리셋 확정 | 셰이더 최종, JS 미러, 프리셋 수치 | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
 | M5 | popup + HUD | 프리셋/상세 UI, HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
@@ -172,6 +172,71 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
 
 **M1 판정 완료 (2026-09-30)**: G1·G2·G3 통과. M2(최소 확장 + Xcode) 착수 가능. M2의 렌더러는 C절 확정 렌더 루프(rAF)로 구현한다.
+
+### D-M2. M2 상세 계획 (2026-09-30, Opus)
+
+목적은 **G4 판정(확장 컨텍스트에서 WebGPU·YouTube video·EDR이 동작하는가)**이다. 화질·UI·수명주기 완성도는 목표가 아니다. 아래에 없는 기능은 M3 이후로 미룬다.
+
+**M2-0. 범위**
+- 포함: content script 최소판(메인 video 1개에 attach, DRM 가드, 오버레이 배치, rAF 렌더 루프, 3개 렌더 모드), 진단 기록, 진단용 최소 popup, `scripts/make-xcode.sh`, ci.yml macOS job, 0b 체크리스트, 결과 JSON 스키마.
+- 제외(M3 이후): SPA 내비(`yt-navigate-finish`)·video 교체 재attach, HDR 원본 스킵, 광고 전환, 미니플레이어·PiP, 검은 프레임 보조 감지, 프리셋 선택·상세 슬라이더, 페이지 위 HUD, JS 톤 커브 미러. M2 테스트는 **영상마다 페이지를 새로 로드**하는 것으로 이를 대신한다.
+- 프리셋: C절 **균형 초안 수치(P3/k0.65/n2.5/g1.0/s1.05/hs0.95)를 고정**한다. 0a G3에서 쓴 셰이더와 같아 비교 기준이 된다. 밝기 최대(헤드룸 2)에서 하이라이트가 잘리는 것은 알려진 제약(C절 0a 헤드룸 제약)이므로 0b 측정은 **SDR 밝기 중간(헤드룸 3)**에서 한다. 프리셋 수치 변경은 M4다.
+
+**M2-1. 파일 (C절 구조의 부분집합, 새 파일 없음)**
+
+| 파일 | M2 내용 |
+|---|---|
+| `extension/manifest.json` | MV3, `name` "SDR HDR", `version` "0.1.0". `content_scripts`: matches `https://www.youtube.com/*`, `run_at` `document_idle`, `all_frames` false, js 순서 `content/ns.js, detect.js, params.js, itm.wgsl.js, hud.js, renderer.js, overlay.js, main.js`. `permissions`: `["storage"]`만. `action.default_popup` `popup/popup.html`. background·host_permissions·web_accessible_resources·icons 없음(converter 경고는 허용, 로그만 기록) |
+| `content/ns.js` | `globalThis.__sdrhdr = globalThis.__sdrhdr \|\| {}` |
+| `content/detect.js` | 셀렉터 상수(`#movie_player`, `.html5-video-container`, `video.html5-main-video`). 순수: `isDrm({mediaKeys, webkitKeys, sawEncryptedEvent})`, `contentRect(boxW, boxH, videoW, videoH)`(letterbox, object-fit contain 가정). DOM: `findMainVideo(doc)` → `{video, container}` 또는 `null`(예외 없음) |
+| `content/params.js` | 균형 프리셋 상수, C절 파라미터 범위 표, 모드 목록 `['itm','identity','stripes']`, 저장 키(`sdrhdr.enabled` 기본 true, `sdrhdr.mode` 기본 `'itm'`, `sdrhdr.diag`), 순수 `normalizeSettings(raw)`(잘못된 값 → 기본값). `browser.storage.local` 읽기와 `onChanged` 구독 함수(호출 시점에만 실행) |
+| `content/itm.wgsl.js` | `probe/shaders.js`의 VERTEX, STRIPES(단계 1.0/1.25/1.5/2/3/4/6/8/16과 인코딩 방식 그대로), VIDEO_IDENTITY, VIDEO_ITM을 복사. 수식·인코딩 변경 금지. ITM 상수는 `params.js` 균형 프리셋 값으로 문자열을 조립한다(값의 출처를 한 곳으로) |
+| `content/hud.js` | M2는 페이지 표시 없이 순수 함수만: `summarize(frameTimesMs, loopTimestamps)` → `{frames, loopFps, jsP50, jsP95}`, `buildDiag(state)` → M2-4 스키마 객체 |
+| `content/renderer.js` | `createRenderer(canvas, video, onError)` → `{start, stop, setMode, destroy}`. GPU 초기화(`requestAdapter`/`requestDevice`에 5초 타임아웃, 프로브 H1과 같은 방식), configure는 GUIDELINES 2.5-3 고정값, 3개 파이프라인을 attach 시 1회 생성, C절 렌더 루프(rAF, 매 프레임 재import, 일시정지·seek 완료·ended 시 1회 렌더 후 정지, `play`/`seeked`로 재개, 탭 비가시 정지). `stripes` 모드는 video를 import하지 않고 스트라이프만 그린다. 프레임당 JS 시간(rAF 콜백 시작~`queue.submit` 직후)과 콜백 타임스탬프를 최근 600개 링 버퍼에 둔다. device lost·SecurityError·기타 예외 → `onError` |
+| `content/overlay.js` | `createOverlay(container, video)` → `{canvas, update, destroy}`. canvas를 container 안 video 바로 뒤에 삽입, `position:absolute`, `pointer-events:none`, z-index 지정 없음(DOM 순서로 컨트롤 아래 유지). `contentRect`로 위치·크기, 백킹 크기는 `min(원본, 표시×DPR)`(프로브 `canvasResolution`과 같은 규칙, 순수 함수는 detect.js에 둔다). `ResizeObserver(video)`, `fullscreenchange`로 갱신 |
+| `content/main.js` | 유일한 부작용 시작점. 흐름: 설정 읽기 → `enabled`면 `findMainVideo` → 없으면 1초 간격 최대 30회 재시도 후 포기(diag에 사유) → DRM 검사 → attach(overlay + renderer) → attach 후 `encrypted`/`webkitneedkey` 리스너와 `mediaKeys` 확인(renderer 프레임마다 저비용 검사) → DRM이면 detach, 해당 video는 WeakSet에 넣어 영구 no-op. `enabled` false로 바뀌면 detach, true로 바뀌면 재attach(DRM 요소 제외). `mode` 변경은 `setMode`만. 2초마다 `buildDiag` 결과를 `sdrhdr.diag`에 쓴다(바뀐 경우만) |
+| `popup/popup.html`, `popup.js` | 켜기/끄기 체크박스, 모드 선택(itm/identity/stripes), `sdrhdr.diag` JSON 표시(읽기 전용 textarea + "복사" 버튼 + "JSON 저장" 링크). 저장 링크의 Safari popup 동작은 [미확인]이라 복사를 기본 경로로 둔다. 페이지 조작·메시징 없음 |
+
+**M2-2. G4 판정 매핑**
+| G4 항목 | 수단 | 자료 |
+|---|---|---|
+| content script에서 `navigator.gpu` 사용 가능 | diag `api.gpu`, `api.adapter`, `api.configure`, `api.configRead` | JSON |
+| YouTube video SecurityError 없음 | diag `errors[]`에 `SecurityError` 없음, `render.frames` 증가 | JSON |
+| 오버레이 EDR이 G2와 동등 | `stripes` 모드에서 사용자가 구분 가능한 최고 단계 선택, 밝기 중간 G2 값(3)과 비교 | 체크리스트 기입 |
+| (참고, 판정 외) 표시·조작 | 오버레이가 video 영역에 정확히 겹침, 컨트롤 클릭 가능, `itm` 모드 끊김 육안, `loopFps`·`jsP95` | 체크리스트 + JSON |
+
+- `navigator.gpu` 없음 → no-op, diag `api.gpu:false`, 사유 기록. B절 실패 분기(main world 주입)는 Opus 판정 후에만 착수한다.
+
+**M2-3. Xcode·CI**
+- `scripts/make-xcode.sh`(사용자 Mac 전용, 저장소 루트에서 실행): `xcode/`가 이미 있으면 중단(덮어쓰기 금지, 재생성은 사용자가 삭제 후). `xcrun safari-web-extension-converter extension --project-location xcode --app-name SDRHDR --bundle-identifier "${BUNDLE_ID:-io.github.tmtmtmtmtmt.sdrhdr}" --macos-only --swift --no-open --no-prompt` 실행(`--copy-resources` 쓰지 않음, A16). 옵션 이름은 [2차]이므로 스크립트는 먼저 `--help` 출력에 각 옵션이 있는지 확인하고 없으면 중단·안내한다. 생성 후 검사: pbxproj에 저장소 절대경로(`$PWD`, `/Users/`)가 있으면 실패 코드와 함께 A16 실패를 알린다(수정하지 않음 → Opus). 마지막에 `xcodebuild -list` 출력과 커밋 안내를 출력한다.
+- 서명: 사용자가 Xcode에서 개인 팀을 지정하되 그 변경(`DEVELOPMENT_TEAM`)은 **커밋하지 않는다**. push할 커밋은 스크립트 직후 생성 상태다. `.gitignore`에 `xcode/**/xcuserdata/`, `xcode/**/build/`, `*.xcuserstate` 추가.
+- ci.yml `macos` job(`runs-on: macos-latest`, 모든 push·PR): `xcode/`에 `.xcodeproj`가 없으면 "Xcode 프로젝트 없음(M2 사용자 단계 대기)"을 출력하고 성공 종료. 있으면 `xcodebuild -version` 기록 → pbxproj 절대경로 검사(위와 같은 규칙) → `xcodebuild -project <찾은 경로> -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build`. scheme은 쓰지 않는다(converter scheme은 xcuserdata에 있을 수 있음).
+- 기존 ubuntu job에 manifest 검사 단위 테스트가 포함되므로 별도 job은 없다.
+
+**M2-4. 진단 JSON (`docs/result-schema-m2.json`)**
+- 최상위: `schemaVersion:1`, `milestone:'M2'`, `extVersion`, `createdAt`(ISO), `page{url 경로만(쿼리의 v만 유지), title 없음}`, `env{ua, dpr, screen{w,h}, dynamicRangeHigh, colorGamutP3}`, `api{gpu, adapter, device, configure, configRead{format,colorSpace,toneMapping}}`, `video{videoWidth, videoHeight, srcIsBlob, paused}`, `canvas{width, height, cssWidth, cssHeight}`, `render{mode, frames, loopFps, jsP50, jsP95}`, `flags{drm, attached, fullscreen}`, `errors[{at, name, message}]`(최대 20개).
+- 사용자 관측값(구분 최고 단계, 겹침, 컨트롤, 끊김)은 JSON에 넣지 않고 체크리스트 사본으로 회신한다.
+- 파일명 `results/result-M2-<YYYYMMDD>-<전원>-<밝기>-<해상도>-<모드>.json`. `scripts/parse-result.py`는 `milestone:'M2'`를 인식해 값만 표로 출력한다(판정 없음). 기존 v1~v4 처리는 유지.
+
+**M2-5. 테스트 (클라우드 (1))**
+- `tests/unit/extension-manifest.test.js`: manifest 필수 키, js 순서가 M2-1과 같고 파일이 존재, permissions가 `["storage"]`, background·host_permissions 없음, matches 값.
+- `tests/unit/extension-load.test.js`: `node:vm`으로 manifest 순서 로드. 로드 시 `document`·`navigator.gpu`·`browser` 접근이 없음(접근 시 throw하는 stub), `__sdrhdr`에 `detect/params/itm/hud/renderer/overlay/main` 키 존재.
+- 순수 함수: `isDrm` 3신호 각각·조합, `contentRect`(16:9 in 16:9, 4:3 pillarbox, 21:9 letterbox, 0 크기), 캔버스 해상도(프로브 테스트와 같은 사례), `normalizeSettings`, `summarize`, `buildDiag` 결과가 `docs/result-schema-m2.json`을 만족.
+- WGSL 일관성: `itm.wgsl.js` 조립 문자열의 ITM 상수가 `params.js` 균형 값 및 `sim/presets.py` 균형 값과 같음, 셰이더 본문(상수 제외)이 `probe/shaders.js`와 같음. JS 톤 커브 미러는 M4에서 만든다(GUIDELINES 3.1 M2 예외).
+- `tests/dom/m2-detect.spec.js`: 최소 정적 픽스처(`#movie_player > .html5-video-container > video.html5-main-video`, 컨트롤 형제 포함)에서 `findMainVideo` 성공, 셀렉터 누락 픽스처에서 `null`. 실제 YouTube 스냅샷은 M3.
+- `scripts/make-xcode.sh`: `bash -n`과 shellcheck(설치돼 있으면)만. 실행 검증은 (3).
+
+**M2-6. 작업 분할 (impl-worker 2개 병렬, 파일 비중첩)**
+- W1: `extension/**`, `tests/unit/extension-*.test.js`, `tests/dom/m2-detect.spec.js`(+ 픽스처 html).
+- W2: `scripts/make-xcode.sh`, `.github/workflows/ci.yml`, `.gitignore`, `docs/result-schema-m2.json`, `docs/manual-checklist.md` 0b 절, `scripts/parse-result.py` M2 지원(+ 그 테스트).
+- W1의 `buildDiag` 스키마 테스트는 W2의 스키마 파일을 쓰므로, 스키마는 M2-4 정의를 그대로 따르고 통합은 Sonnet 본 세션이 한다.
+- K1(FIX_GUIDE)은 이 브랜치에 섞지 않는다.
+
+**M2-7. 절차와 verify**
+1. Sonnet 구현 → → verify: lint, `npm test`, `npm run test:dom`, `python3 -m pytest sim` 통과, CI ubuntu green, macOS job "프로젝트 없음" 성공 / (1)(2).
+2. 사용자 Mac: 브랜치 pull → `scripts/make-xcode.sh` → 출력 확인 → `xcode/` 커밋·push → → verify: CI macOS `xcodebuild … CODE_SIGNING_ALLOWED=NO` 성공, 절대경로 검사 통과(A15/A16) / (2).
+3. 사용자 Mac: Xcode에서 개인 팀 서명으로 실행 → Safari 설정에서 확장 켜기, youtube.com 권한 허용(확장이 안 보이면 개발자 메뉴 "서명되지 않은 확장 허용" [미확인]) → 체크리스트 0b(전원 연결, 밝기 중간, SDR 1080p60·2160p60 각각 `stripes`·`identity`·`itm`, 창·전체화면) → JSON을 `results/`에 push → → verify: G4 판정 자료 / (3).
+4. Opus가 게이트 판정 기록에 G4를 기입한다. 통과 전에는 M3 착수와 M2 PR 머지를 하지 않는다.
 
 ---
 
