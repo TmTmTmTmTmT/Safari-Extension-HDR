@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.4 (2026-09-30, A21·비디오 입력 경로·G3c 추가, G4 조건부 통과)
+> 버전: v1.5 (2026-09-30, A22, G3c 불통과(2160p) 기록)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -44,6 +44,7 @@
 | A19 | (F-A) Safari 확장 appex ↔ 헬퍼 앱 통신은 App Group/XPC 또는 localhost 소켓으로 가능하며, 무료 개인 팀 서명에서도 해당 capability 사용 가능 | [미확인] | F-A 착수 시 FA-0 프로브로 확인 | FA-0 |
 | A20 | Safari `requestVideoFrameCallback`은 video가 표시하는 모든 프레임마다 호출됨 | [반증(0a 3차)] 60Hz 디스플레이에서 60fps video의 콜백이 약 30회/s(모든 모드, 캔버스 없는 B0 포함). ProMotion에서도 51~56회/s. 같은 run의 presentedFrames 기준 video 표시율은 약 54~57회/s로 video 자체는 정상 표시. 즉 rVFC 구동 오버레이는 60Hz에서 약 30fps로만 갱신됨. 4차(rVFC 비교 run V3)에서는 60Hz 53~56회/s, ProMotion 54~56회/s로 3차의 30회/s는 재현되지 않았으나(원인 미확인), 갱신 누락은 여전히 11~32%. 구동 수단으로 신뢰할 수 없다는 결론은 유지 | 0a 3·4차 |
 | A21 | Safari `importExternalTexture`는 VP9 video 프레임을 샘플링할 수 있음 | [반증(0b 2차)] Safari 27.2: YouTube(MSE, VP9)에서 ext 평균 0, 같은 순간 `copyExternalImageToTexture` 97.8·Canvas2D 145.0. 프로브 same-origin VP9 webm(비MSE, main world)도 출력 검정. H.264(0a)는 정상. 예외 없이 검은 텍스처를 반환 → 코덱 의존 결함. 같은 프로브 run에서 VP9 1080p60 video 자체 드롭 327/671(디코드 부하 추정, 원인 미확인) | 0b 2차 |
+| A22 | Safari에서 VP9 video → `copyExternalImageToTexture`는 렌더 루프에 쓸 만큼 싸다 | [반증(0b 3차)] 창 모드 60Hz, 복사 호출의 JS 동기 시간 2160p p50 13 ms / p95 14 ms(loopFps 50.6, 디스플레이 갱신 누락 5.6%), 1440p p50 8 ms / p95 12.8 ms. VP9 프레임이 GPU 텍스처로 바로 쓰이지 않고 복사 때 변환·업로드되는 것으로 추정(원인 미확인). frameProbe의 64×36 Canvas2D drawImage도 18~27 ms | 0b 3차 |
 
 **해석이 갈리는 지점 → 결정**
 - 색 방향: 측색적 변환(709→P3 행렬)을 기반으로 하고, 채도·하이라이트 확장은 **프리셋 + 상세 슬라이더**로 둔다(사용자 답변 반영). 프리셋 수치는 S2/S4 시뮬레이션과 0a 헤드룸 측정 후 Opus가 확정한다.
@@ -126,7 +127,7 @@ results/                       # 사용자 회신 JSON
 
 **역할**
 - **content script**: 런타임 로직 전체를 맡는다. 메인 플레이어 video 1개만 대상이다. 캔버스는 `.html5-video-container` 안 video 바로 뒤에 둔다. 컨트롤은 DOM상 뒤에 있으므로 z-index를 유지한다. letterbox는 `videoWidth/Height`로 콘텐츠 사각형을 계산한다. 캔버스 해상도는 `min(videoWidth×videoHeight, contentRect×DPR)`다.
-- **비디오 입력 경로** (2026-09-30, 0b 2차, A21): 기본은 `importExternalTexture`(외부 텍스처). attach 직후 frameProbe로 외부 텍스처가 검은데 `copyExternalImageToTexture`는 정상이면, 그 video는 **복사 경로**(렌더마다 video 프레임을 video 크기 `rgba8unorm` 텍스처에 복사 → 같은 ITM 셰이더로 샘플)로 전환한다. 두 경로 모두 검으면 detach(N2 가드). 복사 경로의 비용은 FIX_GUIDE P3로 측정하고 G3와 같은 기준으로 판정한다(G3c).
+- **비디오 입력 경로** (2026-09-30, 0b 2차, A21): 기본은 `importExternalTexture`(외부 텍스처). attach 직후 frameProbe로 외부 텍스처가 검은데 `copyExternalImageToTexture`는 정상이면, 그 video는 **복사 경로**(렌더마다 video 프레임을 video 크기 `rgba8unorm` 텍스처에 복사 → 같은 ITM 셰이더로 샘플)로 전환한다. 두 경로 모두 검으면 detach(N2 가드). 복사 경로의 비용은 FIX_GUIDE P3로 측정하고 G3와 같은 기준으로 판정한다(G3c). **2026-09-30 0b 3차: 2160p 복사 경로는 G3c 불통과(A22).** 더 싼 VP9 입력 방식을 FIX_GUIDE Q3 실험으로 찾고, 없으면 제품 결정(Q5)으로 넘긴다.
 - **렌더 루프** (2026-09-30 확정, 0a 4차): `requestAnimationFrame`마다 `importExternalTexture`(매번 재import) → 풀스크린 삼각형 1패스. rVFC는 Safari에서 표시 프레임보다 적게 호출되므로(A20) 구동에 쓰지 않는다. video가 재생 중이 아니면(일시정지·seek 완료·ended) 1회 렌더 후 루프를 멈추고 `play`/`seeked` 이벤트로 재개한다. 탭 비가시 시 정지. ProMotion(120Hz)에서는 60fps 소스에 대해 프레임당 2회 렌더한다. 비용 여유(2160p ITM GPU 약 2.4 ms)로 허용하고, 같은 프레임 재렌더 생략은 M6에서 검토한다.
 - **DRM 가드**: `mediaKeys`, `webkitKeys`, `encrypted`/`webkitneedkey` → 즉시 detach, 해당 video는 영구 no-op. 검은 프레임이 연속되면 보조로 detach.
 - **popup**: `storage.local`에 쓰기만 하고, content script가 `storage.onChanged`로 반영한다.
@@ -394,7 +395,8 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | G1 API | 2026-09-30 | results/result-M1-20260930-battery-max-fullscreen.json | **통과** | configure 예외 없음, 되읽기 `rgba16float`/`display-p3`/`extended`. 조건 무관 항목이라 재측정 불필요 |
 | G2 EDR | 2026-09-30 | results/result-M1-20260930-ac-{low,mid,max}-mixed.json | **통과** | 전원 연결 3단계 밝기 모두 SDR white 위 2단계 이상 구분(안정 후 4 / 3 / 2, 최소 조건인 밝기 최대에서도 1.25·1.5·2). 1차 잠정 판정 확정. 헤드룸 제약은 C절 "0a 헤드룸 제약"으로 M4에 넘김 |
 | G3 성능 | 2026-09-30 | 4차: results/result-M1-20260930-ac-mid-actual60hz-raf.json, …-actualpromotion-raf.json (이전 회차 이력은 git) | **통과** | B절 3차 개정 기준. rAF 구동 run 전부 콜백 수 = 기대 갱신 수(60Hz 600/599~600, ProMotion 1200~1201/1199~1200) → 디스플레이 갱신 누락 0, R3−R0 = 0%p(두 해상도·두 주사율). JS p95 ≤ 1.05 ms. GPU(2160p ITM, 3600×2025) 60Hz 5.3 ms / ProMotion 2.4 ms로 예산 내. 끊김 육안 "없음"(두 주사율). 비교용 rVFC 구동(V3)은 11~32% 누락. 주: 사용자 보고로 4차 두 파일의 refreshRate 표기가 뒤바뀜(loopFps 60/120으로 확인, 파일명은 실제 주사율로 저장). 제한: 픽스처 기준이며 YouTube 실제 재생은 G4(0b)에서 함께 확인 |
-| G4 확장 컨텍스트 | 2026-09-30 | 1차: results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json, stripes 스크린샷 / 2차: 사용자 회신 frameProbe JSON(ext 0, copy 97.8, c2d 145.0, 가드 detach 정상), results/result-M1-20260930-probe-vp9-split-fullscreen.json | **통과(조건부)** | 확장 컨텍스트 조건 세 가지 충족: `navigator.gpu`(isolated world) 사용 가능, YouTube video를 SecurityError 없이 읽을 수 있음(copy·c2d 정상, A10 확인), 오버레이 EDR 동작(stripes 1.25·1.5·2 구분, 한계 약 3, 프로브 밝기 중간 4~3과 일치). 검은 화면은 컨텍스트가 아니라 Safari의 VP9 외부 텍스처 결함(A21). 조건: FIX_GUIDE P 회차(복사 경로)가 YouTube VP9에서 영상 표시와 G3c 비용 기준을 통과해야 M2 PR 머지·M3 착수 가능 |
+| G4 확장 컨텍스트 | 2026-09-30 | 1차: results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json, stripes 스크린샷 / 2차: 사용자 회신 frameProbe JSON(ext 0, copy 97.8, c2d 145.0, 가드 detach 정상), results/result-M1-20260930-probe-vp9-split-fullscreen.json | **통과(조건부)** | 확장 컨텍스트 조건 세 가지 충족: `navigator.gpu`(isolated world) 사용 가능, YouTube video를 SecurityError 없이 읽을 수 있음(copy·c2d 정상, A10 확인), 오버레이 EDR 동작(stripes 1~5번째 줄 1.0/1.25/1.5/2/3 구분, 6번째 4.0부터 동일 → 한계 3, 밝기 중간 G2와 일치. 0b 3차 확정). 검은 화면은 컨텍스트가 아니라 Safari의 VP9 외부 텍스처 결함(A21). 조건: 복사 경로로 YouTube VP9 영상 표시는 확인(0b 3차, 시작 약 30초 검정은 Q1 결함). G3c 비용 기준 통과가 남음. 통과해야 M2 PR 머지·M3 착수 가능 |
+| G3c 복사 경로 비용 | 2026-09-30 | results/result-M2-20260930-ac-mid-{2160p,1440p}-identity-copy-window.json | **불통과(2160p)** | 2160p: 복사 JS p95 14 ms(기준 4 ms), 갱신 누락 5.6%(기준 1%). video 드롭 0. 1440p는 export 시 일시정지 상태라 누락률·loopFps가 일시정지 공백에 오염됨(복사 p95 12.8 ms로 이미 기준 초과). 전체화면·ProMotion·1080p 측정 전이지만 복사 시간만으로 판정 가능. FIX_GUIDE Q3 실험 후 재판정 |
 
 ---
 

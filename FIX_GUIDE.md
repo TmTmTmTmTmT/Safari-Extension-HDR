@@ -1,62 +1,80 @@
-# FIX_GUIDE.md — M2 VP9 복사 경로(P) + 프로브 지표(K1)
+# FIX_GUIDE.md — M2 VP9 입력 경로 비용(Q) + 프로브 지표(K1)
 
-> 작성: Opus. 근거: 사용자 회신 frameProbe JSON(2026-09-30 13:47, ext 0 / copy 97.8 / c2d 145.0, 가드 detach 후 원본 정상 표시), `results/result-M1-20260930-probe-vp9-split-fullscreen.json`(프로브 VP9 오른쪽 출력 검정), 회신 "대부분 vp9, avc1 없음", "stripes: 프로브 밝기 중간 4, 조금 올리면 3", 확장 설명에 "`description` 매니페스트 엔트리가 없거나 비어 있습니다".
+> 작성: Opus. 근거: `results/result-M2-20260930-ac-mid-{2160p,1440p}-identity-copy-window.json`, 사용자 회신("영상이 검정색으로 나오다 30초 정도 후부터 제대로 뜸", "stripes는 왼쪽부터 6번째 칸부터 동일").
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
-> 이전 회차: L1~L6, N1~N4(`36b880d`) 완료. N 회차 판정은 아래 "N5 판정"에 남긴다. K1은 미구현이며 그대로 둔다.
+> 이전 회차: L1~L6, N1~N4, P1~P4(`1aed49a`) 완료. P 회차의 "Opus 확인 필요" 5건은 아래 "P 회차 보류 항목 판정"에서 처리한다. K1은 미구현이며 아래에 그대로 둔다(스키마 번호만 개정).
 
 ## 판정 요약
 
-- **N5 판정: 표 1행(H-a).** ext≈0, copy>0, c2d>0이고 프로브의 same-origin·비MSE·main world VP9도 검다. 원인은 MSE나 isolated world가 아니라 **Safari 27.2 `importExternalTexture`의 VP9 결함**이다(PLAN.md A21). H.264는 0a에서 정상이었다.
-- **G4: 통과(조건부).** 확장 컨텍스트 조건은 모두 충족(PLAN.md 게이트 판정 기록). 조건은 복사 경로(P2)가 YouTube VP9에서 영상을 그리고 G3c 비용 기준을 통과하는 것이다.
-- YouTube 대부분이 VP9이므로 복사 경로는 선택이 아니라 기본 경로가 된다. H.264 강제(코덱 협상 조작)는 main world 주입이 필요하고 YouTube H.264는 1080p가 상한이라 2160p 목표와 충돌하므로 채택하지 않는다.
-- 관찰 두 가지(원인 미확인, P3로 측정):
-  - 회신 JSON의 `loopFps` 8.7(프레임 291개/약 33초)은 이전 1차(약 115)보다 크게 낮다. frameProbe 2회째가 33초에 실행돼 5초 주기와도 맞지 않는다. frameProbe(특히 4K `drawImage`·`copyExternalImageToTexture`·`mapAsync`)가 메인 스레드나 GPU 큐를 막았을 가능성이 있다.
-  - 프로브 VP9 1080p60 run에서 video 자체 드롭 327/671. Safari의 VP9 디코드 부하가 클 수 있다.
-- stripes: 확장 오버레이에서 1.25·1.5·2가 구분되고 한계 약 3, 프로브 밝기 중간에서 4(조금 밝히면 3). G2 기준(흰색 위 2단계 이상)과 같아 EDR 항목은 충족으로 본다. 회신의 "유튜브에선 stripes 해도 영상이 보임"은 가드가 이미 detach한 video에 재attach하지 않아서다(정상 동작). stripes 확인은 **모드를 stripes로 먼저 고른 뒤 새로고침**해야 한다.
+- **복사 경로는 동작한다.** 2160p·1440p VP9에서 path `copy`, 오버레이에 영상 표시, video 자체 드롭 0. G4의 "영상 표시" 조건은 충족.
+- **시작 약 30초 검정은 결함(Q1).** 첫 frameProbe가 video가 아직 어두울 때(또는 첫 프레임 디코드 전) 실행돼 copy·c2d가 모두 8 미만 → `choosePath`가 `ext`를 고름 → 30초 뒤 다음 frameProbe에서야 `copy`로 전환. JSON의 `at` 34633·31557, `n` 2가 이와 맞는다.
+- **G3c 불통과(2160p).** 복사 호출 JS 동기 시간 p50 13 ms / p95 14 ms로 기준 4 ms를 크게 넘고, 60Hz 창 모드에서 갱신 누락 5.6%(loopFps 50.6). 1440p도 p95 12.8 ms. 복사 방식 그대로는 2160p60 목표를 못 맞춘다(PLAN.md A22).
+- 1440p JSON의 누락률 66%·loopFps 20은 export 시 일시정지(`paused: true`)라 일시정지 공백이 섞인 값이다. P 회차 보류 (a)를 Q2로 고친다.
+- **EDR 항목 확정.** stripes 1~5번째 줄(1.0/1.25/1.5/2/3) 구분, 6번째(4.0)부터 동일 → 한계 3 = 밝기 중간 G2.
+- 다음 단계: VP9에서 더 싼 입력 방식을 프로브 실험(Q3)으로 찾는다. 후보가 없으면 제품 결정(Q5)을 사용자에게 묻는다.
+
+## P 회차 보류 항목 판정
+
+| 항목                                            | 판정                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| (a) displayMissRate에 일시정지·비가시 공백 포함 | 결함. Q2로 수정                                                                                                                                                    |
+| (b) 재복사 생략이 currentTime만 사용            | 승인. 60Hz 2160p에서 copySkipped 109/2655로 작동은 함. Q3 결과로 방식이 바뀌면 재검토                                                                              |
+| (c) 복사 경로 가드 임계 `c2d >= 8`              | 승인(기존 BLACK_REF_MIN과 일치가 맞음)                                                                                                                             |
+| (d) 복사 파이프라인 lazy 생성                   | 승인(경로 결정 전에는 어느 파이프라인이 필요한지 모름)                                                                                                             |
+| (e) displayMissRate가 hud.js에 있음             | Q3에서 probe-core에 같은 정의의 함수를 둔다. 두 구현이 같은 테스트 사례를 통과하면 중복을 허용한다(extension과 probe는 로드 방식이 달라 공유 파일을 만들지 않는다) |
 
 ---
 
-## P1. manifest `description` 추가
+## Q1. 경로 결정 보류 상태 (시작 30초 검정 수정)
 
-- **원인**: Safari 확장 설정 화면에 "`description` 매니페스트 엔트리가 없거나 비어 있습니다" 표시.
-- **수정 방향**: `extension/manifest.json`에 `description`(한 문장, 예: "DRM 없는 SDR 영상을 EDR로 확장 표시")을 추가하고 manifest 단위 테스트의 필수 키에 넣는다.
-- **검증(1)**: `npm test`. (3) Safari 확장 설명에 문구 표시.
-
-## P2. 비디오 입력 경로 선택과 복사 경로 (PLAN.md C절 "비디오 입력 경로")
-
+- **원인**: 위 판정 요약. 기준 경로(c2d·copy)가 어두우면 ext 검정 여부를 판단할 수 없는데 `choosePath`가 `ext`로 확정한다.
 - **수정 방향**:
-  1. renderer에 입력 경로 상태 `path: 'ext' | 'copy'`를 둔다. attach 직후 첫 frameProbe 결과로 정한다: `isBlackOverlay`가 true(ext≈0, copy 또는 c2d ≥ 8)이고 `copy` ≥ 8이면 `copy`, 아니면 `ext`. 첫 frameProbe 전에는 렌더하지 않는다(캔버스를 숨겨 원본 video가 보이게 한다. `visibility:hidden` 등, 판정 후 표시).
-  2. `copy` 경로: video 크기(`videoWidth×videoHeight`)의 `rgba8unorm` 텍스처(usage `TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT`, copyExternalImageToTexture 요구사항)를 만들고, 렌더할 때마다 `queue.copyExternalImageToTexture({source: video}, {texture}, [w, h])` 후 일반 `texture_2d<f32>` 샘플로 같은 ITM/identity 수식을 적용한다. 셰이더는 외부 텍스처용과 수식이 같아야 하며, 차이는 바인딩 타입과 샘플 함수뿐이다(수식 본문 공유, GUIDELINES 3.1). video 크기가 바뀌면(화질 변경) 텍스처를 다시 만든다.
-  3. 같은 video 프레임 재복사 생략: 렌더 직전 `video.currentTime`(또는 `getVideoPlaybackQuality().totalVideoFrames`)이 직전 복사 때와 같으면 복사를 건너뛰고 이전 텍스처로 렌더한다. ProMotion에서 60fps 소스 복사를 절반으로 줄이는 목적이다.
-  4. N2 가드는 유지하되 판정 대상을 "선택된 경로의 출력"으로 바꾼다: `copy` 경로에서 `copy`도 ≈0이고 c2d > 8이면 detach. 경로 전환은 attach당 1회(ext→copy)만 하고 반대 방향 전환은 하지 않는다.
-  5. frameProbe는 경로 선택 후 30초마다로 늘린다(비용 절감). `stripes` 모드에서는 실행하지 않는다.
-  6. diag에 `render.path`('ext'|'copy')를 추가한다(schemaVersion 3).
-- **영향 범위**: `extension/content/renderer.js`, `itm.wgsl.js`(복사 경로용 셰이더 조립. 수식 본문은 probe/shaders.js와 동일 유지), `detect.js`(경로 선택 순수 함수 `choosePath(probe)`), `main.js`, `hud.js`, `docs/result-schema-m2.json`, `scripts/parse-result.py`, 테스트.
-- **검증(1)**: `choosePath` 경계 테스트, WGSL 일관성 테스트 확장(두 셰이더의 수식 본문 동일), 스키마 v3, stub으로 복사 호출·텍스처 재생성·재복사 생략 조건. (3) P4.
+  1. `choosePath(probe)`의 결과에 `'pending'`을 추가한다. c2d와 copy가 모두 8 미만이거나 값이 없으면(예외) `'pending'`. ext ≥ 2이고 기준 경로 중 하나 ≥ 8이면 `'ext'`. ext < 2이고 copy ≥ 8이면 `'copy'`. ext < 2이고 copy < 8, c2d ≥ 8이면 `'none'`(N2 가드와 같은 결과: detach).
+  2. `'pending'` 동안은 캔버스를 숨긴 채(원본 video 표시) 1초마다 frameProbe를 다시 한다(재생 중일 때만). 60회(약 1분) 넘게 pending이면 더 시도하지 않고 숨긴 상태로 두며 diag `render.path = 'pending'`, errors에 `PathUndecided` 1회 기록.
+  3. 한 번 `ext`나 `copy`로 결정된 뒤의 규칙(ext→copy 1회 전환, 30초 주기)은 그대로 둔다.
+- **영향 범위**: `detect.js`, `renderer.js`, `main.js`, 스키마(`render.path` enum에 `pending`), 테스트.
+- **검증(1)**: `choosePath` 경계 표 테스트(각 분기), pending 반복·60회 상한 stub 테스트.
 
-## P3. 비용 측정 진단 (G3c 자료)
+## Q2. 측정 창에서 일시정지·비가시 공백 제외
 
-- **수정 방향**:
-  1. diag `render`에 `displayMissRate`(K1과 같은 정의: 콜백 간격 > 1.5/displayHz를 놓친 갱신으로 셈, displayHz는 간격 중앙값으로 60/120 추정)와 `displayHz`, `copyMsP50`/`copyMsP95`(복사 호출의 JS 동기 시간), `copySkipped`(재복사 생략 횟수), `videoDropped`/`videoTotal`(`getVideoPlaybackQuality`)을 추가한다. `displayMissRate` 계산은 순수 함수로 두고 K1 구현 시 프로브와 공유할 수 있게 한다(지금은 extension 쪽에만 둔다. probe 파일은 수정하지 않는다).
-  2. frameProbe 1회에 걸린 시간 `frameProbe.ms`(시작~모든 경로 완료)와 경로별 동기 시간을 기록한다. `loopFps` 8.7 관찰의 원인 확인용이다.
-- **영향 범위**: `renderer.js`, `hud.js`, 스키마, parse-result, 테스트.
-- **검증(1)**: `displayMissRate` 단위 테스트(FIX_GUIDE K1 검증 사례와 같은 입력: 60Hz 규칙 ±2 ms → 0, 120Hz → 0, 60Hz 33 ms 공백 1회 → 1/600, displayHz 추정).
+- **수정 방향**: 루프 타임스탬프 링 버퍼에서 연속 콜백 간격이 500 ms를 넘으면 그 간격은 측정 창의 끊김으로 보고 누락 수와 분모(측정 시간) 모두에서 뺀다. `loopFps`도 같은 규칙. 추가로 `play`·`seeked`·가시 복귀 때 링 버퍼(타임스탬프, JS 시간, 복사 시간)를 비운다. `displayHz` 추정은 그대로(중앙값).
+- **영향 범위**: `hud.js`(순수 함수), `renderer.js`, 테스트.
+- **검증(1)**: 60Hz 규칙 시퀀스 중간에 2초 공백 1회 → 누락 0, 60Hz에 33 ms 공백 1회 → 1/600 유지.
 
-## P4. 사용자 Mac 확인 절차 (docs/manual-checklist.md 0b 절 갱신)
+## Q3. 프로브 P0-6: VP9 입력 방식 비용 실험
 
-1. `git pull` → Xcode Run → Safari 재시작 후 "서명되지 않은 확장 허용" 재확인.
-2. 전원 연결, 밝기 중간, 창 모드. YouTube VP9 영상(같은 영상)을 **2160p60**으로 재생, 모드 `itm`. 영상이 보이는지, 원본보다 하이라이트가 밝아 보이는지 한 줄. 30초 재생 후 popup JSON → `results/result-M2-<날짜>-ac-mid-2160p60-itm-copy-window.json`.
-3. 같은 영상 전체화면 30초 → JSON(`…-fullscreen.json`). 끊김 육안(없음/가끔/자주).
-4. 화질 1080p60으로 바꾸고 페이지 새로고침 → 전체화면 30초 → JSON. 끊김 육안.
-5. 비교 기준: 확장을 popup에서 끈 상태로 같은 영상 2160p60 전체화면 30초 → Stats for nerds의 "dropped of" 숫자 기록.
-6. 60Hz: 시스템 설정 → 디스플레이 → 주사율 60Hz로 바꾸고 3번만 반복.
-7. stripes: popup에서 모드를 `stripes`로 **먼저** 바꾼 뒤 페이지 새로고침 → 밝기 중간 30초 대기 → 왼쪽부터 구분되는 마지막 줄 번호.
+- **목표**: 2160p VP9에서 JS 동기 시간 p95 < 4 ms이고 출력이 검지 않은 입력 방식을 찾는다.
+- **픽스처**: `fixtures/ramp-2160p60.webm`(VP9, 기존 `ramp-2160p60.mp4`를 재인코딩, `-row-mt 1`과 빠른 speed 사용, 12초, bt709). 크기가 2 MB를 넘으면 STATUS.md에 기록. `check-fixtures.sh`에 추가. G3 일괄 측정 목록에는 넣지 않는다.
+- **변형**(각각 같은 렌더: 캔버스 = min(원본, 전체화면×DPR), identity 셰이더):
+  - V-ext: `importExternalTexture({source: video})`(대조군, VP9는 검정 예상)
+  - V-copy8: `copyExternalImageToTexture` → `rgba8unorm`(현 확장 방식)
+  - V-copyB: 같은 복사 → `bgra8unorm`
+  - V-bmp: `await createImageBitmap(video)` → `copyExternalImageToTexture({source: bitmap})` → `bitmap.close()`
+  - V-bmpR: `createImageBitmap(video, {resizeWidth: 캔버스 폭, resizeHeight: 캔버스 높이})` → 복사
+  - V-vf: `new VideoFrame(video)` → `importExternalTexture({source: frame})` → 렌더 후 `frame.close()`(WebCodecs 경로)
+  - 비동기 변형(bmp, bmpR)은 이전 프레임의 결과 텍스처로 렌더하고 새 비트맵이 준비되면 교체한다(렌더 루프를 기다리게 하지 않음). 준비 지연 p50을 따로 잰다.
+- **측정**(변형마다 전체화면 8초, 앞 1초 제외): JS 동기 시간 p50/p95/max, 비동기 준비 지연 p50/p95(해당 시), `displayMissRate`(Q2와 같은 정의, probe-core 순수 함수), loopFps, 출력 평균 밝기(64×36 되읽기 1회, 마지막 프레임), video 드롭(`getVideoPlaybackQuality` 차이), 예외 name. 변형이 지원되지 않으면(예외) 건너뛰고 기록.
+- **실행 대상**: `ramp-2160p60.webm`, `ramp-1080p60.webm`, 대조로 `ramp-2160p60.mp4`(H.264)에서 V-ext와 V-copy8만.
+- **UI**: P0-4 아래 "P0-6 VP9 입력 방식" 절에 "일괄 측정" 버튼 1개(전체화면 진입 후 자동 실행, 진행 표시 최소). 결과 표를 페이지에 출력.
+- **스키마**: 결과 JSON에 `vp9Paths: [{fixture, variant, ...위 측정값}]` 추가, **schemaVersion 5**. `parse-result.py`에 표 추가(판정 없음). K1은 schemaVersion 6으로 번호만 미룬다.
+- **영향 범위**: `probe/`(probe.js, probe-core.js, index.html, shaders.js는 copy 샘플용 셰이더 추가만), `fixtures/ramp-2160p60.webm`, `scripts/make-fixtures.sh`, `scripts/check-fixtures.sh`, `docs/result-schema.json`, `scripts/parse-result.py`, `tests/unit/probe-core.test.js`, `sim/test_parse_result.py`.
+- **검증(1)**: 순수 함수 테스트, check-fixtures, parse-result(v1~v5). (3) Q4.
+
+## Q4. 사용자 Mac 절차 (docs/manual-checklist.md에 추가)
+
+1. `git pull` → 확장은 Xcode Run 재실행(Q1·Q2 반영 확인용).
+2. 확장: YouTube 같은 영상 2160p60, 창 모드, 재생 시작 직후 검은 화면 없이 원본 → 오버레이로 바뀌는지(몇 초 걸리는지) 한 줄. 재생 중 30초 후 **일시정지하지 말고** popup JSON 복사.
+3. 프로브: 전원 연결, 밝기 중간, 새로고침 → P0-6 "일괄 측정" → 끝나면 JSON export. ProMotion과 60Hz 각 1회.
+
+## Q5. 제품 결정 대기 (Q3 결과 후 Opus가 사용자에게 묻는다. 구현 대상 아님)
+
+- Q3에서 2160p 기준을 통과하는 변형이 있으면 확장 복사 경로를 그 방식으로 바꾼다(다음 FIX_GUIDE).
+- 없으면 선택지(사용자 결정):
+  1. VP9는 해상도 상한을 두고(복사 비용이 기준 안인 해상도까지만) 그 이상은 no-op.
+  2. main world에서 코덱 협상을 조작해 H.264(최대 1080p, 외부 텍스처 경로)를 받게 함. PLAN.md B절·C절 개정 필요.
+  3. F-A(네이티브 헬퍼) 착수.
 
 ---
-
-## N5 판정 (기록)
-
-- 결과: YouTube frameProbe ext 0 / copy 97.8 / c2d 145.0(예외 없음), 프로브 VP9 오른쪽 출력 검정 → 표 1행(H-a). 가드는 2회 연속 후 detach해 원본이 정상 표시됨(N2 동작 확인, (3)).
 
 ## K1. G3 지표를 3차 개정 정의로 교체
 
@@ -65,7 +83,7 @@
   1. 순수 함수 `displayMissRate(loopTimes, windowStart, windowEnd, displayHz)`를 `probe-core.js`에 둔다. 측정 창에서 연속 콜백 간격이 `1.5 / displayHz`를 넘으면 `round(간격 × displayHz) − 1`개 갱신을 놓친 것으로 센다. 결과 = 놓친 갱신 수 / (측정 창 초 × displayHz).
   2. `displayHz`는 측정 창의 콜백 간격 중앙값에서 추정해 60 또는 120 중 가까운 값으로 반올림한다. 추정값을 run에 `displayHz`로 기록한다. 사용자가 고른 `env.refreshRate`는 참고로만 두고, 둘이 다르면 페이지에 "주사율 선택값과 측정값이 다름" 경고를 표시한다(4차에서 표기가 뒤바뀐 문제 방지).
   3. run에 `displayMissRate`, `displayHz`를 추가한다. 기존 `missRate`(슬롯 기반)는 이름을 바꾸지 말고 보조로 남긴다.
-  4. `perf.g3`의 `baselineMiss`/`itmMiss`/`delta`를 `displayMissRate` 기준으로 바꾸고, `rvfcMiss`는 기존 그대로 둔다. `perf.g3`에 `displayHz`를 추가한다. schemaVersion 5.
+  4. `perf.g3`의 `baselineMiss`/`itmMiss`/`delta`를 `displayMissRate` 기준으로 바꾸고, `rvfcMiss`는 기존 그대로 둔다. `perf.g3`에 `displayHz`를 추가한다. schemaVersion 6(Q3가 5를 씀).
   5. `scripts/parse-result.py`: 모드별 표와 G3 요약에 `displayMissRate`, `displayHz` 열을 추가한다. v1~v4 파일 11건 오류 없이 처리한다. 판정은 출력하지 않는다.
 - **영향 범위**: `probe/probe-core.js`, `probe/probe.js`, `docs/result-schema.json`, `scripts/parse-result.py`, `tests/unit/probe-core.test.js`.
 - **검증(1)**: 단위 테스트. 60Hz 규칙 시퀀스(±2 ms 지터 포함) → 0, 120Hz → 0, 60Hz에서 33 ms 공백 1회 → 1/600, displayHz 추정(16.7 ms → 60, 8.3 ms → 120). `results/` 11건 parse-result 오류 없음.
@@ -73,7 +91,7 @@
 
 ---
 
-## 이번 수정 범위 밖 (변경 금지, P·K 공통)
+## 이번 수정 범위 밖 (변경 금지, Q·K 공통)
 
 - ITM 수식, 프리셋 수치(M4).
 - K1은 `probe/` 지표 전용이며 M2 브랜치에 섞지 않는다. N3의 프로브 변경은 픽스처 목록 추가만이다.
@@ -81,10 +99,11 @@
 - ITM 수식·프리셋 수치(M4), 캔버스 설정 고정값(GUIDELINES 2.5-3).
 - 커밋된 `xcode/`의 수기 편집·형식 변환(GUIDELINES 7-5).
 
-## 병렬 분할 (P 회차)
+## 병렬 분할 (Q 회차)
 
-- P1~P3는 모두 `renderer.js`·`hud.js`·스키마를 건드려 파일이 겹친다. impl-worker 1개(또는 본 세션)가 순서대로 한다: P1 → P3(측정 필드) → P2.
-- P4 체크리스트 문구는 같은 작업자가 마지막에 반영한다.
+- W-A: Q1 + Q2 (`extension/`, 스키마 m2, 테스트, 체크리스트 Q4-1·2 문구).
+- W-B: Q3 (`probe/`, 픽스처, `docs/result-schema.json`, parse-result, probe 테스트, 체크리스트 Q4-3 문구). 2160p VP9 인코딩은 sim-runner로 돌려도 된다.
+- `docs/manual-checklist.md`와 `scripts/parse-result.py`가 겹친다. 체크리스트는 W-A가 0b 절, W-B가 0a 절 아래 새 절로 나눠 쓰고, parse-result는 W-B만 수정한다(W-A는 m2 스키마 enum 변경만이며 parse-result 변경이 필요 없게 한다).
 
 ## 병렬 분할 (K1)
 
