@@ -9,7 +9,7 @@ import Cocoa
 import SafariServices
 import WebKit
 
-let extensionBundleIdentifier = "io.github.tmtmtmtmtmt.sdrhdr.Extension"
+let extensionBundleIdentifier = "io.github.tmtmtmtmtmt.SDRHDR.Extension"
 
 class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHandler {
 
