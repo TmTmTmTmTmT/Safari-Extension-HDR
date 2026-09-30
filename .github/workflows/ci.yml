@@ -69,7 +69,7 @@ jobs:
           xcrun safari-web-extension-converter extension \
             --project-location "$tmp" \
             --app-name SDRHDR \
-            --bundle-identifier io.github.tmtmtmtmtmt.sdrhdr \
+            --bundle-identifier io.github.tmtmtmtmtmt.SDRHDR \
             --macos-only --swift --no-open --no-prompt \
             ${force[@]+"${force[@]}"}
           tproj="$(find "$tmp" -maxdepth 3 -name '*.xcodeproj' -type d | head -n 1 || true)"

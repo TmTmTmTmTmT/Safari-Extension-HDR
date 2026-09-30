@@ -3,7 +3,7 @@
 # safari-web-extension-converter로 xcode/ 를 생성하고 pbxproj 절대경로 여부를 검사한다.
 set -euo pipefail
 
-BUNDLE_ID="${BUNDLE_ID:-io.github.tmtmtmtmtmt.sdrhdr}"
+BUNDLE_ID="${BUNDLE_ID:-io.github.tmtmtmtmtmt.SDRHDR}"
 
 if [ ! -f package.json ] || [ ! -f extension/manifest.json ] || [ ! -f scripts/make-xcode.sh ]; then
   echo "오류: 저장소 루트에서 실행하세요 (package.json, extension/manifest.json 필요)." >&2

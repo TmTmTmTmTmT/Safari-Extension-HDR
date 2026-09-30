@@ -42,6 +42,12 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 우하단 움직이는 박스가 램프 마지막 100% 계단 패치 모서리를 일부 덮음
 - 3차에서 관측된 rVFC 초당 30회는 4차에 재현되지 않음(60Hz 53~56회/s). 원인 미확인, 누락은 여전히 11~32%라 결론 유지
 
+## M2 CI 진행 (7edf085 이후)
+
+- 러너 converter 임시 프로젝트 생성·컴파일까지 성공, `ValidateEmbeddedBinary`에서 실패: 앱 ID `io.github.tmtmtmtmtmt.SDRHDR`, 확장 ID `io.github.tmtmtmtmtmt.sdrhdr.Extension`(대소문자 불일치로 접두 검증 실패). 원인 추정: converter가 앱 ID 마지막 요소를 앱 이름으로 만듦. 조치: 기본 `--bundle-identifier`를 `io.github.tmtmtmtmtmt.SDRHDR`로 변경(make-xcode.sh, ci.yml). PLAN.md M2-3의 기본값 표기(`…sdrhdr`)와 달라짐, Opus 확인 필요
+- 사용자 Mac의 커밋된 `xcode/`는 소문자 ID로 생성돼 같은 검증에 실패할 가능성이 큼. 재생성 필요(`rm -rf xcode` 후 `bash scripts/make-xcode.sh`). CI가 통과하기 전에는 재생성하지 말고 대기
+- 미검증: 변경 후 CI 결과 / (2)
+
 ## Opus 판정 반영 (FIX_GUIDE L1~L6, 구현 완료 · 검증 대기)
 
 - Xcode 형식 불일치(사용자 Xcode-beta `project.xcproj` vs 러너 26.x)는 (d)로 결정됨(FIX_GUIDE 판정 요약)
