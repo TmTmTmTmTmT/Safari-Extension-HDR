@@ -25,11 +25,11 @@
 |---|---|---|---|---|
 | A1 | Safari 26.0+에서 WebGPU 기본 활성화 | [사실] | WebKit Safari 26.0 블로그, Apple 릴리스 노트. 사용자 macOS 27.2(Safari 버전은 프로브가 기록) | 0a |
 | A2 | Safari 26.0이 WebGPU Canvas 내 HDR **이미지** 지원 | [사실] | WebKit 26.0 블로그 문구 | — |
-| A3 | WebGPU `toneMapping:{mode:"extended"}` + rgba16float가 Safari에서 EDR로 출력됨 | [2차] | pixijs 이슈 주장, 2024-10 WebKit 커밋 "Make HDR canvas testable via Safari"(당시 unstable 플래그). 기본 활성 여부 1차 근거 없음 | **0a 핵심** |
+| A3 | WebGPU `toneMapping:{mode:"extended"}` + rgba16float가 Safari에서 EDR로 출력됨 | [확인(0a)] 2026-09-30 사용자 Mac: configure 성공, 되읽기 extended, 스트라이프 2.0까지 구분. 이전 근거: | pixijs 이슈 주장, 2024-10 WebKit 커밋 "Make HDR canvas testable via Safari"(당시 unstable 플래그). 기본 활성 여부 1차 근거 없음 | **0a 핵심** |
 | A4 | WebGPU 캔버스 colorSpace는 `srgb`/`display-p3`만 지원(rec2100 없음) | [사실(스펙)] | webgpu-hdr explainer. 출력은 display-p3로 고정, BT.2020 출력은 불필요 | 0a |
-| A5 | rgba16float 캔버스 값은 비선형(감마 인코딩) 확장값으로 해석됨 | [추정] | 틀리면 출력 인코딩을 반대로 적용 | 0a P0-3 |
-| A6 | WebGL HDR(`drawingBufferStorage`/ToneMapping)은 Safari 미지원 | [2차] | 2023년 WebKit "No signal". 존재 여부만 프로브 | 0a |
-| A7 | Canvas2D `colorType:"float16"` HDR은 WebKit에서 구현 진행 중 | [2차] | WebKit PR #71719. 보조 폴백 | 0a |
+| A5 | rgba16float 캔버스 값은 비선형(감마 인코딩) 확장값으로 해석됨 | [확인(0a)] P0-3 `nonlinear` | 틀리면 출력 인코딩을 반대로 적용 | 0a P0-3 |
+| A6 | WebGL HDR(`drawingBufferStorage`/ToneMapping)은 Safari 미지원 | [확인(0a)] `drawingBufferStorage` 없음 | 2023년 WebKit "No signal". 존재 여부만 프로브 | 0a |
+| A7 | Canvas2D `colorType:"float16"` HDR은 WebKit에서 구현 진행 중 | [확인(0a)] Safari 27.2 미지원 → G1/G2 1차 폴백 경로 없음 | WebKit PR #71719. 보조 폴백 | 0a |
 | A8 | `importExternalTexture` 샘플은 descriptor colorSpace(기본 srgb) 기준 인코딩 RGB | [추정] | BT.709 transfer 처리 방식 미확인 | 0a P0-4 |
 | A9 | content script(isolated world)에서 `navigator.gpu` 사용 가능 | [미확인] | — | **0b** |
 | A10 | YouTube MSE(blob:) video는 origin-clean이라 SecurityError가 나지 않음 | [추정] | — | **0b** |
@@ -297,6 +297,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 
 ## 확정된 사용자 환경·결정 (질문 회신 반영)
 - Mac: **Apple M1 Pro 10-core CPU, 내장 XDR(Liquid Retina XDR)**, macOS 27.2, **Safari 27.2**. A1 전제(WebGPU 기본 활성)는 충족한다. S7 예산 모델은 M1 Pro GPU(14/16코어, 약 200 GB/s 메모리 대역폭)와 XDR 네이티브 해상도(14" 3024×1964 / 16" 3456×2234)를 기준으로 한다. 14"/16" 여부는 0a 프로브의 `screen` 값으로 확정한다.
+- 0a 1차(2026-09-30) 확정: `screen` 1800×1169 @ DPR 2 → **16" 모델**, 스케일 해상도 설정(백킹 3600×2338, 패널 3456×2234로 다운샘플). 전체화면 16:9 캔버스 상한은 3600×2025다. S7은 이 행을 추가해 갱신한다(FIX_GUIDE.md F5).
 - 성능: 소스 해상도 추종, 최대 2160p60.
 - 색: 프리셋 3종 + 상세 슬라이더(채도 부스트 포함).
 - Xcode: 사용자 Mac에서 생성 후 push.
@@ -315,9 +316,9 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 
 | 게이트 | 일자 | 근거 파일 | 판정 | 후속 지시 |
 |---|---|---|---|---|
-| G1 API | — | — | 대기 | — |
-| G2 EDR | — | — | 대기 | — |
-| G3 성능 | — | — | 대기 | — |
+| G1 API | 2026-09-30 | results/result-M1-20260930-battery-max-fullscreen.json | **통과** | configure 예외 없음, 되읽기 `rgba16float`/`display-p3`/`extended`. 조건 무관 항목이라 재측정 불필요 |
+| G2 EDR | 2026-09-30 | 같은 파일 | **통과(잠정)** | 배터리·SDR 밝기 최대(헤드룸 최소 조건)에서 1.25/1.5/2.0 세 단계 구분(기준 2개 이상). 참조 HDR 이미지 비교는 미실시. 밝기 낮음/중간 P0-2 결과로 헤드룸 범위 확정 후 '통과'로 확정 |
+| G3 성능 | 2026-09-30 | 같은 파일 | **판정 불가** | 측정 조건 미충족(배터리, 모든 run 창 모드, 캔버스 1000×563) + 측정 방법 결함(픽스처 3초라 기동 구간이 지배). FIX_GUIDE.md F1~F4 적용 후 조건 A 재측정. 참고: JS p95 ≤ 2 ms, GPU 0.11~0.16 ms로 연산 비용 신호는 없음 |
 | G4 확장 컨텍스트 | — | — | 대기 | — |
 
 ---
