@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.1 (2026-09-30, D-M2 상세 계획 추가)
+> 버전: v1.2 (2026-09-30, D-M2 M2-3 CI 개정·A15/A16 갱신)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -37,8 +37,8 @@
 | A12 | 배터리/저전력에서 헤드룸 축소 | [추정] | 웹에서 배터리 상태 조회 불가 | 0a 기록 |
 | A13 | YouTube 전체화면은 `#movie_player` 요소 전체화면이라 오버레이가 유지됨 | [추정] | — | 0b/M3 |
 | A14 | HDR 원본은 설정 버튼 HDR 배지 클래스로 판별 가능 | [추정] | 수동 토글 병행 필수 | M3 |
-| A15 | GH Actions macOS 러너에서 커밋된 Safari 확장 프로젝트를 `CODE_SIGNING_ALLOWED=NO`로 빌드 가능 | [2차] | 커뮤니티 사례 | M2 CI |
-| A16 | converter 기본 동작(`--copy-resources` 미사용)은 extension 폴더를 **참조**하며, 저장소 루트 기준 상대경로라면 CI에서도 유효 | [추정] | 절대경로가 박히면 CI 실패 | M2 CI |
+| A15 | GH Actions macOS 러너에서 Safari 확장 프로젝트를 `CODE_SIGNING_ALLOWED=NO`로 빌드 가능 | [2차] | 커뮤니티 사례. 2026-09-30: 사용자 Xcode 베타가 만든 `project.xcproj`(새 형식)는 러너 Xcode 26.x가 읽지 못함 → CI는 러너 converter로 임시 프로젝트를 만들어 빌드(FIX_GUIDE L1) | M2 CI |
+| A16 | converter 기본 동작(`--copy-resources` 미사용)은 extension 폴더를 **참조**하며, 저장소 루트 기준 상대경로라면 CI에서도 유효 | [부분 확인] 사용자 Mac 생성물에 `/Users/` 문자열 없음. 다른 경로 clone에서 Run 가능 여부는 미확인 | 절대경로가 박히면 CI 실패 | M2 CI |
 | A17 | JS에서 EDR 헤드룸 수치 조회 불가(`dynamic-range: high`는 boolean) | [사실(스펙)] | 배율 파라미터의 근거 | — |
 | A18 | 내장 XDR 헤드룸은 SDR 밝기 설정에 따라 변동(밝기를 낮출수록 커짐) | [확인(0a 2차)] 전원 연결, 안정 후 P0-2: 밝기 낮음 4 / 중간 3 / 최대 2. 밝기 변경·재그리기 직후에는 약 30초 동안 2로 보이다가 안정값에 도달 | 0a P0-2/P0-5 |
 | A19 | (F-A) Safari 확장 appex ↔ 헬퍼 앱 통신은 App Group/XPC 또는 localhost 소켓으로 가능하며, 무료 개인 팀 서명에서도 해당 capability 사용 가능 | [미확인] | F-A 착수 시 FA-0 프로브로 확인 | FA-0 |
@@ -210,7 +210,8 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 **M2-3. Xcode·CI**
 - `scripts/make-xcode.sh`(사용자 Mac 전용, 저장소 루트에서 실행): `xcode/`가 이미 있으면 중단(덮어쓰기 금지, 재생성은 사용자가 삭제 후). `xcrun safari-web-extension-converter extension --project-location xcode --app-name SDRHDR --bundle-identifier "${BUNDLE_ID:-io.github.tmtmtmtmtmt.sdrhdr}" --macos-only --swift --no-open --no-prompt` 실행(`--copy-resources` 쓰지 않음, A16). 옵션 이름은 [2차]이므로 스크립트는 먼저 `--help` 출력에 각 옵션이 있는지 확인하고 없으면 중단·안내한다. 생성 후 검사: pbxproj에 저장소 절대경로(`$PWD`, `/Users/`)가 있으면 실패 코드와 함께 A16 실패를 알린다(수정하지 않음 → Opus). 마지막에 `xcodebuild -list` 출력과 커밋 안내를 출력한다.
 - 서명: 사용자가 Xcode에서 개인 팀을 지정하되 그 변경(`DEVELOPMENT_TEAM`)은 **커밋하지 않는다**. push할 커밋은 스크립트 직후 생성 상태다. `.gitignore`에 `xcode/**/xcuserdata/`, `xcode/**/build/`, `*.xcuserstate` 추가.
-- ci.yml `macos` job(`runs-on: macos-latest`, 모든 push·PR): `xcode/`에 `.xcodeproj`가 없으면 "Xcode 프로젝트 없음(M2 사용자 단계 대기)"을 출력하고 성공 종료. 있으면 `xcodebuild -version` 기록 → pbxproj 절대경로 검사(위와 같은 규칙) → `xcodebuild -project <찾은 경로> -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build`. scheme은 쓰지 않는다(converter scheme은 xcuserdata에 있을 수 있음).
+- **2026-09-30 개정(FIX_GUIDE L1)**: 아래 macos job 설명은 L1로 대체한다. CI는 러너 converter로 임시 프로젝트를 만들어 빌드하고, 커밋된 `xcode/`는 A16 검사만(형식이 `project.pbxproj`면 빌드도) 한다.
+- (원안) ci.yml `macos` job(`runs-on: macos-latest`, 모든 push·PR): `xcode/`에 `.xcodeproj`가 없으면 "Xcode 프로젝트 없음(M2 사용자 단계 대기)"을 출력하고 성공 종료. 있으면 `xcodebuild -version` 기록 → pbxproj 절대경로 검사(위와 같은 규칙) → `xcodebuild -project <찾은 경로> -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build`. scheme은 쓰지 않는다(converter scheme은 xcuserdata에 있을 수 있음).
 - 기존 ubuntu job에 manifest 검사 단위 테스트가 포함되므로 별도 job은 없다.
 
 **M2-4. 진단 JSON (`docs/result-schema-m2.json`)**
