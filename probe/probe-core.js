@@ -2,7 +2,33 @@
 // 0a 프로브 순수 함수. DOM/GPU/시간에 의존하지 않는다. (PLAN B절 P0-1~P0-5, E절 회신 형식)
 (function () {
   // v2: run에 warmupSec/windowSec/windowFrames, perf.g3 추가, env.windowMode를 run에서 파생. v1 파일도 요약 가능.
-  const SCHEMA_VERSION = 2;
+  // v3: run에 mode/layout, env.refreshRate, edr.secondsSinceDraw, perf.g3를 해상도별 {baselineDrop,itmDrop,delta,jsP95Max}로 개정. v1/v2 파일도 유효.
+  const SCHEMA_VERSION = 3;
+  // FIX_GUIDE H1: requestAdapter/requestDevice 각각의 타임아웃과 사용자 안내.
+  const GPU_TIMEOUT_MS = 5000;
+  const GPU_HINT = 'GPU 응답 없음, Safari를 종료 후 재시작';
+  // FIX_GUIDE H2: G3 진단 일괄 측정 대상 픽스처와 모드 순서.
+  const MATRIX_FIXTURES = ['ramp-1080p60', 'ramp-2160p60'];
+  const MODES = ['B0', 'B1', 'B2', 'B3'];
+  // B1은 EDR 합성 비용 분리용 진단 설정이다. GUIDELINES 2.5-3(고정 설정)의 프로브 전용 예외.
+  const MODE_CONFIG = {
+    B0: { canvas: false, itm: false, format: null, colorSpace: null, toneMapping: null },
+    B1: { canvas: true, itm: false, format: 'bgra8unorm', colorSpace: 'srgb', toneMapping: null },
+    B2: {
+      canvas: true,
+      itm: false,
+      format: 'rgba16float',
+      colorSpace: 'display-p3',
+      toneMapping: { mode: 'extended' },
+    },
+    B3: {
+      canvas: true,
+      itm: true,
+      format: 'rgba16float',
+      colorSpace: 'display-p3',
+      toneMapping: { mode: 'extended' },
+    },
+  };
   const WARMUP_SEC = 1.0;
   const WINDOW_MAX_SEC = 10;
 
@@ -98,6 +124,83 @@
     };
   }
 
+  // Promise에 타임아웃을 건다. 시간 초과 시 name='TimeoutError', isTimeout=true인 Error로 reject한다.
+  // timers는 테스트용 주입(기본 globalThis.setTimeout/clearTimeout).
+  function withTimeout(promise, ms, label, timers) {
+    const st = (timers && timers.setTimeout) || globalThis.setTimeout;
+    const ct = (timers && timers.clearTimeout) || globalThis.clearTimeout;
+    return new Promise((resolve, reject) => {
+      const id = st(() => {
+        const e = new Error((label || 'operation') + ' ' + ms + 'ms 초과');
+        e.name = 'TimeoutError';
+        e.isTimeout = true;
+        reject(e);
+      }, ms);
+      Promise.resolve(promise).then(
+        (v) => {
+          ct(id);
+          resolve(v);
+        },
+        (e) => {
+          ct(id);
+          reject(e);
+        },
+      );
+    });
+  }
+
+  function isTimeoutError(e) {
+    return !!e && (e.isTimeout === true || e.name === 'TimeoutError');
+  }
+
+  // GPU 없이 export할 때 쓰는 최소 api 객체 (스키마 필수 키 유지). H1-3.
+  function buildFallbackApi(message, flags) {
+    const f = flags || {};
+    return {
+      secureContext: !!f.secureContext,
+      navigatorGpu: !!f.navigatorGpu,
+      adapter: null,
+      timestampQuery: false,
+      preferredFormat: null,
+      configure: { ok: false, error: message || null },
+      getConfiguration: {
+        supported: false,
+        format: null,
+        colorSpace: null,
+        toneMappingMode: null,
+        error: null,
+      },
+      mediaQueries: { dynamicRangeHigh: false, colorGamutP3: false },
+    };
+  }
+
+  function modeConfig(mode) {
+    const c = MODE_CONFIG[mode];
+    return c ? JSON.parse(JSON.stringify(c)) : null;
+  }
+
+  // 일괄 측정 순서: 픽스처별로 B0->B1->B2->B3.
+  function matrixPlan(fixtures) {
+    const out = [];
+    for (const fixture of fixtures || MATRIX_FIXTURES) {
+      for (const mode of MODES) out.push({ fixture, mode });
+    }
+    return out;
+  }
+
+  function progressText(index, total, step) {
+    return (
+      'G3 진단 ' + index + ' / ' + total + (step ? ' (' + step.fixture + ' ' + step.mode + ')' : '')
+    );
+  }
+
+  // H4: 마지막 그리기 후 경과 초(정수). 그린 적 없으면 null.
+  function secondsSinceDraw(drawMs, nowMs) {
+    if (typeof drawMs !== 'number' || typeof nowMs !== 'number') return null;
+    if (!Number.isFinite(drawMs) || !Number.isFinite(nowMs)) return null;
+    return Math.max(0, Math.floor((nowMs - drawMs) / 1000));
+  }
+
   // G3 대상 run = 전원 연결 + 전체화면 (FIX_GUIDE F3/F4).
   function isG3Run(run, power) {
     return power === 'ac' && !!run && run.fullscreen === true;
@@ -112,21 +215,41 @@
     return a.length > 0 ? Math.max(...a) : null;
   }
 
-  // G3 대상 run만 모아 소스 해상도별 최악값. 대상이 없으면 null.
-  function g3Worst(runs, power) {
-    const targets = (runs || []).filter((r) => isG3Run(r, power));
+  // v3 G3 대상 = 전원 연결 + 전체화면 + overlay 배치 run (FIX_GUIDE H3).
+  function isG3OverlayRun(run, power) {
+    return isG3Run(run, power) && run.layout === 'overlay';
+  }
+
+  function hasG3OverlayRun(runs, power) {
+    return (runs || []).some((r) => isG3OverlayRun(r, power));
+  }
+
+  // 해상도별 {baselineDrop(B0), itmDrop(B3), delta(B3-B0), jsP95Max}. 같은 모드가 여러 번이면 마지막 run.
+  // B0 또는 B3가 없으면 해당 해상도는 null, 대상 run이 없으면 전체 null. 판정은 하지 않는다.
+  function g3Summary(runs, power) {
+    const targets = (runs || []).filter((r) => isG3OverlayRun(r, power));
     if (targets.length === 0) return null;
-    const out = {};
+    const groups = {};
     for (const r of targets) {
       const key = r.srcRes || 'unknown';
-      (out[key] = out[key] || []).push(r);
+      (groups[key] = groups[key] || []).push(r);
     }
     const res = {};
-    for (const key of Object.keys(out).sort()) {
+    for (const key of Object.keys(groups).sort()) {
+      const byMode = {};
+      for (const r of groups[key]) byMode[r.mode] = r;
+      const b0 = byMode.B0;
+      const b3 = byMode.B3;
+      if (!b0 || !b3) {
+        res[key] = null;
+        continue;
+      }
+      const bothNum = typeof b0.dropRate === 'number' && typeof b3.dropRate === 'number';
       res[key] = {
-        runs: out[key].length,
-        dropRateMax: maxOrNull(out[key].map((r) => r.dropRate)),
-        jsP95Max: maxOrNull(out[key].map((r) => r.jsP95)),
+        baselineDrop: typeof b0.dropRate === 'number' ? b0.dropRate : null,
+        itmDrop: typeof b3.dropRate === 'number' ? b3.dropRate : null,
+        delta: bothNum ? round(b3.dropRate - b0.dropRate, 5) : null,
+        jsP95Max: maxOrNull(groups[key].map((r) => r.jsP95)),
       };
     }
     return res;
@@ -168,6 +291,8 @@
     const wall = o.wallSeconds;
     return {
       fixture: o.fixture,
+      mode: MODES.includes(o.mode) ? o.mode : 'split',
+      layout: o.layout === 'overlay' ? 'overlay' : 'split',
       itm: !!o.itm,
       srcRes: resStr(o.srcW, o.srcH),
       canvasRes: resStr(o.canvasW, o.canvasH),
@@ -202,7 +327,7 @@
       dropRate: last ? last.dropRate : null,
       jsP50: last ? last.jsP50 : null,
       jsP95: last ? last.jsP95 : null,
-      g3: g3Worst(runs, env.power),
+      g3: g3Summary(runs, env.power),
       runs,
     };
     if (last && last.gpuMs !== null && last.gpuMs !== undefined) perf.gpuMs = last.gpuMs;
@@ -218,6 +343,7 @@
         display: env.display || null,
         power: env.power || null,
         sdrBrightness: env.sdrBrightness || null,
+        refreshRate: env.refreshRate || null,
         windowMode: deriveWindowMode(runs),
         ua: env.ua || null,
         screen: env.screen || null,
@@ -227,6 +353,10 @@
         maxDistinctStep: typeof edr.maxDistinctStep === 'number' ? edr.maxDistinctStep : null,
         encodingMatch: edr.encodingMatch || null,
         refHdrImage: edr.refHdrImage || null,
+        secondsSinceDraw:
+          typeof edr.secondsSinceDraw === 'number' && Number.isFinite(edr.secondsSinceDraw)
+            ? edr.secondsSinceDraw
+            : null,
       },
       perf,
       flags: {
@@ -256,7 +386,21 @@
     windowStats,
     isG3Run,
     hasG3Run,
-    g3Worst,
+    isG3OverlayRun,
+    hasG3OverlayRun,
+    g3Summary,
+    GPU_TIMEOUT_MS,
+    GPU_HINT,
+    MATRIX_FIXTURES,
+    MODES,
+    MODE_CONFIG,
+    withTimeout,
+    isTimeoutError,
+    buildFallbackApi,
+    modeConfig,
+    matrixPlan,
+    progressText,
+    secondsSinceDraw,
     deriveWindowMode,
     dropRateFromPresented,
     canvasResolution,

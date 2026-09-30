@@ -1,8 +1,8 @@
-"""S1~S7 전체 실행 후 요약 마크다운을 stdout 에 출력. 사용: python3 -m sim.run_all"""
+"""S1~S7, S10 전체 실행 후 요약 마크다운을 stdout 에 출력. 사용: python3 -m sim.run_all"""
 
 import numpy as np
 
-from sim import banding, budget, color, compare, refs, sweep
+from sim import banding, budget, color, compare, headroom, refs, sweep
 from sim import tonecurve as tc
 from sim._md import md_table
 from sim.presets import PRESETS
@@ -35,7 +35,7 @@ def s1_report():
 
 def main():
     parts = [
-        "# 시뮬레이션 요약 (S1~S7)",
+        "# 시뮬레이션 요약 (S1~S7, S10)",
         "",
         "클라우드 numpy 결과이며 WebGPU/EDR/Safari 동작은 미검증(사용자 Mac 필요).",
         "",
@@ -52,6 +52,8 @@ def main():
         compare.report(),
         "",
         budget.report(),
+        "",
+        headroom.report(),
     ]
     print("\n".join(parts))
 

@@ -84,6 +84,77 @@ def is_g3_run(run, power):
     return power == "ac" and run.get("fullscreen") is True
 
 
+MODES = ["B0", "B1", "B2", "B3"]
+
+
+def is_g3_overlay_run(run, power):
+    """v3 G3 대상 = 전원 연결 + 전체화면 + overlay 배치. layout이 없는 v1/v2 run은 split로 간주해 제외한다."""
+    return is_g3_run(run, power) and run.get("layout", "split") == "overlay"
+
+
+def latest_by_mode(runs):
+    """{srcRes: {mode: run}}. 같은 (해상도, 모드)가 여러 번이면 마지막 run."""
+    out = {}
+    for r in runs:
+        out.setdefault(r.get("srcRes") or "unknown", {})[r.get("mode", "split")] = r
+    return out
+
+
+def g3_summary(runs, power):
+    """{srcRes: {baselineDrop, itmDrop, delta, jsP95Max} | None}. 값만 계산하고 판정하지 않는다."""
+    targets = [r for r in runs if is_g3_overlay_run(r, power)]
+    res = {}
+    for key, by_mode in sorted(latest_by_mode(targets).items()):
+        b0, b3 = by_mode.get("B0"), by_mode.get("B3")
+        if not b0 or not b3:
+            res[key] = None
+            continue
+        d0, d3 = b0.get("dropRate"), b3.get("dropRate")
+        num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+        p95 = [r.get("jsP95") for r in targets if (r.get("srcRes") or "unknown") == key and num(r.get("jsP95"))]
+        res[key] = {
+            "baselineDrop": d0 if num(d0) else None,
+            "itmDrop": d3 if num(d3) else None,
+            "delta": round(d3 - d0, 5) if num(d0) and num(d3) else None,
+            "jsP95Max": max(p95) if p95 else None,
+        }
+    return res
+
+
+def print_mode_tables(runs, power):
+    overlay = [r for r in runs if r.get("layout", "split") == "overlay"]
+    print("\n모드별 표 (overlay run, 해상도 x B0~B3, 같은 모드 반복 시 마지막 run)")
+    if not overlay:
+        print("overlay run 없음")
+    else:
+        grouped = latest_by_mode(overlay)
+        for metric in ("dropRate", "dropRatePresented", "fps", "gpuMs", "jsP95"):
+            print("\n%s" % metric)
+            rows = [[res] + [fmt(by_mode.get(m, {}).get(metric)) for m in MODES] for res, by_mode in sorted(grouped.items())]
+            print(table(["srcRes"] + MODES, rows))
+        print("\n표의 run 조건 (power=%s)" % fmt(power))
+        rows = []
+        for res, by_mode in sorted(grouped.items()):
+            for m in MODES:
+                r = by_mode.get(m)
+                if r:
+                    rows.append([res, m, fmt(r.get("fullscreen")), fmt(is_g3_overlay_run(r, power)), fmt(r.get("canvasRes"))])
+        print(table(["srcRes", "mode", "fullscreen", "G3 대상", "canvasRes"], rows))
+    print("\nG3 요약 (전원 연결 + 전체화면 + overlay run; 값만)")
+    summary = g3_summary(runs, power)
+    if not summary:
+        print("G3 대상 overlay run 없음")
+    else:
+        rows = []
+        for res, v in summary.items():
+            if v is None:
+                rows.append([res, "-", "-", "-", "-"])
+            else:
+                rows.append([res] + [fmt(v[k]) for k in ("baselineDrop", "itmDrop", "delta", "jsP95Max")])
+        print(table(["srcRes", "baselineDrop", "itmDrop", "delta", "jsP95Max"], rows))
+        print("(B0 또는 B3 run이 없는 해상도는 '-')")
+
+
 def table(headers, rows):
     widths = [len(h) for h in headers]
     for r in rows:
@@ -99,8 +170,8 @@ def summarize(name, data):
     print("\n## %s" % name)
     env = data.get("env", {})
     print(
-        "env: macOS=%s safari=%s chip=%s display=%s power=%s sdrBrightness=%s windowMode=%s"
-        % tuple(fmt(env.get(k)) for k in ("macOS", "safari", "chip", "display", "power", "sdrBrightness", "windowMode"))
+        "env: macOS=%s safari=%s chip=%s display=%s power=%s sdrBrightness=%s refreshRate=%s windowMode=%s"
+        % tuple(fmt(env.get(k)) for k in ("macOS", "safari", "chip", "display", "power", "sdrBrightness", "refreshRate", "windowMode"))
     )
     print("screen: %s" % fmt(env.get("screen")))
     print("\nG1 API 값")
@@ -136,8 +207,8 @@ def summarize(name, data):
     edr = data.get("edr", {})
     print(
         table(
-            ["maxDistinctStep", "encodingMatch", "refHdrImage"],
-            [[fmt(edr.get("maxDistinctStep")), fmt(edr.get("encodingMatch")), fmt(edr.get("refHdrImage"))]],
+            ["maxDistinctStep", "encodingMatch", "refHdrImage", "secondsSinceDraw"],
+            [[fmt(edr.get("maxDistinctStep")), fmt(edr.get("encodingMatch")), fmt(edr.get("refHdrImage")), fmt(edr.get("secondsSinceDraw"))]],
         )
     )
     print("\nG3 성능 값 (run별)")
@@ -146,10 +217,11 @@ def summarize(name, data):
     if not runs:
         print("(run 없음)")
     else:
-        cols = ["fixture", "itm", "srcRes", "canvasRes", "fullscreen", "frames", "warmupSec", "windowSec", "fps", "dropRate", "dropRatePresented", "jsP50", "jsP95", "gpuMs"]
-        rows = [[fmt(is_g3_run(r, power))] + [fmt(r.get(c)) for c in cols] for r in runs]
-        print(table(["G3 대상"] + cols, rows))
-    print("\nG3 대상 run 요약 (전원 연결 + 전체화면)")
+        cols = ["fixture", "mode", "layout", "itm", "srcRes", "canvasRes", "fullscreen", "frames", "warmupSec", "windowSec", "fps", "dropRate", "dropRatePresented", "jsP50", "jsP95", "gpuMs"]
+        dflt = {"mode": "split", "layout": "split"}
+        rows = [[fmt(is_g3_overlay_run(r, power))] + [fmt(r.get(c, dflt.get(c))) for c in cols] for r in runs]
+        print(table(["G3 대상(v3)"] + cols, rows))
+    print("\n전체화면 run 요약 (전원 연결 + 전체화면, v2 정의)")
     targets = [r for r in runs if is_g3_run(r, power)]
     if not targets:
         print("G3 대상 run 없음")
@@ -165,6 +237,7 @@ def summarize(name, data):
             w["p95"].append(r.get("jsP95"))
         mx = lambda vs: max([v for v in vs if isinstance(v, (int, float))], default=None)
         print(table(["srcRes", "runs", "dropRate 최대", "jsP95 최대"], [[k, str(w["n"]), fmt(mx(w["drop"])), fmt(mx(w["p95"]))] for k, w in sorted(worst.items())]))
+    print_mode_tables(runs, power)
     print("\nflags: %s" % fmt(data.get("flags")))
     errs = data.get("errors") or []
     print("errors (%d)%s" % (len(errs), "".join("\n  - " + e for e in errs)))

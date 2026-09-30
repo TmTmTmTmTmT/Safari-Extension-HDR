@@ -2,7 +2,7 @@
 
 ## 현재 단계
 
-M1 0a 2차 회신(새 프로브 v2, 전원 연결, 밝기 낮음/중간/최대) 수신. Opus 판정 대기. 게이트: G1 통과, G2 잠정 통과, G3 판정 불가(PLAN.md 게이트 판정 기록).
+M1 0a 2차 회신 반영(FIX_GUIDE.md H1~H5) 구현 완료. 사용자 Mac 재측정 대기. 게이트: G1 통과, G2 통과(확정), G3 판정 보류(PLAN.md 게이트 판정 기록).
 
 ## 완료
 
@@ -10,14 +10,15 @@ M1 0a 2차 회신(새 프로브 v2, 전원 연결, 밝기 낮음/중간/최대) 
 - M1 probe / 픽스처 / sim(S1~S7): 구현 완료 (PR #2, CI green)
 - FIX_GUIDE F1: 픽스처 12초 + 프레임마다 움직이는 박스(`geq` luma 126, 우하단 720칸 순회). 프레임 해시 1080p 두 파일 720개 모두 상이
 - FIX_GUIDE F2~F4: 드롭률·JS·GPU를 워밍업 1초 제외 측정 창(최대 10초)으로 집계, "전체화면 측정" 버튼과 "창 실행" 버튼, env.windowMode를 run에서 파생, `perf.g3`(전원 연결 + 전체화면 run만, 해상도별 최악값), 스키마 v2(v1 호환), parse-result에 G3 대상 열과 요약
+- FIX_GUIDE H1~H5: 프로브 GPU 요청 5초 타임아웃·pagehide 정리·오류 배너·GPU 비의존 export, "G3 진단 일괄 측정" 버튼(전체화면 오버레이 단일 캔버스, 1080p/2160p × B0 video만 / B1 SDR 캔버스 / B2 EDR identity / B3 EDR ITM = 8 run), 스키마 v3(mode, layout, refreshRate, perf.g3 기준선 대비 delta), P0-2 경과 초 표시, S10 헤드룸 클리핑(`sim/headroom.py`)
 - FIX_GUIDE F5: S7에 "XDR 16 스케일 1800x1169"(백킹 3600x2338, 캔버스 3600x2025) 행 추가
 
 ## 검증 (→ verify)
 
-- 기준: lint, `npm test`, `pytest sim`, 픽스처 검사, 기존 회신 JSON 처리 / 실제: lint 통과, npm test 21/21, pytest 73/73, check-fixtures 4/4 PASS(길이 12초, 합계 882,661바이트), parse-result rc=0("G3 대상 run 없음" 출력) / (1) 클라우드
+- 기준: lint, `npm test`, `pytest sim`, 픽스처 검사, 기존 회신 JSON 처리 / 실제: lint 통과, npm test 30/30, pytest 85/85, check-fixtures 4/4 PASS(길이 12초, 합계 882,661바이트), parse-result rc=0("G3 대상 run 없음" 출력) / (1) 클라우드
 - `pytest sim`은 이 VM의 `pytest` 실행 파일(uv 격리, numpy 없음) 때문에 `python3 -m pytest sim`으로 실행. CI는 무관
 - 미검증: 전체화면 자동 진입·해제, rVFC 실동작, WebGPU/EDR, 픽스처 Safari 재생. 사용자 Mac에서만 가능 / (3)
-- CI(ubuntu): 63291b6에서 green / (1) 클라우드 CI
+- CI(ubuntu): d673bca에서 green / (1) 클라우드 CI. H1~H5 커밋의 결과는 push 후 확인 예정
 
 ## sim 핵심 수치 (프리셋 정확 / 균형 / 선명)
 
@@ -43,6 +44,8 @@ M1 0a 2차 회신(새 프로브 v2, 전원 연결, 밝기 낮음/중간/최대) 
 
 ## Opus 확인 필요
 
+- S10 결과(M4 프리셋 결정 자료): 균형(P=3)은 헤드룸 2에서 입력 코드 247~255(3.5%)가 잘림. 선명(P=4)은 헤드룸 2에서 231~255(9.8%), 헤드룸 4에서도 250~255(2.3%)가 g=1.05 때문에 P를 넘어 잘림. FIX_GUIDE의 'P ≤ H이면 0개' 전제는 g>1 프리셋에서 성립하지 않음
+- 프로브 미검증(사용자 Mac 필요): 타임아웃 배너, unconfigure/device.destroy가 Safari 멈춤을 해소하는지, 전체화면 오버레이에서 canvas와 video가 정확히 겹치는지, B1(bgra8unorm/srgb)에서 importExternalTexture 동작
 - 결정 완료: G3 dropRate 기준(콜백 기반, 정상 구간), S7 캔버스 정의(축별 min)
 - S4/S5 기준 확정: 균형·선명의 음수 채널과 ΔE 목표, S5 스텝 증폭 기준. "정확"이 최상단 스텝 증폭이 가장 큼(끝 기울기 f'(1)≈13). 곡선 완화 여부(M4)
 - S6 BT.2446 Method C 열은 원문 재현이 아닌 근사(계수 '미확인')

@@ -7,59 +7,146 @@
   // 첫 rVFC 콜백 후 워밍업을 버리고 최대 WINDOW_MAX_SEC를 측정한다 (FIX_GUIDE F2).
   const RUN_MAX_SEC = core.WARMUP_SEC + core.WINDOW_MAX_SEC;
   const GPU_SAMPLE_EVERY = 10;
-  const FORMAT = 'rgba16float';
+  const GAP_MS = 1000; // 일괄 측정 run 사이 간격
+  // 게이트 대상 설정(B2/B3와 정적 패턴). GUIDELINES 2.5-3: 값 고정.
+  const EDR_CFG = core.modeConfig('B2');
+  const FORMAT = EDR_CFG.format;
 
   const state = {
     api: null,
     gpu: null,
+    gpuPromise: null,
     errors: [],
     perfRuns: [],
     fixtures: {},
     running: false,
     pending: false,
+    contexts: new Set(),
+    cancel: null, // 진행 중 run을 즉시 끝내는 함수
+    aborted: false, // 일괄 측정 중단/페이지 이탈
+    closing: false,
+    lastDrawAt: null,
+    stepSecondsSinceDraw: null,
+    hangHint: false,
   };
   const $ = (id) => document.getElementById(id);
 
-  function logError(where, e) {
-    const msg = e && e.message ? e.message : String(e);
-    state.errors.push(where + ': ' + msg);
+  function renderErrors() {
     $('errOut').textContent = state.errors.join('\n');
+    const banner = $('errBanner');
+    banner.hidden = state.errors.length === 0;
+    const lines = state.errors.slice(-5);
+    if (state.hangHint) lines.unshift(core.GPU_HINT);
+    $('errBannerText').textContent = lines.join('\n');
   }
 
-  async function getGpu() {
-    if (state.gpu) return state.gpu;
+  function logError(where, e) {
+    const msg = e && e.message ? e.message : String(e);
+    if (core.isTimeoutError(e)) state.hangHint = true;
+    state.errors.push(
+      where + ': ' + msg + (core.isTimeoutError(e) ? ' (' + core.GPU_HINT + ')' : ''),
+    );
+    renderErrors();
+  }
+
+  // H1: 응답 없는 요청이 모든 기능을 막지 않도록 각 요청에 타임아웃을 둔다. 진행 중 요청은 공유한다.
+  function getGpu() {
+    if (state.gpu) return Promise.resolve(state.gpu);
+    if (!state.gpuPromise) {
+      state.gpuPromise = initGpu().catch((e) => {
+        state.gpuPromise = null;
+        throw e;
+      });
+    }
+    return state.gpuPromise;
+  }
+
+  async function initGpu() {
     if (!navigator.gpu) throw new Error('navigator.gpu 없음');
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await core.withTimeout(
+      navigator.gpu.requestAdapter(),
+      core.GPU_TIMEOUT_MS,
+      'requestAdapter',
+    );
     if (!adapter) throw new Error('requestAdapter()가 null');
     let device = null;
     let timestamps = false;
     if (adapter.features.has('timestamp-query')) {
       try {
-        device = await adapter.requestDevice({ requiredFeatures: ['timestamp-query'] });
+        device = await core.withTimeout(
+          adapter.requestDevice({ requiredFeatures: ['timestamp-query'] }),
+          core.GPU_TIMEOUT_MS,
+          'requestDevice(timestamp-query)',
+        );
         timestamps = true;
       } catch (e) {
         logError('requestDevice(timestamp-query)', e);
+        if (core.isTimeoutError(e)) throw e;
       }
     }
-    if (!device) device = await adapter.requestDevice();
-    device.lost.then((info) =>
-      logError('device.lost', new Error(info.reason + ' ' + info.message)),
-    );
+    if (!device) {
+      device = await core.withTimeout(
+        adapter.requestDevice(),
+        core.GPU_TIMEOUT_MS,
+        'requestDevice',
+      );
+    }
+    device.lost.then((info) => {
+      if (!state.closing) logError('device.lost', new Error(info.reason + ' ' + info.message));
+    });
     device.addEventListener('uncapturederror', (ev) => logError('uncapturederror', ev.error));
     state.gpu = { adapter, device, timestamps };
     return state.gpu;
   }
 
-  // 게이트 대상 설정. GUIDELINES 2.5-3: 값 고정.
-  function configureCanvas(canvas, device) {
+  // cfg 기본값은 EDR 고정 설정. B1(bgra8unorm/srgb, toneMapping 없음)은 프로브 전용 진단 설정이다.
+  function configureCanvas(canvas, device, cfg) {
+    const c = cfg || EDR_CFG;
     const ctx = canvas.getContext('webgpu');
-    ctx.configure({
-      device,
-      format: FORMAT,
-      colorSpace: 'display-p3',
-      toneMapping: { mode: 'extended' },
-    });
+    const conf = { device, format: c.format, colorSpace: c.colorSpace };
+    if (c.toneMapping) conf.toneMapping = c.toneMapping;
+    ctx.configure(conf);
+    state.contexts.add(ctx);
     return ctx;
+  }
+
+  function unconfigureCanvas(ctx) {
+    if (!ctx) return;
+    state.contexts.delete(ctx);
+    try {
+      ctx.unconfigure();
+    } catch (e) {
+      // 정리 중 오류는 무시한다.
+    }
+  }
+
+  // video 디코더 해제: pause 후 src 제거 + load().
+  function releaseVideo(video) {
+    try {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    } catch (e) {
+      // 정리 중 오류는 무시한다.
+    }
+  }
+
+  // H1-2: pagehide에서 자원을 반납해 Safari GPU 프로세스에 남기지 않는다.
+  function cleanup() {
+    state.closing = true;
+    state.aborted = true;
+    if (state.cancel) state.cancel();
+    clearInterval(state.ageTimer);
+    for (const ctx of Array.from(state.contexts)) unconfigureCanvas(ctx);
+    if (state.gpu) {
+      try {
+        state.gpu.device.destroy();
+      } catch (e) {
+        // 정리 중 오류는 무시한다.
+      }
+      state.gpu = null;
+    }
+    releaseVideo($('origVideo'));
   }
 
   // ---------- P0-1 ----------
@@ -99,8 +186,9 @@
       api.timestampQuery = gpu.adapter.features.has('timestamp-query');
       api.preferredFormat = navigator.gpu.getPreferredCanvasFormat();
       const canvas = document.createElement('canvas');
+      let ctx = null;
       try {
-        const ctx = configureCanvas(canvas, gpu.device);
+        ctx = configureCanvas(canvas, gpu.device);
         api.configure.ok = true;
         if (typeof ctx.getConfiguration === 'function') {
           api.getConfiguration.supported = true;
@@ -117,6 +205,7 @@
         api.configure.ok = false;
         api.configure.error = String(e && e.message ? e.message : e);
       }
+      unconfigureCanvas(ctx);
     } catch (e) {
       api.configure.error = String(e && e.message ? e.message : e);
       logError('P0-1 gpu', e);
@@ -140,7 +229,8 @@
       api.webgl.error = String(e && e.message ? e.message : e);
     }
     state.api = api;
-    $('apiOut').textContent = JSON.stringify(api, null, 2);
+    $('apiOut').textContent =
+      (state.hangHint && !state.gpu ? core.GPU_HINT + '\n\n' : '') + JSON.stringify(api, null, 2);
     return api;
   }
 
@@ -153,6 +243,7 @@
       display: $('envDisplay').value.trim() || null,
       power: $('envPower').value || null,
       sdrBrightness: $('envBrightness').value || null,
+      refreshRate: $('envRefresh').value || null,
       ua: navigator.userAgent,
       screen: {
         width: screen.width,
@@ -168,7 +259,7 @@
   // ---------- 정적 셰이더 렌더 (P0-2, P0-3) ----------
   function renderStatic(gpu, canvas, code, color) {
     const device = gpu.device;
-    const ctx = configureCanvas(canvas, device);
+    const ctx = configureCanvas(canvas, device, EDR_CFG);
     const module = device.createShaderModule({ code });
     const pipeline = device.createRenderPipeline({
       layout: 'auto',
@@ -210,6 +301,8 @@
   async function drawStripes() {
     try {
       renderStatic(await getGpu(), $('stripes'), shaders.STRIPES);
+      state.lastDrawAt = performance.now();
+      updateDrawAge();
     } catch (e) {
       logError('P0-2 stripes', e);
     }
@@ -225,6 +318,16 @@
     }
   }
 
+  // H4: 마지막 그리기 후 경과 초 표시. 선택 시점의 값을 edr.secondsSinceDraw로 기록한다.
+  function currentSecondsSinceDraw() {
+    return core.secondsSinceDraw(state.lastDrawAt, performance.now());
+  }
+
+  function updateDrawAge() {
+    const s = currentSecondsSinceDraw();
+    $('drawAge').textContent = s === null ? '-' : String(s);
+  }
+
   function buildStepUi() {
     const labels = $('stepLabels');
     const choices = $('stepChoices');
@@ -237,6 +340,9 @@
       radio.type = 'radio';
       radio.name = 'edrstep';
       radio.value = String(s);
+      radio.addEventListener('change', () => {
+        state.stepSecondsSinceDraw = currentSecondsSinceDraw();
+      });
       label.appendChild(radio);
       label.appendChild(
         document.createTextNode(s === 1.0 ? ' 1.0 (SDR white 위로 구분되는 단계 없음)' : ' ' + s),
@@ -270,6 +376,7 @@
       list.appendChild(fsBtn);
       list.appendChild(document.createElement('br'));
     }
+    $('btnMatrix').disabled = !core.MATRIX_FIXTURES.every((f) => state.fixtures[f]);
   }
 
   function setStatus(t) {
@@ -279,6 +386,8 @@
   function renderRunTable() {
     const cols = [
       'fixture',
+      'mode',
+      'layout',
       'itm',
       'srcRes',
       'canvasRes',
@@ -307,16 +416,33 @@
     return m ? Number(m[1]) : 60;
   }
 
-  async function runFixture(name, opts) {
-    if (state.running) return;
-    state.running = true;
+  function inFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function nextFrames() {
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+
+  // 1회 측정. opts = { mode: 'B0'|'B1'|'B2'|'B3'|'split', layout: 'overlay'|'split', itm } .
+  // 중단되면 null (run 기록 안 함). state.running 관리는 호출자가 한다.
+  async function runMeasurement(name, opts) {
+    const mode = opts.mode;
+    const layout = opts.layout;
+    const cfg =
+      mode === 'split' ? Object.assign({}, EDR_CFG, { itm: !!opts.itm }) : core.modeConfig(mode);
     const video = $('origVideo');
     const canvas = $('vidCanvas');
+    let ctx = null;
+    let querySet = null;
+    let resolveBuf = null;
+    let readBuf = null;
     try {
-      const gpu = await getGpu();
-      const device = gpu.device;
-      const itm = $('vmode').value === 'itm';
-      setStatus(name + ' 로딩...');
+      setStatus(name + ' ' + mode + ' 로딩...');
       video.src = '../fixtures/' + name + '.mp4';
       video.muted = true;
       video.playsInline = true;
@@ -324,43 +450,57 @@
         video.onloadedmetadata = resolve;
         video.onerror = () => reject(new Error('video 로드 실패'));
       });
+      if (state.aborted) return null;
       const srcW = video.videoWidth;
       const srcH = video.videoHeight;
-      const rect = video.getBoundingClientRect();
-      const res = core.canvasResolution(
-        srcW,
-        srcH,
-        rect.width,
-        rect.height,
-        globalThis.devicePixelRatio || 1,
-      );
-      canvas.width = res.width;
-      canvas.height = res.height;
-      const ctx = configureCanvas(canvas, device);
 
-      const module = device.createShaderModule({
-        code: itm ? shaders.VIDEO_ITM : shaders.VIDEO_IDENTITY,
-      });
-      const pipeline = device.createRenderPipeline({
-        layout: 'auto',
-        vertex: { module, entryPoint: 'vs' },
-        fragment: { module, entryPoint: 'fs', targets: [{ format: FORMAT }] },
-        primitive: { topology: 'triangle-list' },
-      });
-      const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-      let querySet = null;
-      let resolveBuf = null;
-      let readBuf = null;
-      if (gpu.timestamps) {
-        querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
-        resolveBuf = device.createBuffer({
-          size: 16,
-          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+      let gpu = null;
+      let device = null;
+      let pipeline = null;
+      let sampler = null;
+      let res = { width: canvas.width, height: canvas.height };
+      if (cfg.canvas) {
+        gpu = await getGpu();
+        device = gpu.device;
+        // B0에서 숨긴 캔버스를 다시 보이게 한 뒤 표시 크기를 잰다.
+        canvas.style.display = '';
+        const rect = video.getBoundingClientRect();
+        res = core.canvasResolution(
+          srcW,
+          srcH,
+          rect.width,
+          rect.height,
+          globalThis.devicePixelRatio || 1,
+        );
+        if (!res) throw new Error('캔버스 해상도 계산 실패 (표시 크기 0)');
+        canvas.width = res.width;
+        canvas.height = res.height;
+        ctx = configureCanvas(canvas, device, cfg);
+        const module = device.createShaderModule({
+          code: cfg.itm ? shaders.VIDEO_ITM : shaders.VIDEO_IDENTITY,
         });
-        readBuf = device.createBuffer({
-          size: 16,
-          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        pipeline = device.createRenderPipeline({
+          layout: 'auto',
+          vertex: { module, entryPoint: 'vs' },
+          fragment: { module, entryPoint: 'fs', targets: [{ format: cfg.format }] },
+          primitive: { topology: 'triangle-list' },
         });
+        sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+        if (gpu.timestamps) {
+          querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
+          resolveBuf = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+          });
+          readBuf = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+          });
+        }
+      } else {
+        // B0: 캔버스를 만들지 않는다. rVFC 콜백/presentedFrames만 기록한다.
+        canvas.style.display = 'none';
+        res = null;
       }
 
       // 콜백마다 1건. 워밍업 제외 집계는 core.windowStats가 한다.
@@ -368,58 +508,62 @@
       let frames = 0;
       let gpuBusy = false;
       let finished = false;
-      const fullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const fullscreen = inFullscreen();
       let wallStart = 0;
 
       const done = new Promise((resolve) => {
         const finish = () => {
           if (finished) return;
           finished = true;
+          state.cancel = null;
           resolve();
         };
+        state.cancel = finish;
         video.onended = finish;
         const onFrame = (now, meta) => {
           if (finished) return;
           try {
             const t0 = performance.now();
             if (frames === 0) wallStart = t0;
-            const sample = querySet && !gpuBusy && frames % GPU_SAMPLE_EVERY === 0;
-            const tex = device.importExternalTexture({ source: video });
-            const bind = device.createBindGroup({
-              layout: pipeline.getBindGroupLayout(0),
-              entries: [
-                { binding: 0, resource: sampler },
-                { binding: 1, resource: tex },
-              ],
-            });
-            const enc = device.createCommandEncoder();
-            const desc = {
-              colorAttachments: [
-                {
-                  view: ctx.getCurrentTexture().createView(),
-                  loadOp: 'clear',
-                  storeOp: 'store',
-                  clearValue: { r: 0, g: 0, b: 0, a: 1 },
-                },
-              ],
-            };
-            if (sample) {
-              desc.timestampWrites = {
-                querySet,
-                beginningOfPassWriteIndex: 0,
-                endOfPassWriteIndex: 1,
+            const sample = !!querySet && !gpuBusy && frames % GPU_SAMPLE_EVERY === 0;
+            if (cfg.canvas) {
+              const tex = device.importExternalTexture({ source: video });
+              const bind = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                  { binding: 0, resource: sampler },
+                  { binding: 1, resource: tex },
+                ],
+              });
+              const enc = device.createCommandEncoder();
+              const desc = {
+                colorAttachments: [
+                  {
+                    view: ctx.getCurrentTexture().createView(),
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                    clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                  },
+                ],
               };
+              if (sample) {
+                desc.timestampWrites = {
+                  querySet,
+                  beginningOfPassWriteIndex: 0,
+                  endOfPassWriteIndex: 1,
+                };
+              }
+              const pass = enc.beginRenderPass(desc);
+              pass.setPipeline(pipeline);
+              pass.setBindGroup(0, bind);
+              pass.draw(3);
+              pass.end();
+              if (sample) {
+                enc.resolveQuerySet(querySet, 0, 2, resolveBuf, 0);
+                enc.copyBufferToBuffer(resolveBuf, 0, readBuf, 0, 16);
+              }
+              device.queue.submit([enc.finish()]);
             }
-            const pass = enc.beginRenderPass(desc);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, bind);
-            pass.draw(3);
-            pass.end();
-            if (sample) {
-              enc.resolveQuerySet(querySet, 0, 2, resolveBuf, 0);
-              enc.copyBufferToBuffer(resolveBuf, 0, readBuf, 0, 16);
-            }
-            device.queue.submit([enc.finish()]);
             const rec = {
               t: t0,
               mediaTime: meta.mediaTime,
@@ -440,7 +584,7 @@
                 })
                 .catch((e) => {
                   gpuBusy = false;
-                  logError('gpu timestamp readback', e);
+                  if (!finished) logError('gpu timestamp readback', e);
                 });
             }
             frames++;
@@ -457,23 +601,25 @@
         video.requestVideoFrameCallback(onFrame);
       });
 
-      setStatus(name + ' 실행 중 (' + (itm ? 'ITM' : 'identity') + ')...');
+      setStatus(name + ' 실행 중 (' + mode + (cfg.itm ? ' ITM' : ' identity') + ')...');
       await video.play();
       await done;
+      if (state.aborted) return null;
       const wallSeconds = (performance.now() - wallStart) / 1000;
-      // 전체화면 여부는 run 종료 시점(자동 해제 전)에도 유지된 경우만 true로 기록한다.
-      const fullscreenEnd = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      // 전체화면 여부는 run 종료 시점에도 유지된 경우만 true로 기록한다.
+      const fullscreenEnd = inFullscreen();
       video.pause();
       const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
-      const fps = fixtureFps(name);
-      const win = core.windowStats(samples, { fps });
+      const win = core.windowStats(samples, { fps: fixtureFps(name) });
       const run = core.buildRun({
         fixture: name,
-        itm,
+        mode,
+        layout,
+        itm: cfg.itm,
         srcW,
         srcH,
-        canvasW: canvas.width,
-        canvasH: canvas.height,
+        canvasW: res ? res.width : null,
+        canvasH: res ? res.height : null,
         fullscreen: fullscreen && fullscreenEnd,
         frames,
         wallSeconds,
@@ -486,9 +632,32 @@
         gpuTimes: win.gpuTimes,
         videoQuality: q ? { dropped: q.droppedVideoFrames, total: q.totalVideoFrames } : null,
       });
-      state.perfRuns.push(run);
-      renderRunTable();
-      setStatus(name + ' 완료');
+      if (!gpuBusy) {
+        for (const b of [querySet, resolveBuf, readBuf]) if (b) b.destroy();
+      }
+      return run;
+    } finally {
+      state.cancel = null;
+      unconfigureCanvas(ctx);
+    }
+  }
+
+  // 기존 "창 실행" / "전체화면 측정" 경로 (좌우 분할, mode 'split').
+  async function runFixture(name, opts) {
+    if (state.running) return;
+    state.running = true;
+    state.aborted = false;
+    try {
+      const run = await runMeasurement(name, {
+        mode: 'split',
+        layout: 'split',
+        itm: $('vmode').value === 'itm',
+      });
+      if (run) {
+        state.perfRuns.push(run);
+        renderRunTable();
+        setStatus(name + ' 완료');
+      }
     } catch (e) {
       logError('P0-4 ' + name, e);
       setStatus(name + ' 실패: ' + (e && e.message ? e.message : e));
@@ -496,10 +665,6 @@
       state.running = false;
       if (opts && opts.autoExitFullscreen) exitFullscreen();
     }
-  }
-
-  function inFullscreen() {
-    return !!(document.fullscreenElement || document.webkitFullscreenElement);
   }
 
   function exitFullscreen() {
@@ -513,67 +678,163 @@
     }
   }
 
-  // 클릭 처리기 안에서 동기적으로 전체화면을 요청해야 사용자 제스처 요건을 충족한다.
-  // fullscreenchange 후 run을 자동 시작하고, run이 끝나면 자동 해제한다. 미검증(사용자 Mac).
+  // 클릭 처리기 안에서 동기적으로 호출해야 사용자 제스처 요건을 충족한다.
+  // fullscreenchange(진입)까지 기다리는 Promise. 3초 내 없으면 reject. 미검증(사용자 Mac).
+  function enterFullscreen(el) {
+    return new Promise((resolve, reject) => {
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!req) {
+        reject(new Error('requestFullscreen 없음'));
+        return;
+      }
+      let timer = null;
+      const cleanupListeners = () => {
+        clearTimeout(timer);
+        document.removeEventListener('fullscreenchange', onChange);
+        document.removeEventListener('webkitfullscreenchange', onChange);
+      };
+      const onChange = () => {
+        if (!inFullscreen()) return;
+        cleanupListeners();
+        resolve();
+      };
+      document.addEventListener('fullscreenchange', onChange);
+      document.addEventListener('webkitfullscreenchange', onChange);
+      timer = setTimeout(() => {
+        cleanupListeners();
+        reject(new Error('fullscreenchange 3초 내 없음'));
+      }, 3000);
+      try {
+        const p = req.call(el);
+        if (p && p.catch) {
+          p.catch((e) => {
+            cleanupListeners();
+            reject(e);
+          });
+        }
+      } catch (e) {
+        cleanupListeners();
+        reject(e);
+      }
+    });
+  }
+
   function runFixtureFullscreen(name) {
     if (state.running || state.pending) return;
-    const el = $('stage');
-    const req = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (!req) {
-      logError('fullscreen', new Error('requestFullscreen 없음'));
-      return;
-    }
     state.pending = true;
-    let timer = null;
-    const cleanup = () => {
-      clearTimeout(timer);
-      document.removeEventListener('fullscreenchange', onChange);
-      document.removeEventListener('webkitfullscreenchange', onChange);
+    enterFullscreen($('stage')).then(
+      // 전체화면 레이아웃이 반영된 뒤 캔버스 크기를 측정하도록 두 프레임 기다린다.
+      async () => {
+        state.pending = false;
+        await nextFrames();
+        runFixture(name, { autoExitFullscreen: true });
+      },
+      (e) => {
+        state.pending = false;
+        logError('fullscreen', e);
+        setStatus(name + ' 전체화면 진입 실패');
+      },
+    );
+  }
+
+  // H2: G3 진단 일괄 측정. 클릭 1회로 전체화면 진입 -> 8 run -> 해제.
+  function runMatrix() {
+    if (state.running || state.pending) return;
+    for (const f of core.MATRIX_FIXTURES) {
+      if (!state.fixtures[f]) {
+        setStatus('일괄 측정 불가: 픽스처 없음 (' + f + ')');
+        return;
+      }
+    }
+    const stage = $('stage');
+    state.pending = true;
+    stage.classList.add('overlay');
+    const p = enterFullscreen(stage);
+    p.then(
+      async () => {
+        state.pending = false;
+        await nextFrames();
+        await matrixLoop(stage);
+      },
+      (e) => {
+        state.pending = false;
+        stage.classList.remove('overlay');
+        logError('fullscreen', e);
+        setStatus('일괄 측정: 전체화면 진입 실패');
+      },
+    );
+  }
+
+  async function matrixLoop(stage) {
+    const plan = core.matrixPlan(core.MATRIX_FIXTURES);
+    const progress = $('matrixProgress');
+    const onFsChange = () => {
+      if (inFullscreen()) return;
+      state.aborted = true;
+      if (state.cancel) state.cancel();
     };
-    const onChange = () => {
-      if (!inFullscreen()) return;
-      cleanup();
-      state.pending = false;
-      // 전체화면 레이아웃이 반영된 뒤 캔버스 크기를 측정하도록 한 프레임 기다린다.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => runFixture(name, { autoExitFullscreen: true })),
-      );
-    };
-    document.addEventListener('fullscreenchange', onChange);
-    document.addEventListener('webkitfullscreenchange', onChange);
-    timer = setTimeout(() => {
-      cleanup();
-      state.pending = false;
-      logError('fullscreen', new Error('fullscreenchange 3초 내 없음'));
-      setStatus(name + ' 전체화면 진입 실패');
-    }, 3000);
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    state.running = true;
+    state.aborted = false;
+    let completed = 0;
+    progress.hidden = false;
     try {
-      const p = req.call(el);
-      if (p && p.catch) {
-        p.catch((e) => {
-          cleanup();
-          state.pending = false;
-          logError('fullscreen', e);
-          setStatus(name + ' 전체화면 진입 실패');
-        });
+      for (let i = 0; i < plan.length; i++) {
+        if (i > 0) await sleep(GAP_MS);
+        if (state.aborted) break;
+        const step = plan[i];
+        progress.textContent = core.progressText(i + 1, plan.length, step);
+        const run = await runMeasurement(step.fixture, { mode: step.mode, layout: 'overlay' });
+        if (!run) break;
+        state.perfRuns.push(run);
+        renderRunTable();
+        completed++;
       }
     } catch (e) {
-      cleanup();
-      state.pending = false;
-      logError('fullscreen', e);
+      logError('G3 일괄 측정', e);
+    } finally {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+      const interrupted = completed < plan.length;
+      progress.hidden = true;
+      state.running = false;
+      state.aborted = false;
+      releaseVideo($('origVideo'));
+      $('vidCanvas').style.display = '';
+      exitFullscreen();
+      stage.classList.remove('overlay');
+      setStatus(
+        interrupted
+          ? '일괄 측정 중단: 완료 ' + completed + ' / ' + plan.length + ' run만 기록'
+          : '일괄 측정 완료: ' + completed + ' / ' + plan.length,
+      );
     }
   }
 
   function updateG3Warning(env, runs) {
     const el = $('g3Warn');
-    el.textContent = core.hasG3Run(runs, env.power)
+    el.textContent = core.hasG3OverlayRun(runs, env.power)
       ? ''
-      : '경고: G3 조건(전원 연결 + 전체화면)을 만족하는 run이 없다. 전원 선택과 "전체화면 측정" 버튼 사용을 확인한다. (export는 진행됨)';
+      : '경고: G3 조건(전원 연결 + 전체화면 + overlay 배치)을 만족하는 run이 없다. 전원 선택과 "G3 진단 일괄 측정" 버튼 사용을 확인한다. (export는 진행됨)';
   }
 
   // ---------- export ----------
   async function exportJson() {
-    if (!state.api) await collectApi();
+    // H1-3: export는 GPU에 의존하지 않는다. api가 없으면 타임아웃 있는 collectApi를 1회 시도하고, 실패해도 진행한다.
+    if (!state.api) {
+      try {
+        await collectApi();
+      } catch (e) {
+        logError('export collectApi', e);
+      }
+    }
+    if (!state.api) {
+      state.api = core.buildFallbackApi(
+        state.errors.length > 0 ? state.errors[state.errors.length - 1] : 'api 수집 실패',
+        { secureContext: !!globalThis.isSecureContext, navigatorGpu: !!navigator.gpu },
+      );
+    }
     const step = document.querySelector('input[name=edrstep]:checked');
     const enc = document.querySelector('input[name=enc]:checked');
     const env = collectEnv();
@@ -590,6 +851,7 @@
         maxDistinctStep: step ? Number(step.value) : null,
         encodingMatch: enc ? enc.value : null,
         refHdrImage: $('refChoice').value,
+        secondsSinceDraw: step ? state.stepSecondsSinceDraw : null,
       },
       perfRuns: state.perfRuns,
       flags: { drm: false, hdrSource: false, fullscreen },
@@ -613,6 +875,7 @@
       drawPatches();
     });
     $('btnFixtures').addEventListener('click', checkFixtures);
+    $('btnMatrix').addEventListener('click', runMatrix);
     $('btnExport').addEventListener('click', () =>
       exportJson().catch((e) => logError('export', e)),
     );
@@ -623,7 +886,10 @@
       img.src = URL.createObjectURL(f);
       img.style.display = 'block';
     });
+    state.ageTimer = setInterval(updateDrawAge, 1000);
+    // GPU를 얻지 못했으면(타임아웃 등) 그리기를 시도하지 않는다. 오류는 배너에 표시된다.
     collectApi().then(() => {
+      if (!state.gpu) return;
       drawStripes();
       drawPatches();
     });
@@ -631,4 +897,9 @@
   }
 
   document.addEventListener('DOMContentLoaded', init);
+  window.addEventListener('pagehide', cleanup);
+  // bfcache 복원 시 자원이 정리된 상태이므로 새로 로드한다.
+  window.addEventListener('pageshow', (ev) => {
+    if (ev.persisted) location.reload();
+  });
 })();

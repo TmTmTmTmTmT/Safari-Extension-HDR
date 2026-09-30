@@ -237,20 +237,157 @@ test('isG3Run / hasG3Run: 전원 연결 + 전체화면', () => {
   assert.strictEqual(core.hasG3Run([], 'ac'), false);
 });
 
-test('g3Worst: G3 대상 run만 해상도별 최악값, 없으면 null', () => {
+const J = (x) => JSON.parse(JSON.stringify(x));
+const ov = (srcRes, mode, dropRate, jsP95, extra) =>
+  Object.assign(
+    { srcRes, mode, layout: 'overlay', fullscreen: true, dropRate, jsP95 },
+    extra || {},
+  );
+
+test('g3Summary: 해상도별 B0/B3 기준선 대비, overlay 전체화면 전원 연결 run만', () => {
   const runs = [
-    { srcRes: '1920x1080', fullscreen: true, dropRate: 0.01, jsP95: 1 },
-    { srcRes: '1920x1080', fullscreen: true, dropRate: 0.03, jsP95: 0.5 },
-    { srcRes: '1920x1080', fullscreen: false, dropRate: 0.9, jsP95: 9 },
-    { srcRes: '3840x2160', fullscreen: true, dropRate: null, jsP95: 2 },
+    ov('1920x1080', 'B0', 0.02, 0.1),
+    ov('1920x1080', 'B1', 0.05, 0.5),
+    ov('1920x1080', 'B3', 0.025, 1.5),
+    // 대상 아님: 창, split 배치
+    ov('1920x1080', 'B3', 0.9, 9, { fullscreen: false }),
+    ov('1920x1080', 'B3', 0.9, 9, { layout: 'split' }),
+    ov('3840x2160', 'B0', 0.1, 0.2),
+    ov('3840x2160', 'B2', 0.2, 1),
   ];
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(core.g3Worst(runs, 'ac'))), {
-    '1920x1080': { runs: 2, dropRateMax: 0.03, jsP95Max: 1 },
-    '3840x2160': { runs: 1, dropRateMax: null, jsP95Max: 2 },
+  assert.deepStrictEqual(J(core.g3Summary(runs, 'ac')), {
+    '1920x1080': { baselineDrop: 0.02, itmDrop: 0.025, delta: 0.005, jsP95Max: 1.5 },
+    '3840x2160': null,
   });
-  assert.strictEqual(core.g3Worst(runs, 'battery'), null);
-  assert.strictEqual(core.g3Worst([runs[2]], 'ac'), null);
-  assert.strictEqual(core.g3Worst([], 'ac'), null);
+  assert.strictEqual(core.g3Summary(runs, 'battery'), null);
+  assert.strictEqual(core.g3Summary([], 'ac'), null);
+  // v1/v2 형태(layout 없음)는 대상이 아니다
+  assert.strictEqual(core.g3Summary([{ srcRes: 'a', fullscreen: true, dropRate: 0 }], 'ac'), null);
+});
+
+test('g3Summary: 같은 모드 재실행은 마지막 run, dropRate null이면 delta null', () => {
+  const runs = [
+    ov('1920x1080', 'B0', 0.5, 1),
+    ov('1920x1080', 'B0', 0.01, 0.2),
+    ov('1920x1080', 'B3', null, 0.3),
+  ];
+  assert.deepStrictEqual(J(core.g3Summary(runs, 'ac')), {
+    '1920x1080': { baselineDrop: 0.01, itmDrop: null, delta: null, jsP95Max: 1 },
+  });
+  assert.strictEqual(core.hasG3OverlayRun(runs, 'ac'), true);
+  assert.strictEqual(core.hasG3OverlayRun([{ fullscreen: true }], 'ac'), false);
+});
+
+test('withTimeout: 통과, 원래 reject 전달, 시간 초과는 TimeoutError', async () => {
+  const timers = { setTimeout, clearTimeout };
+  assert.strictEqual(await core.withTimeout(Promise.resolve(7), 1000, 'x', timers), 7);
+  await assert.rejects(
+    core.withTimeout(Promise.reject(new Error('boom')), 1000, 'x', timers),
+    (e) => e.message === 'boom' && !core.isTimeoutError(e),
+  );
+  await assert.rejects(
+    core.withTimeout(new Promise(() => {}), 20, 'requestAdapter', timers),
+    (e) =>
+      e.name === 'TimeoutError' &&
+      core.isTimeoutError(e) &&
+      e.message.includes('requestAdapter') &&
+      e.message.includes('20ms'),
+  );
+  assert.strictEqual(core.GPU_TIMEOUT_MS, 5000);
+  assert.ok(core.GPU_HINT.includes('Safari를 종료 후 재시작'));
+});
+
+test('withTimeout: 완료되면 타이머를 해제한다', async () => {
+  const cleared = [];
+  const timers = {
+    setTimeout: () => 42,
+    clearTimeout: (id) => cleared.push(id),
+  };
+  await core.withTimeout(Promise.resolve(1), 1000, 'x', timers);
+  assert.deepStrictEqual(cleared, [42]);
+});
+
+test('matrixPlan: 픽스처별 B0->B1->B2->B3, 총 8 run', () => {
+  const plan = J(core.matrixPlan());
+  assert.strictEqual(plan.length, 8);
+  assert.deepStrictEqual(
+    plan.map((p) => p.fixture + ':' + p.mode),
+    [
+      'ramp-1080p60:B0',
+      'ramp-1080p60:B1',
+      'ramp-1080p60:B2',
+      'ramp-1080p60:B3',
+      'ramp-2160p60:B0',
+      'ramp-2160p60:B1',
+      'ramp-2160p60:B2',
+      'ramp-2160p60:B3',
+    ],
+  );
+  assert.deepStrictEqual(J(core.MODES), ['B0', 'B1', 'B2', 'B3']);
+  assert.strictEqual(core.progressText(3, 8, plan[2]), 'G3 진단 3 / 8 (ramp-1080p60 B2)');
+});
+
+test('modeConfig: B0 캔버스 없음, B1 bgra8unorm/srgb/toneMapping 없음, B2/B3 EDR, ITM은 B3만', () => {
+  assert.strictEqual(core.modeConfig('B0').canvas, false);
+  const b1 = core.modeConfig('B1');
+  assert.strictEqual(b1.format, 'bgra8unorm');
+  assert.strictEqual(b1.colorSpace, 'srgb');
+  assert.strictEqual(b1.toneMapping, null);
+  for (const m of ['B2', 'B3']) {
+    const c = core.modeConfig(m);
+    assert.strictEqual(c.format, 'rgba16float');
+    assert.strictEqual(c.colorSpace, 'display-p3');
+    assert.strictEqual(c.toneMapping.mode, 'extended');
+  }
+  assert.deepStrictEqual(J(core.MODES.map((m) => core.modeConfig(m).itm)), [
+    false,
+    false,
+    false,
+    true,
+  ]);
+  assert.strictEqual(core.modeConfig('split'), null);
+  // 사본이므로 변경이 원본에 영향 없음
+  core.modeConfig('B2').format = 'x';
+  assert.strictEqual(core.modeConfig('B2').format, 'rgba16float');
+});
+
+test('secondsSinceDraw: 정수 초, 음수 방지, 미기록은 null', () => {
+  assert.strictEqual(core.secondsSinceDraw(1000, 31999), 30);
+  assert.strictEqual(core.secondsSinceDraw(1000, 1000), 0);
+  assert.strictEqual(core.secondsSinceDraw(2000, 1000), 0);
+  assert.strictEqual(core.secondsSinceDraw(null, 1000), null);
+  assert.strictEqual(core.secondsSinceDraw(1000, NaN), null);
+});
+
+test('buildFallbackApi: GPU 없이도 스키마 필수 키 유지, 오류를 configure.error에 담음', () => {
+  const a = core.buildFallbackApi('requestAdapter 5000ms 초과', { navigatorGpu: true });
+  assert.strictEqual(a.configure.ok, false);
+  assert.strictEqual(a.configure.error, 'requestAdapter 5000ms 초과');
+  assert.strictEqual(a.navigatorGpu, true);
+  assert.strictEqual(a.getConfiguration.supported, false);
+  assert.strictEqual(a.mediaQueries.colorGamutP3, false);
+});
+
+test('buildRun: mode/layout 기본은 split, 지정값 기록', () => {
+  const d = core.buildRun({ fixture: 'x' });
+  assert.strictEqual(d.mode, 'split');
+  assert.strictEqual(d.layout, 'split');
+  const r = core.buildRun({ fixture: 'x', mode: 'B3', layout: 'overlay' });
+  assert.strictEqual(r.mode, 'B3');
+  assert.strictEqual(r.layout, 'overlay');
+  assert.strictEqual(core.buildRun({ fixture: 'x', mode: 'zzz', layout: 'q' }).mode, 'split');
+});
+
+test('buildResult: env.refreshRate, edr.secondsSinceDraw 기록(없으면 null)', () => {
+  const r = core.buildResult({
+    env: { refreshRate: 'promotion' },
+    edr: { maxDistinctStep: 3, secondsSinceDraw: 41 },
+  });
+  assert.strictEqual(r.env.refreshRate, 'promotion');
+  assert.strictEqual(r.edr.secondsSinceDraw, 41);
+  const e = core.buildResult({});
+  assert.strictEqual(e.env.refreshRate, null);
+  assert.strictEqual(e.edr.secondsSinceDraw, null);
 });
 
 test('deriveWindowMode: run의 실제 전체화면 상태에서 파생', () => {
@@ -286,19 +423,43 @@ test('buildResult: perf.g3와 env.windowMode 파생, 파일명 반영', () => {
     dropRate: 0.02,
     jsTimes: [1],
   });
+  const ovB0 = core.buildRun({
+    fixture: 'a',
+    mode: 'B0',
+    layout: 'overlay',
+    srcW: 1920,
+    srcH: 1080,
+    fullscreen: true,
+    dropRate: 0.02,
+    jsTimes: [1],
+  });
+  const ovB3 = core.buildRun({
+    fixture: 'a',
+    mode: 'B3',
+    layout: 'overlay',
+    srcW: 1920,
+    srcH: 1080,
+    fullscreen: true,
+    dropRate: 0.03,
+    jsTimes: [2],
+  });
   const ac = core.buildResult({
     now: '2026-09-30T00:00:00.000Z',
     env: { power: 'ac', sdrBrightness: 'mid', windowMode: 'window' },
-    perfRuns: [fsRun],
+    perfRuns: [fsRun, ovB0, ovB3],
   });
-  assert.strictEqual(core.SCHEMA_VERSION, 2);
+  assert.strictEqual(core.SCHEMA_VERSION, 3);
   assert.strictEqual(ac.env.windowMode, 'fullscreen');
-  assert.strictEqual(ac.perf.g3['1920x1080'].dropRateMax, 0.02);
+  assert.deepStrictEqual(J(ac.perf.g3), {
+    '1920x1080': { baselineDrop: 0.02, itmDrop: 0.03, delta: 0.01, jsP95Max: 2 },
+  });
   assert.strictEqual(
     core.resultFileName('2026-09-30', 'M1', ac.env),
     'result-M1-20260930-ac-mid-fullscreen.json',
   );
-  const bat = core.buildResult({ env: { power: 'battery' }, perfRuns: [fsRun] });
+  // split run만 있으면 v3 G3 대상이 없다
+  assert.strictEqual(core.buildResult({ env: { power: 'ac' }, perfRuns: [fsRun] }).perf.g3, null);
+  const bat = core.buildResult({ env: { power: 'battery' }, perfRuns: [fsRun, ovB0, ovB3] });
   assert.strictEqual(bat.perf.g3, null);
   assert.strictEqual(core.buildResult({}).perf.g3, null);
 });

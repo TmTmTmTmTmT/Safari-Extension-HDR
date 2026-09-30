@@ -107,9 +107,70 @@
       .err {
         color: #f88;
       }
+      [hidden] {
+        display: none !important;
+      }
+      #errBanner {
+        background: #6b1111;
+        border: 2px solid #f88;
+        color: #fff;
+        margin: 0 0 12px;
+        padding: 8px 12px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      #errBannerText {
+        margin: 4px 0 0;
+        max-height: 8em;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      /* H2 overlay 배치: video를 contain으로 채우고 같은 위치·크기로 캔버스를 겹친다. */
+      #stage.overlay {
+        aspect-ratio: 16 / 9;
+        display: block;
+        position: relative;
+        width: 100%;
+      }
+      #stage.overlay:fullscreen {
+        aspect-ratio: auto;
+        height: 100vh;
+        width: 100vw;
+      }
+      #stage.overlay:-webkit-full-screen {
+        aspect-ratio: auto;
+        height: 100vh;
+        width: 100vw;
+      }
+      #stage.overlay > video,
+      #stage.overlay > canvas {
+        height: 100%;
+        inset: 0;
+        object-fit: contain;
+        position: absolute;
+        width: 100%;
+      }
+      #stage > #matrixProgress {
+        background: rgba(0, 0, 0, 0.6);
+        color: #ccc;
+        font-size: 11px;
+        height: auto;
+        left: 4px;
+        padding: 1px 6px;
+        pointer-events: none;
+        position: absolute;
+        top: 4px;
+        width: auto;
+        z-index: 2;
+      }
     </style>
   </head>
   <body>
+    <div id="errBanner" role="alert" hidden>
+      <strong>오류 발생</strong>
+      <pre id="errBannerText"></pre>
+    </div>
     <h1>0a 프로브 (PLAN B절)</h1>
     <p class="note">
       localhost(secure context)에서 열어야 한다. 측정 조건(전원, SDR 밝기)을 바꿀 때마다 P0-2~P0-4를
@@ -142,6 +203,14 @@
             <option value="max">최대</option>
           </select>
         </label>
+        <label
+          >주사율
+          <select id="envRefresh">
+            <option value="">(선택)</option>
+            <option value="promotion">ProMotion(기본)</option>
+            <option value="60hz">60Hz</option>
+          </select>
+        </label>
       </div>
       <p>Safari 버전, UA, screen/DPR은 자동으로 기록한다.</p>
     </section>
@@ -164,6 +233,10 @@
       </div>
       <div class="labels" id="stepLabels"></div>
       <div class="opts" id="stepChoices"></div>
+      <p>
+        마지막 그리기 후 경과: <strong id="drawAge">-</strong>초. 밝기를 바꾼 뒤 30초 이상 기다린
+        다음, 다시 그리기를 누르지 말고 선택한다.
+      </p>
       <button id="btnStripes">다시 그리기</button>
       <p>
         참조 HDR 이미지(선택): 파일을 열어 같은 화면에서 줄무늬와 밝기를 비교한다.
@@ -223,9 +296,16 @@
         <button id="btnFixtures">픽스처 다시 확인</button>
       </div>
       <div id="fixtureList"></div>
+      <p>
+        <button id="btnMatrix" disabled>G3 진단 일괄 측정</button>
+        전체화면 overlay 배치(video 위 단일 캔버스)에서 ramp-1080p60, ramp-2160p60 각각 B0(video만)
+        → B1(SDR 캔버스) → B2(EDR identity) → B3(EDR ITM)를 자동 실행한다(총 8 run, run 사이 1초).
+        도중에 전체화면을 나가면 중단되고 완료된 run만 남는다. 전원 연결 + 밝기 중간에서 실행한다.
+      </p>
       <div id="stage">
         <video id="origVideo" muted playsinline></video>
         <canvas id="vidCanvas" width="16" height="9"></canvas>
+        <div id="matrixProgress" hidden></div>
       </div>
       <p id="runStatus">(대기)</p>
       <table id="runTable"></table>
