@@ -50,15 +50,15 @@
       "required": ["gpu", "adapter", "device", "configure", "configRead"],
       "properties": {
         "gpu": { "type": ["boolean", "null"] },
-        "adapter": {},
-        "device": {},
-        "configure": {},
+        "adapter": { "type": ["boolean", "null"] },
+        "device": { "type": ["boolean", "null"] },
+        "configure": { "type": ["boolean", "null"] },
         "configRead": {
           "type": ["object", "null"],
           "properties": {
             "format": { "type": ["string", "null"] },
             "colorSpace": { "type": ["string", "null"] },
-            "toneMapping": {}
+            "toneMapping": { "type": ["string", "null"] }
           }
         }
       }

@@ -15,6 +15,14 @@ if [ -e xcode ]; then
   exit 1
 fi
 
+# converter 자체가 없으면(xcode-select 가 Command Line Tools 를 가리키는 경우 등) 옵션 확인 전에 알린다.
+if ! xcrun --find safari-web-extension-converter >/dev/null 2>&1; then
+  echo "오류: safari-web-extension-converter 를 찾을 수 없습니다. Xcode 앱이 선택되지 않았을 수 있습니다." >&2
+  echo "  확인: xcode-select -p" >&2
+  echo "  변경: sudo xcode-select -s /Applications/<Xcode>.app/Contents/Developer" >&2
+  exit 1
+fi
+
 # 옵션 이름은 [2차] 정보이므로 --help 출력에 있는지 먼저 확인한다.
 help_out="$(xcrun safari-web-extension-converter --help 2>&1 || true)"
 missing=0
@@ -26,6 +34,8 @@ for opt in --project-location --app-name --bundle-identifier --macos-only --swif
 done
 if [ "$missing" -ne 0 ]; then
   echo "converter 옵션이 계획과 다릅니다. 실행을 중단합니다. 위 목록과 --help 출력을 Opus에 전달하세요." >&2
+  echo "--- converter --help (앞 40줄) ---" >&2
+  printf '%s\n' "$help_out" | head -n 40 >&2 || true
   exit 1
 fi
 
@@ -35,6 +45,9 @@ xcrun safari-web-extension-converter extension \
   --app-name SDRHDR \
   --bundle-identifier "$BUNDLE_ID" \
   --macos-only --swift --no-open --no-prompt
+
+echo "생성에 사용한 Xcode:"
+xcodebuild -version
 
 proj="$(find xcode -maxdepth 3 -name '*.xcodeproj' -type d | head -n 1)"
 if [ -z "$proj" ]; then

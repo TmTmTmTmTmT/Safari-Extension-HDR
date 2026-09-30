@@ -201,7 +201,8 @@
         }
       }, DIAG_INTERVAL_MS);
     } catch (e) {
-      // 시작 실패는 no-op (페이지 재생을 방해하지 않는다).
+      // 페이지 재생은 방해하지 않되 원인은 diag errors에 남긴다.
+      addError('main.start', e);
     }
   }
 

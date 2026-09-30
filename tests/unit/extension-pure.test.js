@@ -229,6 +229,40 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
   assert.deepStrictEqual(Object.keys(d.errors[0]), ['at', 'name', 'message']);
 });
 
+test('buildDiag: api 타입 확정 (boolean|null, toneMapping string|null) - L5', () => {
+  const api = (a) => plain(ns.hud.buildDiag({ api: a })).api;
+  // 문자열·객체가 들어와도 boolean으로 변환, toneMapping 객체는 mode 문자열로.
+  const d = api({
+    gpu: true,
+    adapter: { info: 1 },
+    device: {},
+    configure: 'ok',
+    configRead: { toneMapping: { mode: 'extended' } },
+  });
+  for (const k of ['adapter', 'device', 'configure']) assert.strictEqual(d[k], true, k);
+  assert.strictEqual(d.configRead.toneMapping, 'extended');
+  assert.strictEqual(
+    api({ configRead: { toneMapping: 'extended' } }).configRead.toneMapping,
+    'extended',
+  );
+  assert.strictEqual(api({ configRead: { toneMapping: {} } }).configRead.toneMapping, null);
+  // 시도 전은 null, 실패는 false.
+  const n = api({ adapter: null, device: undefined, configure: false });
+  assert.deepStrictEqual([n.adapter, n.device, n.configure], [null, null, false]);
+  const e = plain(ns.hud.buildDiag({}));
+  for (const k of ['adapter', 'device', 'configure']) assert.strictEqual(e.api[k], null, k);
+});
+
+test('buildDiag: 결과가 docs/result-schema-m2.json api 타입 선언과 일치', () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'result-schema-m2.json'), 'utf8'),
+  );
+  const p = schema.properties.api.properties;
+  for (const k of ['adapter', 'device', 'configure'])
+    assert.deepStrictEqual(p[k].type, ['boolean', 'null'], k);
+  assert.deepStrictEqual(p.configRead.properties.toneMapping.type, ['string', 'null']);
+});
+
 test('buildDiag: 빈 state에서도 모든 필드가 있고 값은 null/기본', () => {
   const d = plain(ns.hud.buildDiag({}));
   assert.strictEqual(d.page.url, null);

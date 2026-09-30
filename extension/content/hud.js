@@ -42,6 +42,13 @@
   }
 
   const orNull = (v) => (v === undefined ? null : v);
+  // M2 스키마 타입: api.adapter/device/configure는 boolean|null, configRead.toneMapping은 string|null.
+  const boolOrNull = (v) => (v === undefined || v === null ? null : !!v);
+  const strOrNull = (v) => {
+    if (typeof v === 'string') return v;
+    if (v && typeof v.mode === 'string') return v.mode;
+    return null;
+  };
 
   // 순수: M2-4 스키마 진단 객체. state의 누락 값은 null.
   function buildDiag(state) {
@@ -70,14 +77,14 @@
       },
       api: {
         gpu: orNull(api.gpu),
-        adapter: orNull(api.adapter),
-        device: orNull(api.device),
-        configure: orNull(api.configure),
+        adapter: boolOrNull(api.adapter),
+        device: boolOrNull(api.device),
+        configure: boolOrNull(api.configure),
         configRead: cfg
           ? {
               format: orNull(cfg.format),
               colorSpace: orNull(cfg.colorSpace),
-              toneMapping: orNull(cfg.toneMapping),
+              toneMapping: strOrNull(cfg.toneMapping),
             }
           : null,
       },

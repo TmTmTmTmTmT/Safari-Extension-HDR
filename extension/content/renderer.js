@@ -104,7 +104,11 @@
         api.configRead = {
           format: (c && c.format) || null,
           colorSpace: (c && c.colorSpace) || null,
-          toneMapping: c && c.toneMapping ? c.toneMapping.mode || null : null,
+          // 스키마: string|null. 구현에 따라 객체({mode})나 문자열일 수 있어 문자열로 정규화한다.
+          toneMapping:
+            c && typeof c.toneMapping === 'string'
+              ? c.toneMapping
+              : (c && c.toneMapping && c.toneMapping.mode) || null,
         };
       }
 
@@ -173,6 +177,8 @@
     }
 
     const onWake = () => kick();
+    // 일시정지로 attach된 경우 첫 프레임용 (FIX_GUIDE L4). 1회 구독이며 detach에서도 해제한다.
+    const onLoaded = () => kick();
     const onVisibility = () => {
       if (document.hidden) cancel();
       else kick();
@@ -188,13 +194,16 @@
         initPromise = init().catch((e) => fail(e, 'init'));
       }
       return initPromise.then(() => {
-        if (device && !destroyed && running) kick();
+        if (!device || destroyed || !running) return;
+        if (video.readyState >= 2) kick();
+        else video.addEventListener('loadeddata', onLoaded, { once: true });
       });
     }
 
     function removeListeners() {
       video.removeEventListener('play', onWake);
       video.removeEventListener('seeked', onWake);
+      video.removeEventListener('loadeddata', onLoaded);
       document.removeEventListener('visibilitychange', onVisibility);
     }
 

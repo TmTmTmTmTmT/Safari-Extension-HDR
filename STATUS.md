@@ -42,13 +42,13 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 우하단 움직이는 박스가 램프 마지막 100% 계단 패치 모서리를 일부 덮음
 - 3차에서 관측된 rVFC 초당 30회는 4차에 재현되지 않음(60Hz 53~56회/s). 원인 미확인, 누락은 여전히 11~32%라 결론 유지
 
+## Opus 판정 반영 (FIX_GUIDE L1~L6, 구현 완료 · 검증 대기)
+
+- Xcode 형식 불일치(사용자 Xcode-beta `project.xcproj` vs 러너 26.x)는 (d)로 결정됨(FIX_GUIDE 판정 요약)
+- L1 macos job: 러너 converter로 임시 프로젝트 생성 후 무서명 빌드, 커밋된 `project.xcproj`는 A16 검사만 · L2 make-xcode.sh 안내 · L6 ubuntu에 test:dom · L4 loadeddata 1회 렌더 · L5 진단 타입 확정 · L3 보류 항목 승인(코드 변경은 `main.start` 예외를 errors에 기록)
+- → verify: lint 통과, npm test 62/62, pytest sim 91/91 / (1). macOS 임시 프로젝트 빌드, WebKit DOM 3건은 PR CI 결과로 확인 / (2) 미확인. 일시정지 attach 첫 프레임·`getConfiguration().toneMapping` 실제 형태는 (3) 미검증
+
 ## Opus 확인 필요
-
-- make-xcode.sh 실행(2026-09-30 사용자 Mac, Xcode-beta): converter 옵션 확인 통과, `xcode/SDRHDR/SDRHDR.xcodeproj/`에 `project.pbxproj`가 아닌 `project.xcproj`(새 형식)가 생성됨. `xcodebuild -list` 성공(targets SDRHDR, SDRHDR Extension, scheme SDRHDR), `/Users/` 문자열 없음. 스크립트·CI의 A16 검사를 두 파일명 모두 허용하도록 임시 완화함. CI 결과(23f3af2): 러너 Xcode 26.6이 `project.xcproj`를 읽지 못함(`missing its project.pbxproj file`, exit 74). 러너에는 Xcode 26.2~26.6과 기본 Xcode.app만 있고 27 계열은 확인되지 않음(로그 하단만 확인) → 러너 측 선택(b)은 어려움. 후보: (a) Mac에서 안정판 Xcode 26.x로 `xcode/` 재생성(`Xcode.appdownload` 미완료, macOS 27.2에서 26.x 실행 가능 여부 미확인), (c) CI xcodebuild를 이 형식에서 건너뜀(A15 검증 약화). pbxproj 수기 변환은 GUIDELINES 7-5로 금지. 결정은 Opus
-
-- M2 구현 중 발견(코드 결정 보류): (a) main.js가 로드 시 접근 0을 지키려 `Promise.resolve().then(start)`로 시작(PLAN이 "유일한 부작용 시작점"과 "로드 시 접근 없음"을 함께 요구) (b) renderer에 `hooks.onFrame`, `getStats()` 추가, overlay가 video `loadedmetadata`/`resize` 구독 (c) 일시정지 상태 attach 시 `loadeddata` 미구독이라 첫 프레임이 play/seeked 전까지 안 그려짐 (d) 진단 값 형식 상세(`configRead.toneMapping`은 mode 문자열, 링 버퍼 600개 기준 통계)
-- M2 스키마 `api.adapter/device/configure` 타입 미정(현재 제한 없음), 체크리스트 파일명 표기(`ac`/`mid`/`1080p60`/`2160p60`/모드), make-xcode.sh 저장소 루트 판정(package.json·manifest·스크립트 존재), 절대경로 검출 시 rc=2
-- ci.yml ubuntu job이 test:dom을 실행하지 않음(WebKit 설치 필요). 추가 여부 결정
 
 - M4 프리셋 결정 자료(S10): 균형(P=3)은 밝기 최대(헤드룸 2)에서 하이라이트가 잘림. 결정 조건은 PLAN.md C절 '0a 헤드룸 제약'. 선명은 g>1이라 P=H에서도 잘림
 - S4/S5 기준 확정(균형·선명의 음수 채널·ΔE 목표, S5 스텝 증폭 기준, "정확"의 끝 기울기 f'(1)≈13)

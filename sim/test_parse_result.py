@@ -27,7 +27,7 @@ M2_SAMPLE = {
     "canvas": {"width": 1920, "height": 1080, "cssWidth": 960, "cssHeight": 540},
     "render": {"mode": "stripes", "frames": 321, "loopFps": 59.9, "jsP50": 0.4, "jsP95": 0.9},
     "flags": {"drm": False, "attached": True, "fullscreen": False},
-    "errors": [{"at": 1.5, "name": "TestError", "message": "sample"}],
+    "errors": [{"at": "render", "name": "TestError", "message": "sample"}],
 }
 
 
@@ -64,6 +64,28 @@ def test_m2_missing_required_key_fails(tmp_path):
     bad = copy.deepcopy(M2_SAMPLE)
     del bad["render"]
     r = run(write(tmp_path, "result-M2-bad.json", bad))
+    assert r.returncode == 1
+    assert "스키마 검증 실패" in r.stdout
+
+
+def test_m2_api_null_values_ok(tmp_path):
+    ok = copy.deepcopy(M2_SAMPLE)
+    ok["api"].update({"adapter": None, "device": None, "configure": None})
+    ok["api"]["configRead"]["toneMapping"] = None
+    r = run(write(tmp_path, "result-M2-null.json", ok))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "스키마 검증 실패" not in r.stdout
+
+
+def test_m2_api_wrong_types_fail(tmp_path):
+    bad = copy.deepcopy(M2_SAMPLE)
+    bad["api"]["adapter"] = {"info": "x"}
+    r = run(write(tmp_path, "result-M2-bad-adapter.json", bad))
+    assert r.returncode == 1
+    assert "스키마 검증 실패" in r.stdout
+    bad = copy.deepcopy(M2_SAMPLE)
+    bad["api"]["configRead"]["toneMapping"] = {"mode": "extended"}
+    r = run(write(tmp_path, "result-M2-bad-tm.json", bad))
     assert r.returncode == 1
     assert "스키마 검증 실패" in r.stdout
 
