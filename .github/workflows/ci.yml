@@ -20,3 +20,23 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: pytest sim
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode build (unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          proj="$(find xcode -maxdepth 3 -name '*.xcodeproj' -type d 2>/dev/null | head -n 1 || true)"
+          if [ -z "$proj" ]; then
+            echo "Xcode 프로젝트 없음(M2 사용자 단계 대기)"
+            exit 0
+          fi
+          xcodebuild -version
+          if grep -F -e "$PWD" -e "/Users/" "$proj/project.pbxproj"; then
+            echo "A16 실패: pbxproj에 절대경로가 있습니다."
+            exit 1
+          fi
+          xcodebuild -project "$proj" -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build

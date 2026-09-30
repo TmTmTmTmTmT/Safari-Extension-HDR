@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>SDR HDR</title>
+    <style>
+      body {
+        font:
+          13px -apple-system,
+          sans-serif;
+        width: 320px;
+        margin: 8px;
+      }
+      label {
+        display: block;
+        margin: 6px 0;
+      }
+      textarea {
+        width: 100%;
+        height: 160px;
+        font:
+          11px ui-monospace,
+          monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <label><input type="checkbox" id="enabled" /> 켜기</label>
+    <label
+      >모드
+      <select id="mode">
+        <option value="itm">itm</option>
+        <option value="identity">identity</option>
+        <option value="stripes">stripes</option>
+      </select>
+    </label>
+    <label
+      >진단 JSON
+      <textarea id="diag" readonly></textarea>
+    </label>
+    <button id="copy" type="button">복사</button>
+    <a id="save" download="sdrhdr-diag.json">JSON 저장</a>
+    <script src="../content/ns.js"></script>
+    <script src="../content/params.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

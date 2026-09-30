@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "SDR HDR",
+  "version": "0.1.0",
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "run_at": "document_idle",
+      "all_frames": false,
+      "js": [
+        "content/ns.js",
+        "content/detect.js",
+        "content/params.js",
+        "content/itm.wgsl.js",
+        "content/hud.js",
+        "content/renderer.js",
+        "content/overlay.js",
+        "content/main.js"
+      ]
+    }
+  ],
+  "permissions": ["storage"],
+  "action": { "default_popup": "popup/popup.html" }
+}

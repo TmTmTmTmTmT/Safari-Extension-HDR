@@ -10,6 +10,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_PATH = os.path.join(ROOT, "docs", "result-schema.json")
+SCHEMA_M2_PATH = os.path.join(ROOT, "docs", "result-schema-m2.json")
 
 _TYPES = {
     "object": dict,
@@ -280,6 +281,71 @@ def summarize(name, data):
     print("errors (%d)%s" % (len(errs), "".join("\n  - " + e for e in errs)))
 
 
+def summarize_m2(name, data):
+    """milestone 'M2' 진단 JSON의 값만 표로 출력한다. 판정하지 않는다."""
+    print("\n## %s" % name)
+    print("schemaVersion=%s extVersion=%s createdAt=%s" % (fmt(data.get("schemaVersion")), fmt(data.get("extVersion")), fmt(data.get("createdAt"))))
+    print("page: %s" % fmt(g(data, "page", "url")))
+    env = data.get("env") or {}
+    print("\nenv")
+    print(
+        table(
+            ["dpr", "screen.w", "screen.h", "dynamic-range:high", "color-gamut:p3"],
+            [[fmt(env.get("dpr")), fmt(g(env, "screen", "w")), fmt(g(env, "screen", "h")), fmt(env.get("dynamicRangeHigh")), fmt(env.get("colorGamutP3"))]],
+        )
+    )
+    print("ua: %s" % fmt(env.get("ua")))
+    api = data.get("api") or {}
+    print("\napi")
+    print(
+        table(
+            ["gpu", "adapter", "device", "configure", "configRead.format", "configRead.colorSpace", "configRead.toneMapping"],
+            [
+                [
+                    fmt(api.get("gpu")),
+                    fmt(api.get("adapter")),
+                    fmt(api.get("device")),
+                    fmt(api.get("configure")),
+                    fmt(g(api, "configRead", "format")),
+                    fmt(g(api, "configRead", "colorSpace")),
+                    fmt(g(api, "configRead", "toneMapping")),
+                ]
+            ],
+        )
+    )
+    video, canvas, render, flags = (data.get(k) or {} for k in ("video", "canvas", "render", "flags"))
+    print("\nvideo / canvas / render / flags")
+    print(
+        table(
+            ["videoWidth", "videoHeight", "srcIsBlob", "paused", "canvas.width", "canvas.height", "cssWidth", "cssHeight", "mode", "frames", "loopFps", "jsP50", "jsP95", "drm", "attached", "fullscreen"],
+            [
+                [
+                    fmt(video.get("videoWidth")),
+                    fmt(video.get("videoHeight")),
+                    fmt(video.get("srcIsBlob")),
+                    fmt(video.get("paused")),
+                    fmt(canvas.get("width")),
+                    fmt(canvas.get("height")),
+                    fmt(canvas.get("cssWidth")),
+                    fmt(canvas.get("cssHeight")),
+                    fmt(render.get("mode")),
+                    fmt(render.get("frames")),
+                    fmt(render.get("loopFps")),
+                    fmt(render.get("jsP50")),
+                    fmt(render.get("jsP95")),
+                    fmt(flags.get("drm")),
+                    fmt(flags.get("attached")),
+                    fmt(flags.get("fullscreen")),
+                ]
+            ],
+        )
+    )
+    errs = data.get("errors") or []
+    print("errors (%d)" % len(errs))
+    if errs:
+        print(table(["at", "name", "message"], [[fmt(e.get("at")), fmt(e.get("name")), fmt(e.get("message"))] for e in errs if isinstance(e, dict)]))
+
+
 def collect(args):
     paths = []
     for a in args or [os.path.join(ROOT, "results")]:
@@ -293,6 +359,8 @@ def collect(args):
 def main(argv):
     with open(SCHEMA_PATH, encoding="utf-8") as f:
         schema = json.load(f)
+    with open(SCHEMA_M2_PATH, encoding="utf-8") as f:
+        schema_m2 = json.load(f)
     paths = collect(argv[1:])
     if not paths:
         print("results/*.json 없음")
@@ -306,14 +374,15 @@ def main(argv):
             print("\n## %s\n읽기 실패: %s" % (p, e))
             bad += 1
             continue
-        problems = validate(data, schema)
+        is_m2 = isinstance(data, dict) and data.get("milestone") == "M2"
+        problems = validate(data, schema_m2 if is_m2 else schema)
         if problems:
             bad += 1
             print("\n## %s\n스키마 검증 실패 %d건" % (p, len(problems)))
             for m in problems:
                 print("  - " + m)
             continue
-        summarize(os.path.basename(p), data)
+        (summarize_m2 if is_m2 else summarize)(os.path.basename(p), data)
     return 1 if bad else 0
 
 

@@ -1,0 +1,242 @@
+'use strict';
+(function () {
+  const GPU_TIMEOUT_MS = 5000; // 프로브 H1과 같은 방식: 응답 없는 요청을 끊는다.
+  const RING = 600;
+  // GUIDELINES 2.5-3 고정 설정.
+  const FORMAT = 'rgba16float';
+  const COLOR_SPACE = 'display-p3';
+  const TONE_MAPPING = { mode: 'extended' };
+
+  function withTimeout(promise, ms, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label + ' 응답 없음 (' + ms + 'ms)')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  function push(ring, v) {
+    ring.push(v);
+    if (ring.length > RING) ring.shift();
+  }
+
+  // hooks.onFrame: 프레임마다 호출(DRM 저비용 검사용). getStats: 진단용 읽기 전용 스냅샷.
+  function createRenderer(canvas, video, onError, hooks) {
+    const onFrame = hooks && typeof hooks.onFrame === 'function' ? hooks.onFrame : null;
+    let mode = 'itm';
+    let running = false;
+    let destroyed = false;
+    let initPromise = null;
+    let device = null;
+    let ctx = null;
+    let sampler = null;
+    let pipelines = null;
+    let rafId = null;
+    let frames = 0;
+    const frameTimes = [];
+    const loopTs = [];
+    const api = { gpu: null, adapter: null, device: null, configure: null, configRead: null };
+
+    function fail(e, at) {
+      running = false;
+      cancel();
+      if (destroyed) return;
+      try {
+        onError(e, at);
+      } catch (err) {
+        // 콜백 오류가 재생을 방해하지 않게 한다.
+      }
+    }
+
+    function cancel() {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+
+    function kick() {
+      if (!running || destroyed || rafId !== null || document.hidden) return;
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function makePipeline(module) {
+      return device.createRenderPipeline({
+        layout: 'auto',
+        vertex: { module, entryPoint: 'vs' },
+        fragment: { module, entryPoint: 'fs', targets: [{ format: FORMAT }] },
+        primitive: { topology: 'triangle-list' },
+      });
+    }
+
+    async function init() {
+      api.gpu = !!navigator.gpu;
+      if (!api.gpu) throw Object.assign(new Error('navigator.gpu 없음'), { name: 'NoWebGPU' });
+      const adapter = await withTimeout(
+        navigator.gpu.requestAdapter(),
+        GPU_TIMEOUT_MS,
+        'requestAdapter',
+      );
+      api.adapter = !!adapter;
+      if (!adapter) throw new Error('requestAdapter()가 null');
+      device = await withTimeout(adapter.requestDevice(), GPU_TIMEOUT_MS, 'requestDevice');
+      api.device = true;
+      device.lost.then((info) => {
+        if (!destroyed)
+          fail(new Error('device.lost ' + info.reason + ' ' + info.message), 'device.lost');
+      });
+      device.addEventListener('uncapturederror', (ev) => fail(ev.error, 'uncapturederror'));
+      if (destroyed) return;
+
+      ctx = canvas.getContext('webgpu');
+      try {
+        ctx.configure({
+          device,
+          format: FORMAT,
+          colorSpace: COLOR_SPACE,
+          toneMapping: TONE_MAPPING,
+        });
+        api.configure = true;
+      } catch (e) {
+        api.configure = false;
+        throw e;
+      }
+      if (typeof ctx.getConfiguration === 'function') {
+        const c = ctx.getConfiguration();
+        api.configRead = {
+          format: (c && c.format) || null,
+          colorSpace: (c && c.colorSpace) || null,
+          toneMapping: c && c.toneMapping ? c.toneMapping.mode || null : null,
+        };
+      }
+
+      const shaders = globalThis.__sdrhdr.itm;
+      pipelines = {
+        stripes: makePipeline(device.createShaderModule({ code: shaders.STRIPES })),
+        identity: makePipeline(device.createShaderModule({ code: shaders.VIDEO_IDENTITY })),
+        itm: makePipeline(device.createShaderModule({ code: shaders.VIDEO_ITM })),
+      };
+      sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    }
+
+    // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
+    function renderOnce() {
+      const isVideo = mode !== 'stripes';
+      if (isVideo && video.readyState < 2) return false;
+      const pipeline = pipelines[mode];
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginRenderPass({
+        colorAttachments: [
+          {
+            view: ctx.getCurrentTexture().createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          },
+        ],
+      });
+      pass.setPipeline(pipeline);
+      if (isVideo) {
+        // 외부 텍스처는 재사용하지 않고 매번 import (GUIDELINES 2.5-1).
+        const tex = device.importExternalTexture({ source: video });
+        const bind = device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource: tex },
+          ],
+        });
+        pass.setBindGroup(0, bind);
+      }
+      pass.draw(3);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+      return true;
+    }
+
+    function tick(ts) {
+      rafId = null;
+      if (!running || destroyed) return;
+      const t0 = performance.now();
+      try {
+        if (renderOnce()) {
+          push(frameTimes, performance.now() - t0);
+          push(loopTs, ts);
+          frames += 1;
+        }
+      } catch (e) {
+        fail(e, 'render');
+        return;
+      }
+      if (onFrame) onFrame();
+      if (!running || destroyed) return;
+      // 재생 중일 때만 루프를 이어간다. 그 외에는 이번 1회 렌더 후 정지 (PLAN C절 렌더 루프).
+      if (!video.paused && !video.ended) kick();
+    }
+
+    const onWake = () => kick();
+    const onVisibility = () => {
+      if (document.hidden) cancel();
+      else kick();
+    };
+
+    function start() {
+      if (destroyed || running) return initPromise || Promise.resolve();
+      running = true;
+      video.addEventListener('play', onWake);
+      video.addEventListener('seeked', onWake);
+      document.addEventListener('visibilitychange', onVisibility);
+      if (!initPromise) {
+        initPromise = init().catch((e) => fail(e, 'init'));
+      }
+      return initPromise.then(() => {
+        if (device && !destroyed && running) kick();
+      });
+    }
+
+    function removeListeners() {
+      video.removeEventListener('play', onWake);
+      video.removeEventListener('seeked', onWake);
+      document.removeEventListener('visibilitychange', onVisibility);
+    }
+
+    function stop() {
+      running = false;
+      cancel();
+      removeListeners();
+    }
+
+    function setMode(next) {
+      if (next !== 'itm' && next !== 'identity' && next !== 'stripes') return;
+      mode = next;
+      // 정지 상태에서도 변경이 보이도록 1회 렌더.
+      if (device) kick();
+    }
+
+    function destroy() {
+      if (destroyed) return;
+      stop();
+      destroyed = true;
+      try {
+        if (ctx) ctx.unconfigure();
+        if (device) device.destroy();
+      } catch (e) {
+        // 정리 중 오류는 무시한다.
+      }
+    }
+
+    function getStats() {
+      return {
+        mode,
+        frames,
+        api: Object.assign({}, api, {
+          configRead: api.configRead && Object.assign({}, api.configRead),
+        }),
+        frameTimesMs: frameTimes.slice(),
+        loopTimestamps: loopTs.slice(),
+      };
+    }
+
+    return { start, stop, setMode, destroy, getStats };
+  }
+
+  globalThis.__sdrhdr.renderer = { createRenderer };
+})();

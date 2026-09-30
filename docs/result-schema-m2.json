@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "M2 extension diagnostic (PLAN.md D-M2 M2-4)",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "milestone",
+    "extVersion",
+    "createdAt",
+    "page",
+    "env",
+    "api",
+    "video",
+    "canvas",
+    "render",
+    "flags",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "milestone": { "type": "string", "enum": ["M2"] },
+    "extVersion": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "page": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "type": ["string", "null"], "description": "경로와 v 쿼리만. title 없음." }
+      }
+    },
+    "env": {
+      "type": "object",
+      "required": ["ua", "dpr", "screen", "dynamicRangeHigh", "colorGamutP3"],
+      "properties": {
+        "ua": { "type": ["string", "null"] },
+        "dpr": { "type": ["number", "null"] },
+        "screen": {
+          "type": ["object", "null"],
+          "properties": {
+            "w": { "type": ["number", "null"] },
+            "h": { "type": ["number", "null"] }
+          }
+        },
+        "dynamicRangeHigh": { "type": ["boolean", "null"] },
+        "colorGamutP3": { "type": ["boolean", "null"] }
+      }
+    },
+    "api": {
+      "type": "object",
+      "required": ["gpu", "adapter", "device", "configure", "configRead"],
+      "properties": {
+        "gpu": { "type": ["boolean", "null"] },
+        "adapter": {},
+        "device": {},
+        "configure": {},
+        "configRead": {
+          "type": ["object", "null"],
+          "properties": {
+            "format": { "type": ["string", "null"] },
+            "colorSpace": { "type": ["string", "null"] },
+            "toneMapping": {}
+          }
+        }
+      }
+    },
+    "video": {
+      "type": ["object", "null"],
+      "properties": {
+        "videoWidth": { "type": ["number", "null"] },
+        "videoHeight": { "type": ["number", "null"] },
+        "srcIsBlob": { "type": ["boolean", "null"] },
+        "paused": { "type": ["boolean", "null"] }
+      }
+    },
+    "canvas": {
+      "type": ["object", "null"],
+      "properties": {
+        "width": { "type": ["number", "null"] },
+        "height": { "type": ["number", "null"] },
+        "cssWidth": { "type": ["number", "null"] },
+        "cssHeight": { "type": ["number", "null"] }
+      }
+    },
+    "render": {
+      "type": "object",
+      "required": ["mode", "frames", "loopFps", "jsP50", "jsP95"],
+      "properties": {
+        "mode": { "type": ["string", "null"] },
+        "frames": { "type": ["number", "null"] },
+        "loopFps": { "type": ["number", "null"] },
+        "jsP50": { "type": ["number", "null"] },
+        "jsP95": { "type": ["number", "null"] }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "required": ["drm", "attached", "fullscreen"],
+      "properties": {
+        "drm": { "type": ["boolean", "null"] },
+        "attached": { "type": ["boolean", "null"] },
+        "fullscreen": { "type": ["boolean", "null"] }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["at", "name", "message"],
+        "properties": {
+          "at": {},
+          "name": { "type": ["string", "null"] },
+          "message": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}
