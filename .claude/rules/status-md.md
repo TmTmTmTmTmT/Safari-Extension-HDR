@@ -1,6 +1,6 @@
 ---
 paths:
-  - "**/STATUS.md"
+  - '**/STATUS.md'
 ---
 
 # STATUS.md 기록 규칙

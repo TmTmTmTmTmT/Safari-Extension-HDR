@@ -1,8 +1,8 @@
 ---
 paths:
-  - "**/PLAN.md"
-  - "**/GUIDELINES.md"
-  - "**/FIX_GUIDE.md"
+  - '**/PLAN.md'
+  - '**/GUIDELINES.md'
+  - '**/FIX_GUIDE.md'
 ---
 
 # 핸드오프 규칙
