@@ -238,44 +238,67 @@ test('isG3Run / hasG3Run: 전원 연결 + 전체화면', () => {
 });
 
 const J = (x) => JSON.parse(JSON.stringify(x));
-const ov = (srcRes, mode, dropRate, jsP95, extra) =>
+const ov = (srcRes, mode, missRate, jsP95, extra) =>
   Object.assign(
-    { srcRes, mode, layout: 'overlay', fullscreen: true, dropRate, jsP95 },
+    { srcRes, mode, layout: 'overlay', fullscreen: true, missRate, jsP95 },
     extra || {},
   );
 
-test('g3Summary: 해상도별 B0/B3 기준선 대비, overlay 전체화면 전원 연결 run만', () => {
+test('g3Summary: 해상도별 R0/R3 기준선 대비, overlay 전체화면 전원 연결 run만', () => {
   const runs = [
-    ov('1920x1080', 'B0', 0.02, 0.1),
-    ov('1920x1080', 'B1', 0.05, 0.5),
-    ov('1920x1080', 'B3', 0.025, 1.5),
+    ov('1920x1080', 'R0', 0.02, 0.1, { gpuMs: null }),
+    ov('1920x1080', 'R2', 0.05, 0.5, { gpuMs: 0.8 }),
+    ov('1920x1080', 'R3', 0.025, 1.5, { loopFps: 60.1, videoPresentedFps: 59.8, gpuMs: 1.2 }),
+    ov('1920x1080', 'V3', 0.48, 0.9, { gpuMs: 1.0 }),
     // 대상 아님: 창, split 배치
-    ov('1920x1080', 'B3', 0.9, 9, { fullscreen: false }),
-    ov('1920x1080', 'B3', 0.9, 9, { layout: 'split' }),
-    ov('3840x2160', 'B0', 0.1, 0.2),
-    ov('3840x2160', 'B2', 0.2, 1),
+    ov('1920x1080', 'R3', 0.9, 9, { fullscreen: false }),
+    ov('1920x1080', 'R3', 0.9, 9, { layout: 'split' }),
+    ov('3840x2160', 'R0', 0.1, 0.2),
+    ov('3840x2160', 'R2', 0.2, 1),
   ];
   assert.deepStrictEqual(J(core.g3Summary(runs, 'ac')), {
-    '1920x1080': { baselineDrop: 0.02, itmDrop: 0.025, delta: 0.005, jsP95Max: 1.5 },
+    '1920x1080': {
+      baselineMiss: 0.02,
+      itmMiss: 0.025,
+      delta: 0.005,
+      rvfcMiss: 0.48,
+      loopFps: 60.1,
+      videoPresentedFps: 59.8,
+      jsP95Max: 1.5,
+      gpuMsMax: 1.2,
+    },
     '3840x2160': null,
   });
   assert.strictEqual(core.g3Summary(runs, 'battery'), null);
   assert.strictEqual(core.g3Summary([], 'ac'), null);
   // v1/v2 형태(layout 없음)는 대상이 아니다
-  assert.strictEqual(core.g3Summary([{ srcRes: 'a', fullscreen: true, dropRate: 0 }], 'ac'), null);
+  assert.strictEqual(core.g3Summary([{ srcRes: 'a', fullscreen: true, missRate: 0 }], 'ac'), null);
 });
 
-test('g3Summary: 같은 모드 재실행은 마지막 run, dropRate null이면 delta null', () => {
+test('g3Summary: 같은 모드 재실행은 마지막 run, missRate null이면 delta null, V3 없으면 rvfcMiss null', () => {
   const runs = [
-    ov('1920x1080', 'B0', 0.5, 1),
-    ov('1920x1080', 'B0', 0.01, 0.2),
-    ov('1920x1080', 'B3', null, 0.3),
+    ov('1920x1080', 'R0', 0.5, 1),
+    ov('1920x1080', 'R0', 0.01, 0.2),
+    ov('1920x1080', 'R3', null, 0.3),
   ];
   assert.deepStrictEqual(J(core.g3Summary(runs, 'ac')), {
-    '1920x1080': { baselineDrop: 0.01, itmDrop: null, delta: null, jsP95Max: 1 },
+    '1920x1080': {
+      baselineMiss: 0.01,
+      itmMiss: null,
+      delta: null,
+      rvfcMiss: null,
+      loopFps: null,
+      videoPresentedFps: null,
+      jsP95Max: 1,
+      gpuMsMax: null,
+    },
   });
   assert.strictEqual(core.hasG3OverlayRun(runs, 'ac'), true);
   assert.strictEqual(core.hasG3OverlayRun([{ fullscreen: true }], 'ac'), false);
+  // v3 모드(B0/B3)만 있으면 v4 요약은 해당 해상도 null
+  assert.deepStrictEqual(J(core.g3Summary([ov('a', 'B0', 0), ov('a', 'B3', 0)], 'ac')), {
+    a: null,
+  });
 });
 
 test('withTimeout: 통과, 원래 reject 전달, 시간 초과는 TimeoutError', async () => {
@@ -307,33 +330,35 @@ test('withTimeout: 완료되면 타이머를 해제한다', async () => {
   assert.deepStrictEqual(cleared, [42]);
 });
 
-test('matrixPlan: 픽스처별 B0->B1->B2->B3, 총 8 run', () => {
+test('matrixPlan: 픽스처별 R0->R2->R3->V3, 총 8 run (B1 제외)', () => {
   const plan = J(core.matrixPlan());
   assert.strictEqual(plan.length, 8);
   assert.deepStrictEqual(
     plan.map((p) => p.fixture + ':' + p.mode),
     [
-      'ramp-1080p60:B0',
-      'ramp-1080p60:B1',
-      'ramp-1080p60:B2',
-      'ramp-1080p60:B3',
-      'ramp-2160p60:B0',
-      'ramp-2160p60:B1',
-      'ramp-2160p60:B2',
-      'ramp-2160p60:B3',
+      'ramp-1080p60:R0',
+      'ramp-1080p60:R2',
+      'ramp-1080p60:R3',
+      'ramp-1080p60:V3',
+      'ramp-2160p60:R0',
+      'ramp-2160p60:R2',
+      'ramp-2160p60:R3',
+      'ramp-2160p60:V3',
     ],
   );
-  assert.deepStrictEqual(J(core.MODES), ['B0', 'B1', 'B2', 'B3']);
-  assert.strictEqual(core.progressText(3, 8, plan[2]), 'G3 진단 3 / 8 (ramp-1080p60 B2)');
+  assert.deepStrictEqual(J(core.MODES), ['R0', 'R2', 'R3', 'V3']);
+  assert.ok(!plan.some((p) => p.mode === 'B1'));
+  assert.strictEqual(core.progressText(3, 8, plan[2]), 'G3 진단 3 / 8 (ramp-1080p60 R3)');
 });
 
-test('modeConfig: B0 캔버스 없음, B1 bgra8unorm/srgb/toneMapping 없음, B2/B3 EDR, ITM은 B3만', () => {
+test('modeConfig: R0 캔버스 없음(raf), R2/R3 raf + EDR, V3 rvfc + EDR ITM, B1 코드는 유지', () => {
+  assert.strictEqual(core.modeConfig('R0').canvas, false);
   assert.strictEqual(core.modeConfig('B0').canvas, false);
   const b1 = core.modeConfig('B1');
   assert.strictEqual(b1.format, 'bgra8unorm');
   assert.strictEqual(b1.colorSpace, 'srgb');
   assert.strictEqual(b1.toneMapping, null);
-  for (const m of ['B2', 'B3']) {
+  for (const m of ['R2', 'R3', 'V3', 'B2', 'B3']) {
     const c = core.modeConfig(m);
     assert.strictEqual(c.format, 'rgba16float');
     assert.strictEqual(c.colorSpace, 'display-p3');
@@ -342,13 +367,27 @@ test('modeConfig: B0 캔버스 없음, B1 bgra8unorm/srgb/toneMapping 없음, B2
   assert.deepStrictEqual(J(core.MODES.map((m) => core.modeConfig(m).itm)), [
     false,
     false,
+    true,
+    true,
+  ]);
+  assert.deepStrictEqual(J(core.MODES.map((m) => core.modeConfig(m).driver)), [
+    'raf',
+    'raf',
+    'raf',
+    'rvfc',
+  ]);
+  assert.deepStrictEqual(J(core.LEGACY_MODES.map((m) => core.modeConfig(m).itm)), [
+    false,
+    false,
     false,
     true,
   ]);
   assert.strictEqual(core.modeConfig('split'), null);
   // 사본이므로 변경이 원본에 영향 없음
-  core.modeConfig('B2').format = 'x';
-  assert.strictEqual(core.modeConfig('B2').format, 'rgba16float');
+  core.modeConfig('R2').format = 'x';
+  core.modeConfig('R2').toneMapping.mode = 'x';
+  assert.strictEqual(core.modeConfig('R2').format, 'rgba16float');
+  assert.strictEqual(core.modeConfig('R2').toneMapping.mode, 'extended');
 });
 
 test('secondsSinceDraw: 정수 초, 음수 방지, 미기록은 null', () => {
@@ -376,6 +415,31 @@ test('buildRun: mode/layout 기본은 split, 지정값 기록', () => {
   assert.strictEqual(r.mode, 'B3');
   assert.strictEqual(r.layout, 'overlay');
   assert.strictEqual(core.buildRun({ fixture: 'x', mode: 'zzz', layout: 'q' }).mode, 'split');
+  for (const m of ['R0', 'R2', 'R3', 'V3', 'B1']) {
+    assert.strictEqual(core.buildRun({ fixture: 'x', mode: m }).mode, m);
+  }
+});
+
+test('buildRun: driver 기본 rvfc, missRate/loopFps/videoPresentedFps 기록', () => {
+  const d = core.buildRun({ fixture: 'x' });
+  assert.strictEqual(d.driver, 'rvfc');
+  assert.strictEqual(d.missRate, null);
+  assert.strictEqual(d.loopFps, null);
+  assert.strictEqual(d.videoPresentedFps, null);
+  const r = core.buildRun({
+    fixture: 'x',
+    driver: 'raf',
+    missRate: 0.123456,
+    loopFps: 59.987,
+    videoPresentedFps: 55.5555,
+  });
+  assert.strictEqual(r.driver, 'raf');
+  assert.strictEqual(r.missRate, 0.12346);
+  assert.strictEqual(r.loopFps, 59.99);
+  assert.strictEqual(r.videoPresentedFps, 55.56);
+  assert.strictEqual(core.buildRun({ fixture: 'x', driver: 'zz' }).driver, 'rvfc');
+  // 기존 필드 유지
+  assert.ok('dropRate' in r && 'dropRatePresented' in r);
 });
 
 test('buildResult: env.refreshRate, edr.secondsSinceDraw 기록(없으면 null)', () => {
@@ -423,45 +487,140 @@ test('buildResult: perf.g3와 env.windowMode 파생, 파일명 반영', () => {
     dropRate: 0.02,
     jsTimes: [1],
   });
-  const ovB0 = core.buildRun({
-    fixture: 'a',
-    mode: 'B0',
-    layout: 'overlay',
-    srcW: 1920,
-    srcH: 1080,
-    fullscreen: true,
-    dropRate: 0.02,
-    jsTimes: [1],
-  });
-  const ovB3 = core.buildRun({
-    fixture: 'a',
-    mode: 'B3',
-    layout: 'overlay',
-    srcW: 1920,
-    srcH: 1080,
-    fullscreen: true,
-    dropRate: 0.03,
-    jsTimes: [2],
-  });
+  const mk = (mode, driver, missRate, js) =>
+    core.buildRun({
+      fixture: 'a',
+      mode,
+      driver,
+      layout: 'overlay',
+      srcW: 1920,
+      srcH: 1080,
+      fullscreen: true,
+      missRate,
+      loopFps: 60,
+      videoPresentedFps: 58,
+      jsTimes: [js],
+      gpuTimes: [js / 2],
+    });
+  const r0 = mk('R0', 'raf', 0.02, 1);
+  const r3 = mk('R3', 'raf', 0.03, 2);
+  const v3 = mk('V3', 'rvfc', 0.5, 2);
   const ac = core.buildResult({
     now: '2026-09-30T00:00:00.000Z',
     env: { power: 'ac', sdrBrightness: 'mid', windowMode: 'window' },
-    perfRuns: [fsRun, ovB0, ovB3],
+    perfRuns: [fsRun, r0, r3, v3],
+    visualJudder: 'sometimes',
   });
-  assert.strictEqual(core.SCHEMA_VERSION, 3);
+  assert.strictEqual(core.SCHEMA_VERSION, 4);
+  assert.strictEqual(ac.schemaVersion, 4);
   assert.strictEqual(ac.env.windowMode, 'fullscreen');
+  assert.strictEqual(ac.perf.visualJudder, 'sometimes');
   assert.deepStrictEqual(J(ac.perf.g3), {
-    '1920x1080': { baselineDrop: 0.02, itmDrop: 0.03, delta: 0.01, jsP95Max: 2 },
+    '1920x1080': {
+      baselineMiss: 0.02,
+      itmMiss: 0.03,
+      delta: 0.01,
+      rvfcMiss: 0.5,
+      loopFps: 60,
+      videoPresentedFps: 58,
+      jsP95Max: 2,
+      gpuMsMax: 1,
+    },
   });
   assert.strictEqual(
     core.resultFileName('2026-09-30', 'M1', ac.env),
     'result-M1-20260930-ac-mid-fullscreen.json',
   );
-  // split run만 있으면 v3 G3 대상이 없다
+  // split run만 있으면 G3 대상이 없다
   assert.strictEqual(core.buildResult({ env: { power: 'ac' }, perfRuns: [fsRun] }).perf.g3, null);
-  const bat = core.buildResult({ env: { power: 'battery' }, perfRuns: [fsRun, ovB0, ovB3] });
+  const bat = core.buildResult({ env: { power: 'battery' }, perfRuns: [fsRun, r0, r3] });
   assert.strictEqual(bat.perf.g3, null);
   assert.strictEqual(core.buildResult({}).perf.g3, null);
+  // 끊김 질문 미응답/잘못된 값은 null
+  assert.strictEqual(core.buildResult({}).perf.visualJudder, null);
+  assert.strictEqual(core.buildResult({ visualJudder: 'x' }).perf.visualJudder, null);
+  assert.strictEqual(core.normalizeJudder(''), null);
+  assert.deepStrictEqual(J(core.JUDDER_VALUES), ['none', 'sometimes', 'often']);
+});
+
+// ---------- J2: missRate ----------
+const times = (n, stepMs, offsetMs) => Array.from({ length: n }, (_, i) => offsetMs + i * stepMs);
+
+test('missRate: 규칙적 60Hz 렌더는 60fps 소스에서 0', () => {
+  near(core.missRate(times(600, 1000 / 60, 0), 0, 10000, 60), 0);
+  // 슬롯 중앙에 놓여도 0
+  near(core.missRate(times(600, 1000 / 60, 1000 / 120), 0, 10000, 60), 0);
+});
+
+test('missRate: 30Hz 렌더는 60fps 소스에서 0.5', () => {
+  near(core.missRate(times(300, 1000 / 30, 0), 0, 10000, 60), 0.5);
+});
+
+test('missRate: 120Hz 렌더는 0 (한 슬롯에 2회 렌더돼도 누락 아님)', () => {
+  near(core.missRate(times(1200, 1000 / 120, 0), 0, 10000, 60), 0);
+});
+
+test('missRate: 3프레임 공백 1회 -> 3/60', () => {
+  const t = times(60, 1000 / 60, 1000 / 120).filter((_, i) => i < 10 || i > 12);
+  assert.strictEqual(t.length, 57);
+  near(core.missRate(t, 0, 1000, 60), 3 / 60);
+});
+
+test('missRate: 창 시작이 0이 아니어도 동일, 창 밖 시각은 무시, 끝의 불완전 슬롯은 버림', () => {
+  const t = times(60, 1000 / 60, 5000 + 1000 / 120).concat([100, 99999]);
+  near(core.missRate(t, 5000, 6000, 60), 0);
+  // 창 1000.5ms = 슬롯 60개 + 불완전 0.5ms
+  near(core.missRate(t, 5000, 6000.5, 60), 0);
+});
+
+test('missRate: 렌더 시각이 없으면 1, 잘못된 입력/슬롯 없음은 null', () => {
+  near(core.missRate([], 0, 1000, 60), 1);
+  assert.strictEqual(core.missRate(null, 0, 1000, 60), null);
+  assert.strictEqual(core.missRate([1], 0, 1000, 0), null);
+  assert.strictEqual(core.missRate([1], 1000, 1000, 60), null);
+  assert.strictEqual(core.missRate([1], 0, 10, 60), null);
+  assert.strictEqual(core.missRate([1], NaN, 1000, 60), null);
+});
+
+test('runStats: 구동 60Hz raf + 관측 rVFC 30회/s (Safari A20 형태)', () => {
+  const loop = Array.from({ length: 840 }, (_, i) => ({
+    t: 1000 + i * (1000 / 60),
+    js: 1,
+    gpu: i === 300 ? 0.5 : null,
+  }));
+  const obs = Array.from({ length: 420 }, (_, j) => ({
+    t: 1000 + j * (1000 / 30),
+    mediaTime: j / 30,
+    presented: 2 * j,
+  }));
+  const st = core.runStats(loop, obs, { fps: 60 });
+  assert.strictEqual(st.warmupSec, 1);
+  assert.ok(Math.abs(st.loopFps - 60) < 0.2, String(st.loopFps));
+  assert.ok(Math.abs(st.videoPresentedFps - 60) < 0.5, String(st.videoPresentedFps));
+  assert.ok(st.missRate < 0.01, String(st.missRate));
+  // 관측 rVFC 콜백은 표시 프레임의 절반 -> 기존 지표는 약 0.5로 유지 계산
+  assert.ok(Math.abs(st.dropRate - 0.5) < 0.01, String(st.dropRate));
+  near(st.dropRatePresented, 0.5, 0.01);
+  assert.ok(st.windowSec > 9.9 && st.windowSec <= 10.01);
+  assert.deepStrictEqual(Array.from(st.gpuTimes), [0.5]);
+  assert.ok(st.jsTimes.every((v) => v === 1));
+});
+
+test('runStats: 30Hz 구동 루프는 missRate 0.5, 캔버스 없어도 콜백 시각으로 계산', () => {
+  const loop = Array.from({ length: 420 }, (_, i) => ({ t: 500 + i * (1000 / 30), js: 0.1 }));
+  const st = core.runStats(loop, [], { fps: 60 });
+  assert.ok(Math.abs(st.missRate - 0.5) < 0.01, String(st.missRate));
+  assert.ok(Math.abs(st.loopFps - 30) < 0.1);
+  assert.strictEqual(st.videoPresentedFps, null);
+  assert.strictEqual(st.dropRate, null);
+});
+
+test('runStats: 빈 입력은 null 집계', () => {
+  const st = core.runStats([], [], { fps: 60 });
+  assert.strictEqual(st.frames, 0);
+  assert.strictEqual(st.missRate, null);
+  assert.strictEqual(st.loopFps, null);
+  assert.deepStrictEqual(Array.from(st.jsTimes), []);
 });
 
 test('resultFileName', () => {

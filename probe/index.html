@@ -164,6 +164,23 @@
         width: auto;
         z-index: 2;
       }
+      #stage > #judderPrompt {
+        background: rgba(0, 0, 0, 0.75);
+        color: #eee;
+        height: auto;
+        left: 50%;
+        padding: 16px 24px;
+        position: absolute;
+        text-align: center;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: auto;
+        z-index: 3;
+      }
+      #judderPrompt button {
+        font-size: 18px;
+        margin: 8px 6px 0;
+      }
     </style>
   </head>
   <body>
@@ -298,15 +315,34 @@
       <div id="fixtureList"></div>
       <p>
         <button id="btnMatrix" disabled>G3 진단 일괄 측정</button>
-        전체화면 overlay 배치(video 위 단일 캔버스)에서 ramp-1080p60, ramp-2160p60 각각 B0(video만)
-        → B1(SDR 캔버스) → B2(EDR identity) → B3(EDR ITM)를 자동 실행한다(총 8 run, run 사이 1초).
+        전체화면 overlay 배치(video 위 단일 캔버스)에서 ramp-1080p60, ramp-2160p60 각각 R0(rAF
+        루프만, 캔버스 없음) → R2(rAF + EDR identity) → R3(rAF + EDR ITM) → V3(rVFC + EDR ITM,
+        비교용)를 자동 실행한다(총 8 run, run 사이 1초). 끝나면 전체화면 안에서 끊김 질문이 뜬다.
         도중에 전체화면을 나가면 중단되고 완료된 run만 남는다. 전원 연결 + 밝기 중간에서 실행한다.
       </p>
       <div id="stage">
         <video id="origVideo" muted playsinline></video>
         <canvas id="vidCanvas" width="16" height="9"></canvas>
         <div id="matrixProgress" hidden></div>
+        <div id="judderPrompt" hidden>
+          <div>R3 실행 중 우하단 움직이는 박스가 끊겼나?</div>
+          <button type="button" data-judder="none">없음</button>
+          <button type="button" data-judder="sometimes">가끔</button>
+          <button type="button" data-judder="often">자주</button>
+        </div>
       </div>
+      <p>
+        <label
+          >끊김(R3 실행 중 우하단 움직이는 박스)
+          <select id="judderChoice">
+            <option value="">(선택 안 함)</option>
+            <option value="none">없음</option>
+            <option value="sometimes">가끔</option>
+            <option value="often">자주</option>
+          </select>
+        </label>
+        전체화면 안 질문에 답하지 못했으면 여기서 고른다.
+      </p>
       <p id="runStatus">(대기)</p>
       <table id="runTable"></table>
     </section>

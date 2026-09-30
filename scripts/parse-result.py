@@ -84,7 +84,8 @@ def is_g3_run(run, power):
     return power == "ac" and run.get("fullscreen") is True
 
 
-MODES = ["B0", "B1", "B2", "B3"]
+MODES = ["R0", "R2", "R3", "V3"]  # v4 매트릭스 모드
+LEGACY_MODES = ["B0", "B1", "B2", "B3"]  # v3 이하 파일의 모드
 
 
 def is_g3_overlay_run(run, power):
@@ -100,59 +101,94 @@ def latest_by_mode(runs):
     return out
 
 
+def _num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _max(vs):
+    vs = [v for v in vs if _num(v)]
+    return max(vs) if vs else None
+
+
 def g3_summary(runs, power):
-    """{srcRes: {baselineDrop, itmDrop, delta, jsP95Max} | None}. 값만 계산하고 판정하지 않는다."""
+    """v4 {srcRes: {baselineMiss, itmMiss, delta, rvfcMiss, loopFps, videoPresentedFps, jsP95Max, gpuMsMax} | None}.
+    R0 또는 R3가 없으면 None. 값만 계산하고 판정하지 않는다."""
+    targets = [r for r in runs if is_g3_overlay_run(r, power)]
+    res = {}
+    for key, by_mode in sorted(latest_by_mode(targets).items()):
+        r0, r3, v3 = by_mode.get("R0"), by_mode.get("R3"), by_mode.get("V3")
+        if not r0 or not r3:
+            res[key] = None
+            continue
+        m0, m3 = r0.get("missRate"), r3.get("missRate")
+        same = [r for r in targets if (r.get("srcRes") or "unknown") == key]
+        res[key] = {
+            "baselineMiss": m0 if _num(m0) else None,
+            "itmMiss": m3 if _num(m3) else None,
+            "delta": round(m3 - m0, 5) if _num(m0) and _num(m3) else None,
+            "rvfcMiss": v3.get("missRate") if v3 and _num(v3.get("missRate")) else None,
+            "loopFps": r3.get("loopFps"),
+            "videoPresentedFps": r3.get("videoPresentedFps"),
+            "jsP95Max": _max([r.get("jsP95") for r in same]),
+            "gpuMsMax": _max([r.get("gpuMs") for r in same]),
+        }
+    return res
+
+
+def g3_summary_legacy(runs, power):
+    """v3 파일용 {srcRes: {baselineDrop, itmDrop, delta, jsP95Max} | None} (B0/B3 기준)."""
     targets = [r for r in runs if is_g3_overlay_run(r, power)]
     res = {}
     for key, by_mode in sorted(latest_by_mode(targets).items()):
         b0, b3 = by_mode.get("B0"), by_mode.get("B3")
         if not b0 or not b3:
-            res[key] = None
             continue
         d0, d3 = b0.get("dropRate"), b3.get("dropRate")
-        num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
-        p95 = [r.get("jsP95") for r in targets if (r.get("srcRes") or "unknown") == key and num(r.get("jsP95"))]
         res[key] = {
-            "baselineDrop": d0 if num(d0) else None,
-            "itmDrop": d3 if num(d3) else None,
-            "delta": round(d3 - d0, 5) if num(d0) and num(d3) else None,
-            "jsP95Max": max(p95) if p95 else None,
+            "baselineDrop": d0 if _num(d0) else None,
+            "itmDrop": d3 if _num(d3) else None,
+            "delta": round(d3 - d0, 5) if _num(d0) and _num(d3) else None,
+            "jsP95Max": _max([r.get("jsP95") for r in targets if (r.get("srcRes") or "unknown") == key]),
         }
     return res
 
 
 def print_mode_tables(runs, power):
     overlay = [r for r in runs if r.get("layout", "split") == "overlay"]
-    print("\n모드별 표 (overlay run, 해상도 x B0~B3, 같은 모드 반복 시 마지막 run)")
+    print("\n모드별 표 (overlay run, 해상도 x R0/R2/R3/V3, 같은 모드 반복 시 마지막 run)")
     if not overlay:
         print("overlay run 없음")
     else:
         grouped = latest_by_mode(overlay)
-        for metric in ("dropRate", "dropRatePresented", "fps", "gpuMs", "jsP95"):
+        legacy = any(m in by_mode for by_mode in grouped.values() for m in LEGACY_MODES)
+        modes = MODES + (LEGACY_MODES if legacy else [])
+        metrics = ["missRate", "loopFps", "videoPresentedFps", "gpuMs", "jsP95"] + (["dropRate"] if legacy else [])
+        for metric in metrics:
             print("\n%s" % metric)
-            rows = [[res] + [fmt(by_mode.get(m, {}).get(metric)) for m in MODES] for res, by_mode in sorted(grouped.items())]
-            print(table(["srcRes"] + MODES, rows))
+            rows = [[res] + [fmt(by_mode.get(m, {}).get(metric)) for m in modes] for res, by_mode in sorted(grouped.items())]
+            print(table(["srcRes"] + modes, rows))
         print("\n표의 run 조건 (power=%s)" % fmt(power))
         rows = []
         for res, by_mode in sorted(grouped.items()):
-            for m in MODES:
+            for m in modes:
                 r = by_mode.get(m)
                 if r:
-                    rows.append([res, m, fmt(r.get("fullscreen")), fmt(is_g3_overlay_run(r, power)), fmt(r.get("canvasRes"))])
-        print(table(["srcRes", "mode", "fullscreen", "G3 대상", "canvasRes"], rows))
+                    rows.append([res, m, fmt(r.get("driver", "rvfc")), fmt(r.get("fullscreen")), fmt(is_g3_overlay_run(r, power)), fmt(r.get("canvasRes"))])
+        print(table(["srcRes", "mode", "driver", "fullscreen", "G3 대상", "canvasRes"], rows))
     print("\nG3 요약 (전원 연결 + 전체화면 + overlay run; 값만)")
     summary = g3_summary(runs, power)
-    if not summary:
+    legacy_summary = g3_summary_legacy(runs, power)
+    if not summary and not legacy_summary:
         print("G3 대상 overlay run 없음")
-    else:
-        rows = []
-        for res, v in summary.items():
-            if v is None:
-                rows.append([res, "-", "-", "-", "-"])
-            else:
-                rows.append([res] + [fmt(v[k]) for k in ("baselineDrop", "itmDrop", "delta", "jsP95Max")])
-        print(table(["srcRes", "baselineDrop", "itmDrop", "delta", "jsP95Max"], rows))
-        print("(B0 또는 B3 run이 없는 해상도는 '-')")
+    if summary:
+        keys = ("baselineMiss", "itmMiss", "delta", "rvfcMiss", "loopFps", "videoPresentedFps", "jsP95Max", "gpuMsMax")
+        rows = [[res] + (["-"] * len(keys) if v is None else [fmt(v[k]) for k in keys]) for res, v in summary.items()]
+        print(table(["srcRes"] + list(keys), rows))
+        print("(R0 또는 R3 run이 없는 해상도는 '-')")
+    if legacy_summary:
+        print("\nG3 요약 (v3 정의: B0/B3 dropRate 기준)")
+        keys = ("baselineDrop", "itmDrop", "delta", "jsP95Max")
+        print(table(["srcRes"] + list(keys), [[res] + [fmt(v[k]) for k in keys] for res, v in legacy_summary.items()]))
 
 
 def table(headers, rows):
@@ -174,6 +210,7 @@ def summarize(name, data):
         % tuple(fmt(env.get(k)) for k in ("macOS", "safari", "chip", "display", "power", "sdrBrightness", "refreshRate", "windowMode"))
     )
     print("screen: %s" % fmt(env.get("screen")))
+    print("schemaVersion=%s visualJudder=%s" % (fmt(data.get("schemaVersion")), fmt(g(data, "perf", "visualJudder"))))
     print("\nG1 API 값")
     api = data.get("api", {})
     print(
@@ -217,10 +254,10 @@ def summarize(name, data):
     if not runs:
         print("(run 없음)")
     else:
-        cols = ["fixture", "mode", "layout", "itm", "srcRes", "canvasRes", "fullscreen", "frames", "warmupSec", "windowSec", "fps", "dropRate", "dropRatePresented", "jsP50", "jsP95", "gpuMs"]
-        dflt = {"mode": "split", "layout": "split"}
+        cols = ["fixture", "mode", "driver", "layout", "itm", "srcRes", "canvasRes", "fullscreen", "frames", "warmupSec", "windowSec", "fps", "missRate", "loopFps", "videoPresentedFps", "dropRate", "dropRatePresented", "jsP50", "jsP95", "gpuMs"]
+        dflt = {"mode": "split", "layout": "split", "driver": "rvfc"}
         rows = [[fmt(is_g3_overlay_run(r, power))] + [fmt(r.get(c, dflt.get(c))) for c in cols] for r in runs]
-        print(table(["G3 대상(v3)"] + cols, rows))
+        print(table(["G3 대상(overlay)"] + cols, rows))
     print("\n전체화면 run 요약 (전원 연결 + 전체화면, v2 정의)")
     targets = [r for r in runs if is_g3_run(r, power)]
     if not targets:

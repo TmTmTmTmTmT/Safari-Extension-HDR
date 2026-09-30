@@ -2,7 +2,7 @@
 
 ## 현재 단계
 
-M1 0a 2차 회신 반영(FIX_GUIDE.md H1~H5) 구현 완료. 사용자 Mac 재측정 대기. 게이트: G1 통과, G2 통과(확정), G3 판정 보류(PLAN.md 게이트 판정 기록).
+M1 0a 3차 회신 반영(FIX_GUIDE.md J1~J4) 구현 완료. 사용자 Mac 재측정 대기(rAF 구동 검증). 게이트: G1 통과, G2 통과(확정), G3 rVFC 구동 불통과·렌더 루프를 rAF로 개정 후 재판정 대기(PLAN.md 게이트 판정 기록).
 
 ## 완료
 
@@ -11,14 +11,16 @@ M1 0a 2차 회신 반영(FIX_GUIDE.md H1~H5) 구현 완료. 사용자 Mac 재측
 - FIX_GUIDE F1: 픽스처 12초 + 프레임마다 움직이는 박스(`geq` luma 126, 우하단 720칸 순회). 프레임 해시 1080p 두 파일 720개 모두 상이
 - FIX_GUIDE F2~F4: 드롭률·JS·GPU를 워밍업 1초 제외 측정 창(최대 10초)으로 집계, "전체화면 측정" 버튼과 "창 실행" 버튼, env.windowMode를 run에서 파생, `perf.g3`(전원 연결 + 전체화면 run만, 해상도별 최악값), 스키마 v2(v1 호환), parse-result에 G3 대상 열과 요약
 - FIX_GUIDE H1~H5: 프로브 GPU 요청 5초 타임아웃·pagehide 정리·오류 배너·GPU 비의존 export, "G3 진단 일괄 측정" 버튼(전체화면 오버레이 단일 캔버스, 1080p/2160p × B0 video만 / B1 SDR 캔버스 / B2 EDR identity / B3 EDR ITM = 8 run), 스키마 v3(mode, layout, refreshRate, perf.g3 기준선 대비 delta), P0-2 경과 초 표시, S10 헤드룸 클리핑(`sim/headroom.py`)
+- FIX_GUIDE J1~J4: 프로브에 rAF 구동 루프 추가(rVFC는 관측 전용 병행), 갱신 누락률 `missRate`(슬롯 기반), 진단 매트릭스를 R0 기준선 / R2 EDR identity / R3 EDR ITM / V3 rVFC+ITM으로 교체(B1은 코드만 유지), 끊김 질문(perf.visualJudder), 스키마 v4(driver, missRate, loopFps, videoPresentedFps, perf.g3 기준선 대비 delta), parse-result 모드별 표와 G3 요약, 재측정 절차 문서
 - FIX_GUIDE F5: S7에 "XDR 16 스케일 1800x1169"(백킹 3600x2338, 캔버스 3600x2025) 행 추가
 
 ## 검증 (→ verify)
 
-- 기준: lint, `npm test`, `pytest sim`, 픽스처 검사, 기존 회신 JSON 처리 / 실제: lint 통과, npm test 30/30, pytest 85/85, check-fixtures 4/4 PASS(길이 12초, 합계 882,661바이트), parse-result rc=0("G3 대상 run 없음" 출력) / (1) 클라우드
+- 기준: lint, `npm test`, `pytest sim`, 픽스처 검사, 기존 회신 JSON 처리 / 실제: lint 통과, npm test 40/40, pytest 85/85, check-fixtures 4/4 PASS(길이 12초, 합계 882,661바이트), parse-result rc=0(결과 9건: v1~v3) / (1) 클라우드
 - `pytest sim`은 이 VM의 `pytest` 실행 파일(uv 격리, numpy 없음) 때문에 `python3 -m pytest sim`으로 실행. CI는 무관
 - 미검증: 전체화면 자동 진입·해제, rVFC 실동작, WebGPU/EDR, 픽스처 Safari 재생. 사용자 Mac에서만 가능 / (3)
-- CI(ubuntu): d673bca에서 green / (1) 클라우드 CI. H1~H5 커밋의 결과는 push 후 확인 예정
+- CI(ubuntu): 1bc1469에서 green / (1) 클라우드 CI. J1~J4 커밋의 결과는 push 후 확인 예정
+- 미검증(추가): rAF 구동 루프와 관측 rVFC의 시간 기준이 Safari에서 같은지, R0~V3 매트릭스 전체 흐름
 
 ## sim 핵심 수치 (프리셋 정확 / 균형 / 선명)
 
@@ -44,6 +46,8 @@ M1 0a 2차 회신 반영(FIX_GUIDE.md H1~H5) 구현 완료. 사용자 Mac 재측
 
 ## Opus 확인 필요
 
+- `missRate` 슬롯 위상(구현 작업자 보고): 슬롯을 측정 창 시작 시각 기준으로 나누므로 실제 video 프레임 위상과 맞지 않는다. 60Hz rAF 지터로 한 슬롯에 2회 렌더되고 다음 슬롯이 비면 누락으로 집계된다. R0와 R3에 같은 방식이 적용되어 R3−R0에서는 상쇄되겠지만 R0 절대값이 5% 판정선에 영향을 줄 수 있다. 재판정 규칙의 'R0 < 5%' 조건 전에 정의(슬롯 위상, 허용 지터)를 확인해야 함
+- 3차 회신 원인 관측(PLAN.md A20, 게이트 판정 기록 참조): rVFC가 60Hz에서 약 30회/s, ProMotion에서 45~56회/s. 재측정 결과로 rAF가 누락을 없애는지 확인 후 G3 재판정
 - S10 결과(M4 프리셋 결정 자료): 균형(P=3)은 헤드룸 2에서 입력 코드 247~255(3.5%)가 잘림. 선명(P=4)은 헤드룸 2에서 231~255(9.8%), 헤드룸 4에서도 250~255(2.3%)가 g=1.05 때문에 P를 넘어 잘림. FIX_GUIDE의 'P ≤ H이면 0개' 전제는 g>1 프리셋에서 성립하지 않음
 - 프로브 미검증(사용자 Mac 필요): 타임아웃 배너, unconfigure/device.destroy가 Safari 멈춤을 해소하는지, 전체화면 오버레이에서 canvas와 video가 정확히 겹치는지, B1(bgra8unorm/srgb)에서 importExternalTexture 동작
 - 결정 완료: G3 dropRate 기준(콜백 기반, 정상 구간), S7 캔버스 정의(축별 min)
@@ -56,6 +60,6 @@ M1 0a 2차 회신 반영(FIX_GUIDE.md H1~H5) 구현 완료. 사용자 Mac 재측
 
 ## 다음 단계
 
-- (2차 회신으로 조건 A, B, C의 P0-2 수신 완료. 남은 것: ITM run, 기준선, 전체화면 단일 캔버스 재측정은 Opus가 FIX_GUIDE로 정함) 이전 계획: 조건 A(전원 연결, 밝기 중간, 픽스처 4개 × identity/ITM을 "전체화면 측정" 버튼으로, P0-2·P0-3 포함), 조건 B(밝기 낮음)·C(밝기 중간)는 P0-2만. 절차는 `docs/manual-checklist.md`
-- `scripts/parse-result.py`로 요약 후 Opus가 G2 확정, G3 판정(PLAN.md 게이트 판정 기록)
+- 사용자 Mac 재측정(전원 연결, 밝기 중간, Safari 재시작 후): ProMotion 1회 + 60Hz 1회 "G3 진단 일괄 측정", 끊김 질문 답, JSON export 후 `results/`에 push. H1 확인(재시작 없이 새로고침 3회 후 P0-1 정상 여부)도 한 줄. 절차는 `docs/manual-checklist.md`
+- `scripts/parse-result.py`로 요약 후 Opus가 FIX_GUIDE.md '재판정 규칙'대로 G3 재판정(PLAN.md 게이트 판정 기록)
 - M1 판정 전에는 M2 이후 착수 금지 (PLAN.md D절 게이트)
