@@ -24,7 +24,7 @@ for spec in ramp-1080p60:1920x1080 ramp-2160p60:3840x2160 colorbars-1080p60:1920
   [ "$fps" = "60/1" ] || ok=FAIL
   [ "$pix" = yuv420p ] || ok=FAIL
   [ "$prim" = bt709 ] && [ "$trc" = bt709 ] && [ "$space" = bt709 ] || ok=FAIL
-  awk -v d="$dur" 'BEGIN{exit !(d>0 && d<=4)}' || ok=FAIL
+  awk -v d="$dur" 'BEGIN{exit !(d>=11 && d<=13)}' || ok=FAIL
   [ "$ok" = PASS ] || fail=1
   printf '%-24s %-10s %-8s %-8s %-10s %-10s %-10s %-10s %s\n' "$name.mp4" "${w}x${h}" "$fps" "$pix" "$prim" "$trc" "$space" "$dur" "$ok"
 done

@@ -15,6 +15,22 @@ def test_canvas_sizes():
     assert budget.canvas_size((1920, 1080), (3024, 1964)) == (1920, 1080)  # 소스가 더 작으면 소스
 
 
+def test_scaled_xdr16_backing():
+    disp = budget.DISPLAYS["XDR 16 스케일 1800x1169"]
+    assert disp == (1800 * 2, 1169 * 2)
+    assert budget.content_rect(disp) == (3600, 2025)
+    assert budget.canvas_size((3840, 2160), disp) == (3600, 2025)
+    assert budget.canvas_size((1920, 1080), disp) == (1920, 1080)
+    r = budget.model("x", (3840, 2160), disp)
+    native = budget.model("x", (3840, 2160), budget.DISPLAYS["XDR 16"])
+    assert r.total_gbps > native.total_gbps  # 백킹이 네이티브보다 큼
+
+
+def test_scaled_row_in_report():
+    rep = budget.report()
+    assert rep.count("XDR 16 스케일 1800x1169") >= 6 and "3600x2025" in rep
+
+
 def test_canvas_gbps_2160p60():
     r = budget.model("x", (3840, 2160), None)
     assert r.canvas_gbps == pytest.approx(3840 * 2160 * 8 * 60 / 1e9)

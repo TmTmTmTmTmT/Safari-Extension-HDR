@@ -4,11 +4,20 @@
   const core = globalThis.__probeCore;
   const shaders = globalThis.__probeShaders;
   const FIXTURES = ['ramp-1080p60', 'ramp-2160p60', 'colorbars-1080p60', 'colorbars-2160p60'];
-  const RUN_MAX_SEC = 10;
+  // 첫 rVFC 콜백 후 워밍업을 버리고 최대 WINDOW_MAX_SEC를 측정한다 (FIX_GUIDE F2).
+  const RUN_MAX_SEC = core.WARMUP_SEC + core.WINDOW_MAX_SEC;
   const GPU_SAMPLE_EVERY = 10;
   const FORMAT = 'rgba16float';
 
-  const state = { api: null, gpu: null, errors: [], perfRuns: [], fixtures: {}, running: false };
+  const state = {
+    api: null,
+    gpu: null,
+    errors: [],
+    perfRuns: [],
+    fixtures: {},
+    running: false,
+    pending: false,
+  };
   const $ = (id) => document.getElementById(id);
 
   function logError(where, e) {
@@ -144,7 +153,6 @@
       display: $('envDisplay').value.trim() || null,
       power: $('envPower').value || null,
       sdrBrightness: $('envBrightness').value || null,
-      windowMode: $('envWindow').value || null,
       ua: navigator.userAgent,
       screen: {
         width: screen.width,
@@ -251,10 +259,16 @@
       }
       state.fixtures[name] = ok;
       const btn = document.createElement('button');
-      btn.textContent = name + (ok ? ' 실행' : ' (픽스처 없음)');
+      btn.textContent = name + (ok ? ' 창 실행' : ' (픽스처 없음)');
       btn.disabled = !ok;
       btn.addEventListener('click', () => runFixture(name));
       list.appendChild(btn);
+      const fsBtn = document.createElement('button');
+      fsBtn.textContent = name + ' 전체화면 측정';
+      fsBtn.disabled = !ok;
+      fsBtn.addEventListener('click', () => runFixtureFullscreen(name));
+      list.appendChild(fsBtn);
+      list.appendChild(document.createElement('br'));
     }
   }
 
@@ -270,6 +284,7 @@
       'canvasRes',
       'fullscreen',
       'frames',
+      'windowSec',
       'fps',
       'dropRate',
       'dropRatePresented',
@@ -292,10 +307,9 @@
     return m ? Number(m[1]) : 60;
   }
 
-  async function runFixture(name) {
+  async function runFixture(name, opts) {
     if (state.running) return;
     state.running = true;
-    state.lastFixture = name;
     const video = $('origVideo');
     const canvas = $('vidCanvas');
     try {
@@ -349,12 +363,9 @@
         });
       }
 
-      const jsTimes = [];
-      const gpuTimes = [];
-      const presented = [];
+      // 콜백마다 1건. 워밍업 제외 집계는 core.windowStats가 한다.
+      const samples = [];
       let frames = 0;
-      let firstMedia = null;
-      let lastMedia = null;
       let gpuBusy = false;
       let finished = false;
       const fullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
@@ -409,14 +420,21 @@
               enc.copyBufferToBuffer(resolveBuf, 0, readBuf, 0, 16);
             }
             device.queue.submit([enc.finish()]);
-            jsTimes.push(performance.now() - t0);
+            const rec = {
+              t: t0,
+              mediaTime: meta.mediaTime,
+              js: performance.now() - t0,
+              gpu: null,
+              presented: typeof meta.presentedFrames === 'number' ? meta.presentedFrames : null,
+            };
+            samples.push(rec);
             if (sample) {
               gpuBusy = true;
               readBuf
                 .mapAsync(GPUMapMode.READ)
                 .then(() => {
                   const a = new BigUint64Array(readBuf.getMappedRange().slice(0));
-                  gpuTimes.push(Number(a[1] - a[0]) / 1e6);
+                  rec.gpu = Number(a[1] - a[0]) / 1e6;
                   readBuf.unmap();
                   gpuBusy = false;
                 })
@@ -426,9 +444,6 @@
                 });
             }
             frames++;
-            if (firstMedia === null) firstMedia = meta.mediaTime;
-            lastMedia = meta.mediaTime;
-            if (typeof meta.presentedFrames === 'number') presented.push(meta.presentedFrames);
             if ((performance.now() - wallStart) / 1000 >= RUN_MAX_SEC) {
               finish();
               return;
@@ -446,9 +461,12 @@
       await video.play();
       await done;
       const wallSeconds = (performance.now() - wallStart) / 1000;
+      // 전체화면 여부는 run 종료 시점(자동 해제 전)에도 유지된 경우만 true로 기록한다.
+      const fullscreenEnd = !!(document.fullscreenElement || document.webkitFullscreenElement);
       video.pause();
       const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
       const fps = fixtureFps(name);
+      const win = core.windowStats(samples, { fps });
       const run = core.buildRun({
         fixture: name,
         itm,
@@ -456,17 +474,16 @@
         srcH,
         canvasW: canvas.width,
         canvasH: canvas.height,
-        fullscreen,
+        fullscreen: fullscreen && fullscreenEnd,
         frames,
         wallSeconds,
-        dropRate: core.computeDropRate({
-          frames,
-          mediaTimeSpan: lastMedia - firstMedia,
-          fps,
-        }),
-        dropRatePresented: core.dropRateFromPresented(presented),
-        jsTimes,
-        gpuTimes,
+        warmupSec: win.warmupSec,
+        windowSec: win.windowSec,
+        windowFrames: win.frames,
+        dropRate: win.dropRate,
+        dropRatePresented: win.dropRatePresented,
+        jsTimes: win.jsTimes,
+        gpuTimes: win.gpuTimes,
         videoQuality: q ? { dropped: q.droppedVideoFrames, total: q.totalVideoFrames } : null,
       });
       state.perfRuns.push(run);
@@ -477,18 +494,81 @@
       setStatus(name + ' 실패: ' + (e && e.message ? e.message : e));
     } finally {
       state.running = false;
+      if (opts && opts.autoExitFullscreen) exitFullscreen();
     }
   }
 
-  function toggleFullscreen() {
-    const el = $('stage');
-    if (document.fullscreenElement || document.webkitFullscreenElement) {
-      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    } else {
-      const req = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (req) req.call(el);
-      else logError('fullscreen', new Error('requestFullscreen 없음'));
+  function inFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function exitFullscreen() {
+    if (!inFullscreen()) return;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    try {
+      const p = exit.call(document);
+      if (p && p.catch) p.catch((e) => logError('exitFullscreen', e));
+    } catch (e) {
+      logError('exitFullscreen', e);
     }
+  }
+
+  // 클릭 처리기 안에서 동기적으로 전체화면을 요청해야 사용자 제스처 요건을 충족한다.
+  // fullscreenchange 후 run을 자동 시작하고, run이 끝나면 자동 해제한다. 미검증(사용자 Mac).
+  function runFixtureFullscreen(name) {
+    if (state.running || state.pending) return;
+    const el = $('stage');
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) {
+      logError('fullscreen', new Error('requestFullscreen 없음'));
+      return;
+    }
+    state.pending = true;
+    let timer = null;
+    const cleanup = () => {
+      clearTimeout(timer);
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+    const onChange = () => {
+      if (!inFullscreen()) return;
+      cleanup();
+      state.pending = false;
+      // 전체화면 레이아웃이 반영된 뒤 캔버스 크기를 측정하도록 한 프레임 기다린다.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => runFixture(name, { autoExitFullscreen: true })),
+      );
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    timer = setTimeout(() => {
+      cleanup();
+      state.pending = false;
+      logError('fullscreen', new Error('fullscreenchange 3초 내 없음'));
+      setStatus(name + ' 전체화면 진입 실패');
+    }, 3000);
+    try {
+      const p = req.call(el);
+      if (p && p.catch) {
+        p.catch((e) => {
+          cleanup();
+          state.pending = false;
+          logError('fullscreen', e);
+          setStatus(name + ' 전체화면 진입 실패');
+        });
+      }
+    } catch (e) {
+      cleanup();
+      state.pending = false;
+      logError('fullscreen', e);
+    }
+  }
+
+  function updateG3Warning(env, runs) {
+    const el = $('g3Warn');
+    el.textContent = core.hasG3Run(runs, env.power)
+      ? ''
+      : '경고: G3 조건(전원 연결 + 전체화면)을 만족하는 run이 없다. 전원 선택과 "전체화면 측정" 버튼 사용을 확인한다. (export는 진행됨)';
   }
 
   // ---------- export ----------
@@ -498,9 +578,8 @@
     const enc = document.querySelector('input[name=enc]:checked');
     const env = collectEnv();
     const last = state.perfRuns.length > 0 ? state.perfRuns[state.perfRuns.length - 1] : null;
-    const fullscreen = last
-      ? last.fullscreen
-      : !!(document.fullscreenElement || document.webkitFullscreenElement);
+    const fullscreen = last ? last.fullscreen : inFullscreen();
+    updateG3Warning(env, state.perfRuns);
     const now = new Date();
     const result = core.buildResult({
       milestone: 'M1',
@@ -520,7 +599,7 @@
     $('jsonOut').value = text;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-    a.download = core.resultFileName(now.toISOString().slice(0, 10), 'M1', env);
+    a.download = core.resultFileName(now.toISOString().slice(0, 10), 'M1', result.env);
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -532,11 +611,6 @@
     $('btnStripes').addEventListener('click', () => {
       drawStripes();
       drawPatches();
-    });
-    $('btnFull').addEventListener('click', toggleFullscreen);
-    // 전체화면에서는 stage 밖 버튼이 안 보이므로 r 키로 마지막 픽스처를 다시 실행한다.
-    document.addEventListener('keydown', (ev) => {
-      if (ev.key === 'r' && state.lastFixture) runFixture(state.lastFixture);
     });
     $('btnFixtures').addEventListener('click', checkFixtures);
     $('btnExport').addEventListener('click', () =>

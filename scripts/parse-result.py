@@ -79,6 +79,11 @@ def fmt(v):
     return str(v)
 
 
+def is_g3_run(run, power):
+    """G3 대상 = 전원 연결 + 전체화면 run. 스키마 v1/v2 공통(env.power와 run.fullscreen만 사용)."""
+    return power == "ac" and run.get("fullscreen") is True
+
+
 def table(headers, rows):
     widths = [len(h) for h in headers]
     for r in rows:
@@ -137,11 +142,29 @@ def summarize(name, data):
     )
     print("\nG3 성능 값 (run별)")
     runs = g(data, "perf", "runs") or []
+    power = env.get("power")
     if not runs:
         print("(run 없음)")
     else:
-        cols = ["fixture", "itm", "srcRes", "canvasRes", "fullscreen", "frames", "fps", "dropRate", "dropRatePresented", "jsP50", "jsP95", "gpuMs"]
-        print(table(cols, [[fmt(r.get(c)) for c in cols] for r in runs]))
+        cols = ["fixture", "itm", "srcRes", "canvasRes", "fullscreen", "frames", "warmupSec", "windowSec", "fps", "dropRate", "dropRatePresented", "jsP50", "jsP95", "gpuMs"]
+        rows = [[fmt(is_g3_run(r, power))] + [fmt(r.get(c)) for c in cols] for r in runs]
+        print(table(["G3 대상"] + cols, rows))
+    print("\nG3 대상 run 요약 (전원 연결 + 전체화면)")
+    targets = [r for r in runs if is_g3_run(r, power)]
+    if not targets:
+        print("G3 대상 run 없음")
+    else:
+        cols = ["fixture", "itm", "srcRes", "canvasRes", "windowSec", "dropRate", "jsP50", "jsP95", "jsMax", "gpuMs"]
+        print(table(cols, [[fmt(r.get(c)) for c in cols] for r in targets]))
+        print("\n소스 해상도별 최악값 (대상 run만)")
+        worst = {}
+        for r in targets:
+            w = worst.setdefault(r.get("srcRes") or "unknown", {"n": 0, "drop": [], "p95": []})
+            w["n"] += 1
+            w["drop"].append(r.get("dropRate"))
+            w["p95"].append(r.get("jsP95"))
+        mx = lambda vs: max([v for v in vs if isinstance(v, (int, float))], default=None)
+        print(table(["srcRes", "runs", "dropRate 최대", "jsP95 최대"], [[k, str(w["n"]), fmt(mx(w["drop"])), fmt(mx(w["p95"]))] for k, w in sorted(worst.items())]))
     print("\nflags: %s" % fmt(data.get("flags")))
     errs = data.get("errors") or []
     print("errors (%d)%s" % (len(errs), "".join("\n  - " + e for e in errs)))

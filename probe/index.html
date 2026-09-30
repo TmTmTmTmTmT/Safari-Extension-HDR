@@ -112,8 +112,8 @@
   <body>
     <h1>0a 프로브 (PLAN B절)</h1>
     <p class="note">
-      localhost(secure context)에서 열어야 한다. 측정 조건(전원, SDR 밝기, 창/전체화면)을 바꿀
-      때마다 P0-2~P0-4를 다시 하고 JSON을 따로 저장한다. 절차는 docs/manual-checklist.md 참고.
+      localhost(secure context)에서 열어야 한다. 측정 조건(전원, SDR 밝기)을 바꿀 때마다 P0-2~P0-4를
+      다시 하고 JSON을 따로 저장한다. 절차는 docs/manual-checklist.md 참고.
     </p>
 
     <section>
@@ -140,14 +140,6 @@
             <option value="low">낮음</option>
             <option value="mid">중간</option>
             <option value="max">최대</option>
-          </select>
-        </label>
-        <label
-          >창 모드
-          <select id="envWindow">
-            <option value="">(선택)</option>
-            <option value="window">창</option>
-            <option value="fullscreen">전체화면</option>
           </select>
         </label>
       </div>
@@ -216,8 +208,9 @@
     <section>
       <h2>P0-4 비디오</h2>
       <p>
-        왼쪽은 원본 video, 오른쪽은 importExternalTexture + 셰이더 출력이다. 실행은 최대 10초이고
-        재생이 끝나면 함께 끝난다. 결과 표의 수치는 측정 조건(위 P0-5)과 함께 저장된다.
+        왼쪽은 원본 video, 오른쪽은 importExternalTexture + 셰이더 출력이다. 첫 프레임 후 1초는
+        워밍업으로 버리고 최대 10초를 측정한다. G3용 수치는 "전체화면 측정" 버튼으로만
+        얻는다(전체화면 진입 후 자동 시작, 종료 시 자동 해제). 창 모드는 "창 실행" 버튼이다.
       </p>
       <div class="opts">
         <label
@@ -227,7 +220,6 @@
             <option value="itm">ITM (균형 프리셋 초안)</option>
           </select>
         </label>
-        <button id="btnFull">비교 영역 전체화면</button>
         <button id="btnFixtures">픽스처 다시 확인</button>
       </div>
       <div id="fixtureList"></div>
@@ -244,6 +236,7 @@
       <button id="btnExport">JSON export (다운로드)</button>
       <p>다운로드가 막히면 아래 내용을 복사해 result-*.json 파일로 저장한다.</p>
       <textarea id="jsonOut" readonly></textarea>
+      <p class="err" id="g3Warn"></p>
       <p class="err" id="errOut"></p>
     </section>
 

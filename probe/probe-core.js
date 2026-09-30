@@ -1,7 +1,10 @@
 'use strict';
 // 0a 프로브 순수 함수. DOM/GPU/시간에 의존하지 않는다. (PLAN B절 P0-1~P0-5, E절 회신 형식)
 (function () {
-  const SCHEMA_VERSION = 1;
+  // v2: run에 warmupSec/windowSec/windowFrames, perf.g3 추가, env.windowMode를 run에서 파생. v1 파일도 요약 가능.
+  const SCHEMA_VERSION = 2;
+  const WARMUP_SEC = 1.0;
+  const WINDOW_MAX_SEC = 10;
 
   function round(x, digits) {
     if (typeof x !== 'number' || !Number.isFinite(x)) return null;
@@ -60,6 +63,84 @@
     return dropped / (dropped + a.length - 1);
   }
 
+  // 측정 창 선택 (FIX_GUIDE F2). samples: rVFC 콜백 순서대로 {t(ms), mediaTime, js, gpu?, presented?}.
+  // 첫 콜백 이후 warmupSec를 버리고 그 뒤 maxSec 이내의 콜백만 남긴다.
+  function selectWindow(samples, warmupSec, maxSec) {
+    const s = (samples || []).filter((x) => x && typeof x.t === 'number' && Number.isFinite(x.t));
+    if (s.length === 0) return [];
+    const start = s[0].t + warmupSec * 1000;
+    const end = start + maxSec * 1000;
+    return s.filter((x) => x.t >= start && x.t <= end);
+  }
+
+  function finiteOnly(a) {
+    return a.filter((v) => typeof v === 'number' && Number.isFinite(v));
+  }
+
+  // 측정 창 기준 집계. 드롭률 = (기대 - 창 콜백 수) / 기대, 기대 = 창 mediaTime 구간 x fps.
+  function windowStats(samples, o) {
+    const warmupSec = o && typeof o.warmupSec === 'number' ? o.warmupSec : WARMUP_SEC;
+    const maxSec = o && typeof o.maxSec === 'number' ? o.maxSec : WINDOW_MAX_SEC;
+    const w = selectWindow(samples, warmupSec, maxSec);
+    const media = finiteOnly(w.map((x) => x.mediaTime));
+    const enough = w.length >= 2 && media.length >= 2;
+    const span = enough ? Math.max(...media) - Math.min(...media) : null;
+    return {
+      warmupSec,
+      frames: w.length,
+      windowSec: w.length >= 2 ? (w[w.length - 1].t - w[0].t) / 1000 : null,
+      dropRate: enough
+        ? computeDropRate({ frames: w.length, mediaTimeSpan: span, fps: o.fps })
+        : null,
+      dropRatePresented: dropRateFromPresented(w.map((x) => x.presented)),
+      jsTimes: finiteOnly(w.map((x) => x.js)),
+      gpuTimes: finiteOnly(w.map((x) => x.gpu)),
+    };
+  }
+
+  // G3 대상 run = 전원 연결 + 전체화면 (FIX_GUIDE F3/F4).
+  function isG3Run(run, power) {
+    return power === 'ac' && !!run && run.fullscreen === true;
+  }
+
+  function hasG3Run(runs, power) {
+    return (runs || []).some((r) => isG3Run(r, power));
+  }
+
+  function maxOrNull(values) {
+    const a = finiteOnly(values);
+    return a.length > 0 ? Math.max(...a) : null;
+  }
+
+  // G3 대상 run만 모아 소스 해상도별 최악값. 대상이 없으면 null.
+  function g3Worst(runs, power) {
+    const targets = (runs || []).filter((r) => isG3Run(r, power));
+    if (targets.length === 0) return null;
+    const out = {};
+    for (const r of targets) {
+      const key = r.srcRes || 'unknown';
+      (out[key] = out[key] || []).push(r);
+    }
+    const res = {};
+    for (const key of Object.keys(out).sort()) {
+      res[key] = {
+        runs: out[key].length,
+        dropRateMax: maxOrNull(out[key].map((r) => r.dropRate)),
+        jsP95Max: maxOrNull(out[key].map((r) => r.jsP95)),
+      };
+    }
+    return res;
+  }
+
+  // env.windowMode는 사용자 선택이 아니라 run의 실제 전체화면 상태에서 파생한다 (FIX_GUIDE F3).
+  function deriveWindowMode(runs) {
+    const a = runs || [];
+    if (a.length === 0) return null;
+    const fs = a.filter((r) => r.fullscreen === true).length;
+    if (fs === a.length) return 'fullscreen';
+    return fs === 0 ? 'window' : 'mixed';
+  }
+
   // 캔버스 해상도 = min(원본, 표시 크기 x DPR), 종횡비 유지 (PLAN C절 content script 역할).
   function canvasResolution(srcW, srcH, cssW, cssH, dpr) {
     if (![srcW, srcH, cssW, cssH, dpr].every((v) => typeof v === 'number' && v > 0)) return null;
@@ -93,6 +174,9 @@
       fullscreen: !!o.fullscreen,
       frames,
       durationSec: round(wall, 2),
+      warmupSec: round(o.warmupSec, 2),
+      windowSec: round(o.windowSec, 2),
+      windowFrames: typeof o.windowFrames === 'number' ? o.windowFrames : null,
       fps: wall > 0 ? round(frames / wall, 2) : null,
       dropRate: round(o.dropRate, 5),
       dropRatePresented: round(o.dropRatePresented, 5),
@@ -118,6 +202,7 @@
       dropRate: last ? last.dropRate : null,
       jsP50: last ? last.jsP50 : null,
       jsP95: last ? last.jsP95 : null,
+      g3: g3Worst(runs, env.power),
       runs,
     };
     if (last && last.gpuMs !== null && last.gpuMs !== undefined) perf.gpuMs = last.gpuMs;
@@ -133,7 +218,7 @@
         display: env.display || null,
         power: env.power || null,
         sdrBrightness: env.sdrBrightness || null,
-        windowMode: env.windowMode || null,
+        windowMode: deriveWindowMode(runs),
         ua: env.ua || null,
         screen: env.screen || null,
       },
@@ -164,7 +249,15 @@
     SCHEMA_VERSION,
     percentile,
     summarize,
+    WARMUP_SEC,
+    WINDOW_MAX_SEC,
     computeDropRate,
+    selectWindow,
+    windowStats,
+    isG3Run,
+    hasG3Run,
+    g3Worst,
+    deriveWindowMode,
     dropRateFromPresented,
     canvasResolution,
     parseSafariVersion,

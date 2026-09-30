@@ -14,7 +14,11 @@
     "errors"
   ],
   "properties": {
-    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "v1: 창 모드를 사용자가 선택, run 전체 집계. v2: 워밍업 제외 측정 창 집계, windowMode는 run에서 파생, perf.g3 추가. v1 파일도 유효."
+    },
     "milestone": { "type": "string" },
     "createdAt": { "type": ["string", "null"] },
     "env": {
@@ -27,7 +31,11 @@
         "display": { "type": ["string", "null"] },
         "power": { "type": ["string", "null"], "enum": ["ac", "battery", null] },
         "sdrBrightness": { "type": ["string", "null"], "enum": ["low", "mid", "max", null] },
-        "windowMode": { "type": ["string", "null"], "enum": ["window", "fullscreen", null] },
+        "windowMode": {
+          "type": ["string", "null"],
+          "enum": ["window", "fullscreen", "mixed", null],
+          "description": "v2: runs[].fullscreen에서 파생 (전부 true=fullscreen, 전부 false=window, 혼재=mixed, run 없음=null)"
+        },
         "ua": { "type": ["string", "null"] },
         "screen": { "type": ["object", "null"] }
       }
@@ -96,6 +104,19 @@
         "jsP50": { "type": ["number", "null"] },
         "jsP95": { "type": ["number", "null"] },
         "gpuMs": { "type": ["number", "null"] },
+        "g3": {
+          "type": ["object", "null"],
+          "description": "v2: G3 대상 run(env.power=ac 이고 runs[].fullscreen=true)만 소스 해상도별 최악값. 대상 없으면 null.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["runs", "dropRateMax", "jsP95Max"],
+            "properties": {
+              "runs": { "type": "integer", "minimum": 1 },
+              "dropRateMax": { "type": ["number", "null"] },
+              "jsP95Max": { "type": ["number", "null"] }
+            }
+          }
+        },
         "runs": {
           "type": "array",
           "items": {
@@ -120,6 +141,9 @@
               "fullscreen": { "type": "boolean" },
               "frames": { "type": "integer", "minimum": 0 },
               "durationSec": { "type": ["number", "null"] },
+              "warmupSec": { "type": ["number", "null"] },
+              "windowSec": { "type": ["number", "null"] },
+              "windowFrames": { "type": ["integer", "null"] },
               "fps": { "type": ["number", "null"] },
               "dropRate": { "type": ["number", "null"] },
               "dropRatePresented": { "type": ["number", "null"] },
