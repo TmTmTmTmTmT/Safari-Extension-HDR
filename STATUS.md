@@ -42,6 +42,15 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 우하단 움직이는 박스가 램프 마지막 100% 계단 패치 모서리를 일부 덮음
 - 3차에서 관측된 rVFC 초당 30회는 4차에 재현되지 않음(60Hz 53~56회/s). 원인 미확인, 누락은 여전히 11~32%라 결론 유지
 
+## M2 0b 1차 회신 (2026-09-30, 사용자 Mac, 전원 연결 추정, SDR 밝기 중간, 창 모드, YouTube)
+
+- 설치·실행: Xcode-beta 빌드 Run → Safari 확장 허용·youtube.com 허용 완료(서명 없는 확장 허용 설정 사용 추정)
+- G4 자료: content script에서 `navigator.gpu`·adapter·device·configure 모두 true, configRead rgba16float/display-p3/extended, errors 빈 배열, ProMotion loopFps ≈ 115, jsP95 1 ms(캔버스 2428×1366) / (3)
+- `stripes` 모드: 4단계(SDR white 위 단계 포함 여부는 미확인, 회신 표현 "4단계로 보여져") 구분 → 확장 오버레이 EDR 경로 동작 / (3). 단계 정의(1.0/1.25/1.5/2/3…)와 대응은 Opus 판정 필요
+- **결함**: `itm`, `identity` 모두 검은 화면(소리 정상). 화질 144p로 낮춰도 동일, 코덱 vp09(VP9), bt709, MSE(blob) video. errors 비어 있음(uncapturederror·device.lost는 기록 대상) → `importExternalTexture`가 예외 없이 검은 프레임을 반환하는 것으로 추정. 원인 미확정: YouTube MSE/VP9 프레임 경로, isolated world, 그 밖. 프로브(H.264 same-origin mp4)에서는 정상이었음
+- 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
+- Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
+
 ## M2 CI 진행 (7edf085 이후)
 
 - 러너 converter 임시 프로젝트 생성·컴파일까지 성공, `ValidateEmbeddedBinary`에서 실패: 앱 ID `io.github.tmtmtmtmtmt.SDRHDR`, 확장 ID `io.github.tmtmtmtmtmt.sdrhdr.Extension`(대소문자 불일치로 접두 검증 실패). 원인 추정: converter가 앱 ID 마지막 요소를 앱 이름으로 만듦. 조치: 기본 `--bundle-identifier`를 `io.github.tmtmtmtmtmt.SDRHDR`로 변경(make-xcode.sh, ci.yml). PLAN.md M2-3의 기본값 표기(`…sdrhdr`)와 달라짐, Opus 확인 필요

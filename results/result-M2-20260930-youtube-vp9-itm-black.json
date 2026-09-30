@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "extVersion": "0.1.0",
+  "canvas": {
+    "cssWidth": 1214,
+    "cssHeight": 682.875,
+    "width": 2428,
+    "height": 1366
+  },
+  "flags": {
+    "drm": false,
+    "attached": true,
+    "fullscreen": false
+  },
+  "errors": [],
+  "milestone": "M2",
+  "page": {
+    "url": "/watch?v=vF5oXa1cVEg"
+  },
+  "env": {
+    "dpr": 2,
+    "screen": {
+      "w": 1800,
+      "h": 1169
+    },
+    "dynamicRangeHigh": true,
+    "colorGamutP3": true,
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15"
+  },
+  "api": {
+    "configRead": {
+      "toneMapping": "extended",
+      "format": "rgba16float",
+      "colorSpace": "display-p3"
+    },
+    "gpu": true,
+    "adapter": true,
+    "device": true,
+    "configure": true
+  },
+  "video": {
+    "srcIsBlob": true,
+    "videoHeight": 2160,
+    "paused": false,
+    "videoWidth": 3840
+  },
+  "render": {
+    "jsP50": 0,
+    "loopFps": 115.92800464486162,
+    "jsP95": 1,
+    "mode": "itm",
+    "frames": 3982
+  },
+  "createdAt": "2026-09-30T13:03:57.899Z"
+}
