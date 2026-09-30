@@ -32,6 +32,37 @@
     };
   }
 
+  // 순수: 렌더 루프 콜백 간격의 중앙값으로 디스플레이 주사율을 60 또는 120으로 추정 (FIX_GUIDE P3/K1).
+  function estimateDisplayHz(loopTimes) {
+    const ts = (Array.isArray(loopTimes) ? loopTimes : []).filter(
+      (v) => typeof v === 'number' && Number.isFinite(v),
+    );
+    const gaps = [];
+    for (let i = 1; i < ts.length; i++) if (ts[i] > ts[i - 1]) gaps.push(ts[i] - ts[i - 1]);
+    const med = percentile(gaps, 50);
+    if (med === null || med <= 0) return null;
+    const hz = 1000 / med;
+    return Math.abs(hz - 60) <= Math.abs(hz - 120) ? 60 : 120;
+  }
+
+  // 순수: 측정 창(ms)에서 콜백 간격이 1.5/displayHz를 넘으면 round(간격 x hz) - 1개 갱신을 놓친 것으로 센다.
+  // 결과 = 놓친 갱신 수 / (창 초 x displayHz). 계산 불가면 null (FIX_GUIDE P3/K1 정의).
+  function displayMissRate(loopTimes, windowStart, windowEnd, displayHz) {
+    if (!Array.isArray(loopTimes)) return null;
+    if (!(displayHz > 0) || !(windowEnd > windowStart)) return null;
+    const ts = loopTimes.filter(
+      (v) => typeof v === 'number' && Number.isFinite(v) && v >= windowStart && v <= windowEnd,
+    );
+    if (ts.length < 2) return null;
+    const limitMs = 1500 / displayHz;
+    let missed = 0;
+    for (let i = 1; i < ts.length; i++) {
+      const gap = ts[i] - ts[i - 1];
+      if (gap > limitMs) missed += Math.max(0, Math.round((gap * displayHz) / 1000) - 1);
+    }
+    return missed / (((windowEnd - windowStart) / 1000) * displayHz);
+  }
+
   // 순수: 경로와 v 쿼리만 남긴다 (GUIDELINES 2.6-1). URL 전역이 없는 환경을 위해 정규식으로 파싱.
   function sanitizePageUrl(href) {
     const m = /^https?:\/\/[^/?#]+(\/[^?#]*)?(?:\?([^#]*))?/.exec(String(href || ''));
@@ -76,6 +107,10 @@
       ext: round2(numOrNull(p.ext)),
       copy: round2(numOrNull(p.copy)),
       c2d: round2(numOrNull(p.c2d)),
+      ms: round2(numOrNull(p.ms)),
+      extSyncMs: round2(numOrNull(p.extSyncMs)),
+      copySyncMs: round2(numOrNull(p.copySyncMs)),
+      c2dSyncMs: round2(numOrNull(p.c2dSyncMs)),
       extErr: nameOrNull(p.extErr),
       copyErr: nameOrNull(p.copyErr),
       c2dErr: nameOrNull(p.c2dErr),
@@ -103,8 +138,15 @@
     const render = s.render || {};
     const flags = s.flags || {};
     const sum = summarize(render.frameTimesMs, render.loopTimestamps);
+    const loopTs = Array.isArray(render.loopTimestamps) ? render.loopTimestamps : [];
+    const displayHz = estimateDisplayHz(loopTs);
+    const miss =
+      displayHz === null
+        ? null
+        : displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], displayHz);
+    const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -147,6 +189,14 @@
         loopFps: sum.loopFps,
         jsP50: sum.jsP50,
         jsP95: sum.jsP95,
+        path: render.path === 'ext' || render.path === 'copy' ? render.path : null,
+        displayHz,
+        displayMissRate: miss === null ? null : Math.round(miss * 1e5) / 1e5,
+        copyMsP50: round2(percentile(copyTimes, 50)),
+        copyMsP95: round2(percentile(copyTimes, 95)),
+        copySkipped: numOrNull(render.copySkipped),
+        videoDropped: numOrNull(render.videoDropped),
+        videoTotal: numOrNull(render.videoTotal),
       },
       frameProbe: normalizeFrameProbe(s.frameProbe),
       flags: {
@@ -168,6 +218,8 @@
     sanitizePageUrl,
     alignBytesPerRow,
     meanBrightness,
+    estimateDisplayHz,
+    displayMissRate,
     normalizeFrameProbe,
     buildDiag,
   };

@@ -140,3 +140,55 @@ def test_m2_v2_null_probe_ok_and_wrong_types_fail(tmp_path):
     r = run(write(tmp_path, "result-M2-v2-bad.json", bad))
     assert r.returncode == 1
     assert "스키마 검증 실패" in r.stdout
+
+
+def _v3_sample():
+    d = _v2_sample()
+    d["schemaVersion"] = 3
+    d["render"].update(
+        {
+            "path": "copy",
+            "displayHz": 120,
+            "displayMissRate": 0.00417,
+            "copyMsP50": 1.25,
+            "copyMsP95": 2.5,
+            "copySkipped": 42,
+            "videoDropped": 3,
+            "videoTotal": 1800,
+        }
+    )
+    d["frameProbe"].update({"ms": 88.5, "extSyncMs": 1.5, "copySyncMs": 6.25, "c2dSyncMs": 30.75})
+    return d
+
+
+def test_m2_v3_prints_render_cost_and_probe_times(tmp_path):
+    r = run(write(tmp_path, "result-M2-v3.json", _v3_sample()))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "스키마 검증 실패" not in r.stdout
+    for s in ("displayMissRate", "0.00417", "copyMsP95", "2.5", "1800", "copy", "extSyncMs", "88.5", "30.75"):
+        assert s in r.stdout
+    for word in ("PASS", "FAIL", "통과", "판정:"):
+        assert word not in r.stdout
+
+
+def test_m2_v1_v2_have_no_render_cost_section(tmp_path):
+    for name, d in (("v1", M2_SAMPLE), ("v2", _v2_sample())):
+        r = run(write(tmp_path, "result-M2-%s.json" % name, d))
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "displayMissRate" not in r.stdout
+        assert "extSyncMs" not in r.stdout
+
+
+def test_m2_v3_wrong_types_fail(tmp_path):
+    bad = _v3_sample()
+    bad["render"]["path"] = "gpu"
+    r = run(write(tmp_path, "result-M2-v3-bad-path.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    bad = _v3_sample()
+    bad["render"]["displayMissRate"] = "0.1"
+    r = run(write(tmp_path, "result-M2-v3-bad-miss.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    ok = _v3_sample()
+    ok["render"].update({"path": None, "displayHz": None, "displayMissRate": None})
+    r = run(write(tmp_path, "result-M2-v3-null.json", ok))
+    assert r.returncode == 0, r.stdout + r.stderr

@@ -51,6 +51,13 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
 - Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
 
+## M2 복사 경로 구현 (FIX_GUIDE P1~P4, 구현 완료 · Mac 확인 대기)
+
+- 배경: 0b 2차에서 YouTube VP9는 `importExternalTexture`가 검고 `copyExternalImageToTexture`·Canvas2D는 정상(PLAN.md A21, G4 조건부 통과)
+- P1 manifest description, P2 ext/copy 입력 경로(attach 직후 frameProbe로 choosePath, 결정 전 캔버스 숨김, 복사 경로는 rgba8unorm 텍스처 + texture_2d 셰이더, 재복사 생략은 currentTime 기준), P3 비용 진단(displayMissRate·displayHz·copyMs·videoDropped·frameProbe.ms), P4 체크리스트 7단계, 진단 schemaVersion 3
+- → verify: lint 통과, npm test 89/89, pytest sim 97/97, results 전체 parse-result rc=0 / (1). test:dom은 이 VM에 WebKit 없음(CI ubuntu에서 실행). 복사 경로 실제 렌더·색 일치·G3c 비용·description 표시·`loopFps` 8.7 원인은 미검증 / (3)
+- Opus 확인 필요: (a) `displayMissRate`가 일시정지·탭 비가시 공백을 누락으로 셈(측정 창에서 공백 제외 여부) (b) 재복사 생략이 `currentTime`만 사용, Safari에서 프레임 단위로 갱신되는지 미확인(0이면 `copySkipped`=0) (c) 복사 경로 N2 가드 임계 `copy<2 && c2d>=8`(FIX_GUIDE는 `>8`) (d) 복사 파이프라인 lazy 생성(GUIDELINES 2.5-5 권장에서 소폭 이탈) (e) `displayMissRate`가 hud.js에 있어 K1에서 probe-core와 공유하려면 이동 필요
+
 ## M2 검은 프레임 진단 구현 (FIX_GUIDE N1~N4, 구현 완료 · Mac 확인 대기)
 
 - N1 frameProbe(ext/copy/c2d 평균 밝기, 진단 schemaVersion 2), N2 검은 프레임 가드(2회 연속 detach, stripes 제외), N3 프로브용 `fixtures/ramp-1080p60.webm`(VP9, 약 50 KB), N4 체크리스트 절차 추가

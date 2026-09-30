@@ -91,24 +91,41 @@ fn itm(rgb: vec3f) -> vec3f {
 }
 `;
 
-  const VIDEO_IDENTITY =
-    VIDEO_COMMON +
+  // 복사 경로(FIX_GUIDE P2): 바인딩 타입과 샘플 함수만 외부 텍스처용과 다르고 수식 본문은 공유한다.
+  const COPY_COMMON =
+    VERTEX +
     `
+@group(0) @binding(0) var samp: sampler;
+@group(0) @binding(1) var tex: texture_2d<f32>;
+`;
+  const SAMPLE_EXT = 'textureSampleBaseClampToEdge(tex, samp, in.uv)';
+  const SAMPLE_COPY = 'textureSampleLevel(tex, samp, in.uv, 0.0)';
+
+  const fsIdentity = (sample) => `
 @fragment fn fs(in: VSOut) -> @location(0) vec4f {
-  let c = textureSampleBaseClampToEdge(tex, samp, in.uv);
+  let c = ${sample};
   return vec4f(c.rgb, 1.0);
 }
 `;
-
-  const VIDEO_ITM =
-    VIDEO_COMMON +
-    ITM_FN +
-    `
+  const fsItm = (sample) => `
 @fragment fn fs(in: VSOut) -> @location(0) vec4f {
-  let c = textureSampleBaseClampToEdge(tex, samp, in.uv);
+  let c = ${sample};
   return vec4f(itm(c.rgb), 1.0);
 }
 `;
 
-  globalThis.__sdrhdr.itm = { STEPS, VERTEX, STRIPES, VIDEO_IDENTITY, VIDEO_ITM };
+  const VIDEO_IDENTITY = VIDEO_COMMON + fsIdentity(SAMPLE_EXT);
+  const VIDEO_ITM = VIDEO_COMMON + ITM_FN + fsItm(SAMPLE_EXT);
+  const VIDEO_IDENTITY_COPY = COPY_COMMON + fsIdentity(SAMPLE_COPY);
+  const VIDEO_ITM_COPY = COPY_COMMON + ITM_FN + fsItm(SAMPLE_COPY);
+
+  globalThis.__sdrhdr.itm = {
+    STEPS,
+    VERTEX,
+    STRIPES,
+    VIDEO_IDENTITY,
+    VIDEO_ITM,
+    VIDEO_IDENTITY_COPY,
+    VIDEO_ITM_COPY,
+  };
 })();

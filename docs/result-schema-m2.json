@@ -89,7 +89,37 @@
         "frames": { "type": ["number", "null"] },
         "loopFps": { "type": ["number", "null"] },
         "jsP50": { "type": ["number", "null"] },
-        "jsP95": { "type": ["number", "null"] }
+        "jsP95": { "type": ["number", "null"] },
+        "path": {
+          "type": ["string", "null"],
+          "enum": ["ext", "copy", null],
+          "description": "schemaVersion 3 이상. 입력 경로: ext(외부 텍스처) | copy(복사). 첫 frameProbe 전은 null."
+        },
+        "displayHz": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 콜백 간격 중앙값으로 추정한 60|120."
+        },
+        "displayMissRate": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 콜백 간격 > 1.5/displayHz를 놓친 갱신으로 센 비율."
+        },
+        "copyMsP50": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. copyExternalImageToTexture 호출의 JS 동기 시간(ms)."
+        },
+        "copyMsP95": { "type": ["number", "null"] },
+        "copySkipped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 같은 프레임 재복사 생략 횟수."
+        },
+        "videoDropped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. getVideoPlaybackQuality().droppedVideoFrames"
+        },
+        "videoTotal": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. getVideoPlaybackQuality().totalVideoFrames"
+        }
       }
     },
     "frameProbe": {
@@ -103,7 +133,17 @@
         "c2d": { "type": ["number", "null"] },
         "extErr": { "type": ["string", "null"] },
         "copyErr": { "type": ["string", "null"] },
-        "c2dErr": { "type": ["string", "null"] }
+        "c2dErr": { "type": ["string", "null"] },
+        "ms": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. frameProbe 1회 전체 소요(ms)."
+        },
+        "extSyncMs": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 경로별 첫 await까지 동기 시간(ms)."
+        },
+        "copySyncMs": { "type": ["number", "null"] },
+        "c2dSyncMs": { "type": ["number", "null"] }
       }
     },
     "flags": {

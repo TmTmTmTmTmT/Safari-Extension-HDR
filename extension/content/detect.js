@@ -45,9 +45,24 @@
     return (num(p.c2d) && p.c2d >= BLACK_REF_MIN) || (num(p.copy) && p.copy >= BLACK_REF_MIN);
   }
 
-  // 순수: 연속 횟수 갱신. 검지 않거나 판단 불가면 0으로 되돌린다.
-  function nextBlackStreak(streak, probe) {
-    return isBlackOverlay(probe) ? (streak || 0) + 1 : 0;
+  // 순수: 입력 경로 선택 (PLAN C절 "비디오 입력 경로"). ext가 검고 copy가 정상이면 'copy', 아니면 'ext'.
+  function choosePath(probe) {
+    const p = probe || {};
+    const copyOk = typeof p.copy === 'number' && Number.isFinite(p.copy) && p.copy >= BLACK_REF_MIN;
+    return isBlackOverlay(p) && copyOk ? 'copy' : 'ext';
+  }
+
+  // 순수: 선택된 경로의 출력이 검은지. ext는 isBlackOverlay, copy는 copy 자체가 검고 c2d가 정상일 때 (FIX_GUIDE P2-4).
+  function isBlackSelected(probe, path) {
+    if (path !== 'copy') return isBlackOverlay(probe);
+    const p = probe || {};
+    const num = (v) => typeof v === 'number' && Number.isFinite(v);
+    return num(p.copy) && p.copy < BLACK_EXT_MAX && num(p.c2d) && p.c2d >= BLACK_REF_MIN;
+  }
+
+  // 순수: 연속 횟수 갱신. 검지 않거나 판단 불가면 0으로 되돌린다. path 생략 시 ext 기준.
+  function nextBlackStreak(streak, probe, path) {
+    return isBlackSelected(probe, path) ? (streak || 0) + 1 : 0;
   }
 
   // DOM: 메인 플레이어 video와 container. 실패 시 예외 없이 null (GUIDELINES 2.3-2).
@@ -70,6 +85,8 @@
     BLACK_STREAK_LIMIT,
     isDrm,
     isBlackOverlay,
+    isBlackSelected,
+    choosePath,
     nextBlackStreak,
     contentRect,
     canvasResolution,

@@ -11,6 +11,8 @@ test('manifest: 필수 키', () => {
   assert.strictEqual(manifest.manifest_version, 3);
   assert.strictEqual(manifest.name, 'SDR HDR');
   assert.strictEqual(manifest.version, '0.1.0');
+  assert.strictEqual(typeof manifest.description, 'string');
+  assert.ok(manifest.description.trim().length > 0);
   assert.strictEqual(manifest.action.default_popup, 'popup/popup.html');
 });
 

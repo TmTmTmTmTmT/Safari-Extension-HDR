@@ -10,10 +10,11 @@
   const PROBE_W = 64;
   const PROBE_H = 36;
   const PROBE_FORMAT = 'rgba8unorm';
-  const PROBE_INTERVAL_MS = 5000;
+  const PROBE_INTERVAL_MS = 30000; // 경로 선택 후 주기 (FIX_GUIDE P2-5)
   const PROBE_POLL_MS = 500;
   const TEX_COPY_SRC = 0x01;
   const TEX_COPY_DST = 0x02;
+  const TEX_TEXTURE_BINDING = 0x04;
   const TEX_RENDER_ATTACHMENT = 0x10;
   const BUF_MAP_READ = 0x01;
   const BUF_COPY_DST = 0x08;
@@ -46,6 +47,7 @@
     let rafId = null;
     let frames = 0;
     const frameTimes = [];
+    const copyTimes = [];
     const loopTs = [];
     const api = { gpu: null, adapter: null, device: null, configure: null, configRead: null };
     const onProbe = hooks && typeof hooks.onProbe === 'function' ? hooks.onProbe : null;
@@ -56,6 +58,14 @@
     let probeN = 0;
     let probePipeline = null;
     let frameProbe = null;
+    // 입력 경로: null(첫 frameProbe 전) | 'ext' | 'copy'. ext->copy만 허용하고 되돌리지 않는다.
+    let path = null;
+    let copyTex = null;
+    let copyView = null;
+    let copySize = null;
+    let lastCopyTime = null;
+    let copySkipped = 0;
+    const copyPipelines = {};
 
     function fail(e, at) {
       running = false;
@@ -73,8 +83,18 @@
       rafId = null;
     }
 
+    // video 모드에서 경로가 정해지기 전에는 렌더하지 않는다. stripes는 경로와 무관.
+    function pathReady() {
+      return mode === 'stripes' || path !== null;
+    }
+
+    // 결정 전 video 모드에서는 캔버스를 숨겨 원본 video가 보이게 한다.
+    function updateVisibility() {
+      if (canvas && canvas.style) canvas.style.visibility = pathReady() ? '' : 'hidden';
+    }
+
     function kick() {
-      if (!running || destroyed || rafId !== null || document.hidden) return;
+      if (!running || destroyed || rafId !== null || document.hidden || !pathReady()) return;
       rafId = requestAnimationFrame(tick);
     }
 
@@ -141,11 +161,58 @@
       sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     }
 
+    function copyPipeline() {
+      const key = mode === 'identity' ? 'identity' : 'itm';
+      if (!copyPipelines[key]) {
+        const shaders = globalThis.__sdrhdr.itm;
+        const code = key === 'identity' ? shaders.VIDEO_IDENTITY_COPY : shaders.VIDEO_ITM_COPY;
+        copyPipelines[key] = makePipeline(device.createShaderModule({ code }));
+      }
+      return copyPipelines[key];
+    }
+
+    function destroyCopyTexture() {
+      if (copyTex) copyTex.destroy();
+      copyTex = null;
+      copyView = null;
+      copySize = null;
+      lastCopyTime = null;
+    }
+
+    // video 크기 텍스처를 유지하고, 같은 프레임(currentTime 동일)이면 재복사를 생략한다. 복사 불가면 false.
+    function updateCopyTexture() {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!(w > 0 && h > 0)) return false;
+      if (copyTex && (copySize[0] !== w || copySize[1] !== h)) destroyCopyTexture();
+      if (!copyTex) {
+        copyTex = device.createTexture({
+          size: [w, h],
+          format: PROBE_FORMAT,
+          usage: TEX_TEXTURE_BINDING | TEX_COPY_DST | TEX_RENDER_ATTACHMENT,
+        });
+        copyView = copyTex.createView();
+        copySize = [w, h];
+      }
+      const t = video.currentTime;
+      if (lastCopyTime !== null && t === lastCopyTime) {
+        copySkipped += 1;
+        return true;
+      }
+      const c0 = performance.now();
+      device.queue.copyExternalImageToTexture({ source: video }, { texture: copyTex }, [w, h]);
+      push(copyTimes, performance.now() - c0);
+      lastCopyTime = t;
+      return true;
+    }
+
     // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
     function renderOnce() {
       const isVideo = mode !== 'stripes';
-      if (isVideo && video.readyState < 2) return false;
-      const pipeline = pipelines[mode];
+      if (isVideo && (video.readyState < 2 || path === null)) return false;
+      const useCopy = isVideo && path === 'copy';
+      if (useCopy && !updateCopyTexture()) return false;
+      const pipeline = useCopy ? copyPipeline() : pipelines[mode];
       const enc = device.createCommandEncoder();
       const pass = enc.beginRenderPass({
         colorAttachments: [
@@ -159,13 +226,13 @@
       });
       pass.setPipeline(pipeline);
       if (isVideo) {
-        // 외부 텍스처는 재사용하지 않고 매번 import (GUIDELINES 2.5-1).
-        const tex = device.importExternalTexture({ source: video });
+        // 외부 텍스처는 재사용하지 않고 매번 import (GUIDELINES 2.5-1). 복사 경로는 복사 텍스처 뷰를 쓴다.
+        const resource = useCopy ? copyView : device.importExternalTexture({ source: video });
         const bind = device.createBindGroup({
           layout: pipeline.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: sampler },
-            { binding: 1, resource: tex },
+            { binding: 1, resource },
           ],
         });
         pass.setBindGroup(0, bind);
@@ -305,17 +372,22 @@
     }
 
     // 경로마다 예외를 따로 잡아 name만 기록한다. 한 경로 실패가 다른 경로를 막지 않는다.
+    // syncMs: 함수 호출 후 첫 await까지의 동기 시간 (메인 스레드 점유 추정, FIX_GUIDE P3-2).
     async function runPath(fn) {
+      const t0 = performance.now();
       try {
-        return { v: await fn(), err: null };
+        const pending = fn();
+        const syncMs = performance.now() - t0;
+        return { v: await pending, err: null, syncMs };
       } catch (e) {
-        return { v: null, err: (e && e.name) || 'Error' };
+        return { v: null, err: (e && e.name) || 'Error', syncMs: performance.now() - t0 };
       }
     }
 
     async function runProbe() {
       probeBusy = true;
       try {
+        const t0 = performance.now();
         const ext = await runPath(probeExt);
         const copy = await runPath(probeCopy);
         const c2d = await runPath(probeC2d);
@@ -330,10 +402,21 @@
           extErr: ext.err,
           copyErr: copy.err,
           c2dErr: c2d.err,
+          ms: performance.now() - t0,
+          extSyncMs: ext.syncMs,
+          copySyncMs: copy.syncMs,
+          c2dSyncMs: c2d.syncMs,
         };
+        // 첫 결과로 경로를 정하고, 이후 ext에서 copy로 1회만 전환한다 (반대 방향 없음).
+        const chosen = globalThis.__sdrhdr.detect.choosePath(frameProbe);
+        if (path === null || (path === 'ext' && chosen === 'copy')) {
+          path = chosen;
+          updateVisibility();
+          kick();
+        }
         if (onProbe) {
           try {
-            onProbe(Object.assign({}, frameProbe));
+            onProbe(Object.assign({}, frameProbe), path);
           } catch (e) {
             // 콜백 오류가 재생을 방해하지 않게 한다.
           }
@@ -343,14 +426,16 @@
       }
     }
 
-    // 재생 중이고 readyState>=2일 때만 실행. 첫 회차는 즉시, 이후 5초마다. 실행 중이면 건너뜀.
+    // 경로 결정 전 첫 회차는 readyState>=2이면 즉시(일시정지 포함, 첫 프레임 표시용).
+    // 결정 후에는 재생 중일 때만 30초마다. stripes 모드와 실행 중에는 건너뜀.
     function probePoll() {
-      if (probeBusy || destroyed || !running || !device) return;
-      if (video.paused || video.ended || video.readyState < 2) return;
+      if (probeBusy || destroyed || !running || !device || mode === 'stripes') return;
+      if (video.readyState < 2) return;
+      if (path !== null && (video.paused || video.ended)) return;
       const now = performance.now();
       if (now < probeDue) return;
       probeDue = now + PROBE_INTERVAL_MS;
-      runProbe();
+      runProbe().catch(() => {});
     }
 
     const onWake = () => kick();
@@ -364,6 +449,7 @@
     function start() {
       if (destroyed || running) return initPromise || Promise.resolve();
       running = true;
+      updateVisibility();
       video.addEventListener('play', onWake);
       video.addEventListener('seeked', onWake);
       document.addEventListener('visibilitychange', onVisibility);
@@ -397,6 +483,7 @@
     function setMode(next) {
       if (next !== 'itm' && next !== 'identity' && next !== 'stripes') return;
       mode = next;
+      updateVisibility();
       // 정지 상태에서도 변경이 보이도록 1회 렌더.
       if (device) kick();
     }
@@ -406,6 +493,7 @@
       stop();
       destroyed = true;
       try {
+        destroyCopyTexture();
         if (ctx) ctx.unconfigure();
         if (device) device.destroy();
       } catch (e) {
@@ -414,9 +502,21 @@
     }
 
     function getStats() {
+      let vq = null;
+      try {
+        if (typeof video.getVideoPlaybackQuality === 'function')
+          vq = video.getVideoPlaybackQuality();
+      } catch (e) {
+        // 품질 정보를 못 읽어도 진단은 계속한다.
+      }
       return {
         mode,
+        path,
         frames,
+        copyTimesMs: copyTimes.slice(),
+        copySkipped,
+        videoDropped: vq ? vq.droppedVideoFrames : null,
+        videoTotal: vq ? vq.totalVideoFrames : null,
         api: Object.assign({}, api, {
           configRead: api.configRead && Object.assign({}, api.configRead),
         }),

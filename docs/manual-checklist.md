@@ -50,13 +50,19 @@
 - 조건마다 popup의 진단 JSON을 "복사"로 복사해 `results/result-M2-<YYYYMMDD>-<전원>-<밝기>-<해상도>-<모드>.json`으로 저장한다. "JSON 저장" 링크의 Safari popup 동작은 [미확인]이므로 복사를 기본 경로로 한다. 전원은 `ac`, 밝기는 `mid`, 해상도는 `1080p60`/`2160p60`, 모드는 `stripes`/`identity`/`itm`으로 적는다.
 - 확인하지 못한 항목은 비워 두지 말고 [미확인]으로 적는다.
 
-### 0b 검은 프레임 진단 절차 (FIX_GUIDE N4)
+### 0b 복사 경로 확인 절차 (FIX_GUIDE P4)
 
-1. 확장 갱신: `git pull` 후 Xcode에서 다시 Run한다. 확장 코드는 참조 방식이라 xcode 재생성은 필요 없을 것으로 [추정]한다. 반영이 안 되면 Safari를 재시작한다.
-2. 같은 YouTube 영상(VP9)에서 popup 모드를 `identity`로 두고 10초 이상 재생한 뒤 popup JSON을 복사해 `results/result-M2-<날짜>-ac-mid-yt-vp9-identity-probe.json`으로 저장한다(예: `result-M2-20261001-ac-mid-yt-vp9-identity-probe.json`). 가드가 작동하면 오버레이가 사라지고 원본이 보이는 것이 정상이다.
-3. 가능하면 H.264로 재생되는 영상 1개로 같은 절차를 한다(Stats for nerds의 Codecs가 `avc1`인 영상). 없으면 생략하고 [미확인]으로 적는다.
-4. 프로브: 저장소 루트에서 `python3 -m http.server 8000`을 실행하고 `http://localhost:8000/probe/`를 연다. P0-4에서 `ramp-1080p60-vp9`(파일 `fixtures/ramp-1080p60.webm`)의 "창 실행"을 셰이더 identity로 누르고, 오른쪽 출력이 검은지 한 줄 메모한 뒤 JSON export를 저장한다. 이 픽스처는 G3 일괄 측정 대상이 아니다.
-5. stripes 판독: 밝기 중간에서 popup 모드를 `stripes`로 두고 30초 이상 기다린다. 캔버스는 왼쪽부터 9줄(1.0 / 1.25 / 1.5 / 2 / 3 / 4 / 6 / 8 / 16)이다. 왼쪽부터 세어 서로 구분되는 마지막 줄의 번호와 값을 적는다(예: 5번째, 값 3). 판독하지 못하면 [미확인]으로 적는다.
+VP9 영상에서 외부 텍스처가 검어(PLAN.md A21) 확장은 첫 frameProbe 결과로 복사 경로(`render.path:"copy"`)를 고른다. 아래 순서로 확인한다. 확인하지 못한 항목은 [미확인]으로 적는다.
+
+1. `git pull` → Xcode Run → Safari 재시작 후 "서명되지 않은 확장 허용"을 다시 확인한다.
+2. 전원 연결, 밝기 중간, 창 모드. YouTube VP9 영상(이후 모두 같은 영상)을 **2160p60**으로 재생하고 모드를 `itm`으로 둔다. 영상이 보이는지, 원본보다 하이라이트가 밝아 보이는지 한 줄 적는다. 30초 재생 후 popup JSON을 복사해 `results/result-M2-<날짜>-ac-mid-2160p60-itm-copy-window.json`으로 저장한다.
+3. 같은 영상을 전체화면으로 30초 재생하고 JSON을 `results/result-M2-<날짜>-ac-mid-2160p60-itm-copy-fullscreen.json`으로 저장한다. 끊김 육안(없음/가끔/자주)을 적는다.
+4. 화질을 1080p60으로 바꾸고 페이지를 새로고침한다. 전체화면 30초 후 JSON(`…-1080p60-itm-copy-fullscreen.json`)을 저장하고 끊김 육안을 적는다.
+5. 비교 기준: 확장을 popup에서 끈 상태로 같은 영상 2160p60 전체화면 30초를 재생하고 Stats for nerds의 "dropped of" 숫자를 적는다.
+6. 60Hz: 시스템 설정 → 디스플레이 → 주사율을 60Hz로 바꾸고 3번만 반복한다(파일명에 `60hz`를 붙인다). 끝나면 주사율을 ProMotion으로 되돌린다.
+7. stripes: popup에서 모드를 `stripes`로 **먼저** 바꾼 뒤 페이지를 새로고침한다(가드가 이미 detach한 video에는 재attach하지 않는다). 밝기 중간에서 30초 기다린 뒤 왼쪽부터 구분되는 마지막 줄 번호를 적는다(줄은 1.0 / 1.25 / 1.5 / 2 / 3 / 4 / 6 / 8 / 16 순서).
+
+JSON의 `render.path`, `render.displayMissRate`, `render.displayHz`, `render.copyMsP50/P95`, `render.videoDropped/videoTotal`, `frameProbe.ms`가 G3c 판정 자료다(PLAN.md G3c). `python3 scripts/parse-result.py`가 값만 표로 출력한다.
 
 `python3 scripts/parse-result.py`는 `milestone:'M2'` 파일을 `docs/result-schema-m2.json`으로 검증하고 값만 표로 출력한다(판정 없음).
 

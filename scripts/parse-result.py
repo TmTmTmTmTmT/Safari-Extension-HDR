@@ -344,7 +344,13 @@ def summarize_m2(name, data):
         fp = data.get("frameProbe") or {}
         print("\nframeProbe (v2, 밝기 0~255) / flags.blackFrame")
         cols = ["at", "n", "ext", "copy", "c2d", "extErr", "copyErr", "c2dErr"]
+        if "ms" in fp:  # v3: 프로브 1회 소요와 경로별 동기 시간
+            cols += ["ms", "extSyncMs", "copySyncMs", "c2dSyncMs"]
         print(table(cols + ["blackFrame"], [[fmt(fp.get(c)) for c in cols] + [fmt(flags.get("blackFrame"))]]))
+    v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "videoDropped", "videoTotal"]
+    if any(k in render for k in v3_cols):  # schemaVersion 3 이상. v1/v2 파일은 건너뛴다.
+        print("\nrender 비용 진단 (v3, 값만)")
+        print(table(v3_cols, [[fmt(render.get(c)) for c in v3_cols]]))
     errs = data.get("errors") or []
     print("errors (%d)" % len(errs))
     if errs:

@@ -191,7 +191,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'flags',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 2);
+  assert.strictEqual(d.schemaVersion, 3);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -323,6 +323,8 @@ test('normalizeFrameProbe: 숫자 2자리 반올림, 예외는 name 문자열만
       extErr: null,
       copyErr: 'SecurityError',
       c2dErr: { name: 'x' },
+      ms: 12.3456,
+      extSyncMs: 1.234,
       pixels: [1, 2, 3],
     }),
   );
@@ -335,6 +337,10 @@ test('normalizeFrameProbe: 숫자 2자리 반올림, 예외는 name 문자열만
     extErr: null,
     copyErr: 'SecurityError',
     c2dErr: null,
+    ms: 12.35,
+    extSyncMs: 1.23,
+    copySyncMs: null,
+    c2dSyncMs: null,
   });
 });
 
@@ -380,4 +386,120 @@ test('schema v2: frameProbe 선택 필드와 flags.blackFrame 선언, required�
   const d = plain(ns.hud.buildDiag({ frameProbe: { n: 1, ext: 0 } }));
   for (const k of Object.keys(d.frameProbe))
     assert.ok(k in schema.properties.frameProbe.properties, k);
+});
+
+// ---- P2 choosePath / P3 displayMissRate·estimateDisplayHz ----
+
+test('choosePath: ext 검음(<2) + copy>=8이면 copy, 그 외 ext', () => {
+  const { choosePath } = ns.detect;
+  assert.strictEqual(choosePath({ ext: 0, copy: 97.8, c2d: 145 }), 'copy');
+  assert.strictEqual(choosePath({ ext: 1.9, copy: 8, c2d: null }), 'copy');
+  assert.strictEqual(choosePath({ ext: 1.9, copy: 7.9, c2d: 145 }), 'ext'); // copy가 검으면 전환하지 않음
+  assert.strictEqual(choosePath({ ext: 2, copy: 60, c2d: 60 }), 'ext');
+  assert.strictEqual(choosePath({ ext: 40, copy: 60, c2d: 60 }), 'ext');
+  assert.strictEqual(choosePath({ ext: null, copy: 60, c2d: 60 }), 'ext');
+  assert.strictEqual(choosePath({ ext: 0, copy: null, c2d: 60 }), 'ext');
+  assert.strictEqual(choosePath(null), 'ext');
+  assert.strictEqual(choosePath(undefined), 'ext');
+});
+
+test('isBlackSelected/nextBlackStreak: 선택된 경로의 출력 기준', () => {
+  const { isBlackSelected, nextBlackStreak } = ns.detect;
+  assert.strictEqual(isBlackSelected({ ext: 0, copy: 50, c2d: 50 }, 'ext'), true);
+  assert.strictEqual(isBlackSelected({ ext: 0, copy: 50, c2d: 50 }, undefined), true);
+  assert.strictEqual(isBlackSelected({ ext: 0, copy: 50, c2d: 50 }, 'copy'), false);
+  assert.strictEqual(isBlackSelected({ ext: 0, copy: 1.9, c2d: 8 }, 'copy'), true);
+  assert.strictEqual(isBlackSelected({ ext: 0, copy: 1.9, c2d: 7.9 }, 'copy'), false);
+  assert.strictEqual(isBlackSelected({ ext: 50, copy: 2, c2d: 50 }, 'copy'), false);
+  assert.strictEqual(isBlackSelected({ ext: 0, copy: null, c2d: 50 }, 'copy'), false);
+  assert.strictEqual(nextBlackStreak(1, { ext: 0, copy: 0, c2d: 50 }, 'copy'), 2);
+  assert.strictEqual(nextBlackStreak(1, { ext: 0, copy: 50, c2d: 50 }, 'copy'), 0);
+});
+
+// 결정적 지터(+-jitter 교대)를 넣은 콜백 시각열 (ms).
+function seq(periodMs, count, jitter = 0) {
+  return Array.from({ length: count }, (_, i) => i * periodMs + (i % 2 ? jitter : -jitter));
+}
+
+test('displayMissRate: 60Hz 규칙 +-2ms 지터는 0, 120Hz도 0', () => {
+  const { displayMissRate } = ns.hud;
+  const t60 = seq(1000 / 60, 601, 2);
+  assert.strictEqual(displayMissRate(t60, t60[0], t60[600], 60), 0);
+  const t120 = seq(1000 / 120, 1201, 2);
+  assert.strictEqual(displayMissRate(t120, t120[0], t120[1200], 120), 0);
+});
+
+test('displayMissRate: 60Hz에서 33ms 공백 1회는 1/600', () => {
+  const { displayMissRate } = ns.hud;
+  const t = seq(1000 / 60, 601).filter((_, i) => i !== 300); // 한 슬롯 누락
+  assert.strictEqual(displayMissRate(t, 0, 10000, 60), 1 / 600);
+  // 긴 공백은 round(간격 x hz) - 1개로 센다 (100ms -> 5개)
+  const g = [0, 100, 116.7];
+  assert.strictEqual(displayMissRate(g, 0, 1000, 60), 5 / 60);
+});
+
+test('displayMissRate: 창 밖 시각은 무시, 계산 불가는 null', () => {
+  const { displayMissRate } = ns.hud;
+  const t = [-500, 0, 16.7, 33.4, 50.1, 5000];
+  assert.strictEqual(displayMissRate(t, 0, 100, 60), 0);
+  assert.strictEqual(displayMissRate([0], 0, 100, 60), null);
+  assert.strictEqual(displayMissRate([], 0, 100, 60), null);
+  assert.strictEqual(displayMissRate(null, 0, 100, 60), null);
+  assert.strictEqual(displayMissRate([0, 16, 33], 0, 100, 0), null);
+  assert.strictEqual(displayMissRate([0, 16, 33], 100, 100, 60), null);
+});
+
+test('estimateDisplayHz: 간격 중앙값으로 60/120 추정, 일시정지 공백에 강함', () => {
+  const { estimateDisplayHz } = ns.hud;
+  assert.strictEqual(estimateDisplayHz(seq(16.7, 100)), 60);
+  assert.strictEqual(estimateDisplayHz(seq(8.3, 100)), 120);
+  assert.strictEqual(estimateDisplayHz(seq(8.3, 100, 1)), 120);
+  const withPause = seq(16.7, 100).map((v, i) => (i >= 50 ? v + 5000 : v));
+  assert.strictEqual(estimateDisplayHz(withPause), 60);
+  assert.strictEqual(estimateDisplayHz([0]), null);
+  assert.strictEqual(estimateDisplayHz([]), null);
+  assert.strictEqual(estimateDisplayHz(null), null);
+});
+
+test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 일치', () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'result-schema-m2.json'), 'utf8'),
+  );
+  const t = seq(1000 / 120, 1201);
+  const d = plain(
+    ns.hud.buildDiag({
+      render: {
+        mode: 'itm',
+        path: 'copy',
+        frames: 1201,
+        frameTimesMs: [1, 2],
+        loopTimestamps: t,
+        copyTimesMs: [1, 2, 3, 4, 5],
+        copySkipped: 7,
+        videoDropped: 3,
+        videoTotal: 100,
+      },
+      frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3 },
+    }),
+  );
+  assert.strictEqual(d.schemaVersion, 3);
+  assert.strictEqual(d.render.path, 'copy');
+  assert.strictEqual(d.render.displayHz, 120);
+  assert.strictEqual(d.render.displayMissRate, 0);
+  assert.strictEqual(d.render.copyMsP50, 3);
+  assert.strictEqual(d.render.copyMsP95, 4.8);
+  assert.deepStrictEqual(
+    [d.render.copySkipped, d.render.videoDropped, d.render.videoTotal],
+    [7, 3, 100],
+  );
+  for (const k of Object.keys(d.render)) assert.ok(k in schema.properties.render.properties, k);
+  for (const k of Object.keys(d.frameProbe))
+    assert.ok(k in schema.properties.frameProbe.properties, k);
+  assert.deepStrictEqual(schema.properties.render.properties.path.enum, ['ext', 'copy', null]);
+  assert.ok(!schema.properties.render.required.includes('path'));
+  const e = plain(ns.hud.buildDiag({}));
+  assert.deepStrictEqual(
+    [e.render.path, e.render.displayHz, e.render.displayMissRate, e.render.copyMsP50],
+    [null, null, null, null],
+  );
 });

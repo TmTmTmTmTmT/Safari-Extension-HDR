@@ -10,9 +10,13 @@ const root = path.join(__dirname, '..', '..', 'extension');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 // opts.ext/copy/c2d: 각 경로가 돌려줄 픽셀 값(0~255) 또는 Error(예외). onProbe는 hooks로 전달된다.
-function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, videoSize }) {
+function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, videoSize, mode }) {
+  const vals = { ext, copy, c2d };
   const state = {
+    vals,
     submits: 0,
+    renders: 0,
+    paths: [],
     raf: [],
     calls: [],
     textures: [],
@@ -31,13 +35,14 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
     createBindGroup: () => ({}),
     importExternalTexture: () => {
       state.calls.push('importExternalTexture');
-      if (ext instanceof Error) throw ext;
-      lastFill = ext;
+      if (vals.ext instanceof Error) throw vals.ext;
+      lastFill = vals.ext;
       return {};
     },
     createTexture: (d) => {
       state.calls.push('createTexture:' + d.format + ':' + d.size.join('x'));
       const t = {
+        usage: d.usage,
         destroyed: false,
         createView: () => ({}),
         destroy() {
@@ -83,11 +88,10 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
         state.submits += 1;
       },
       copyExternalImageToTexture: (src, dst, size) => {
-        state.calls.push(
-          'copyExternalImageToTexture:' + src.origin.x + ',' + src.origin.y + ':' + size.join('x'),
-        );
-        if (copy instanceof Error) throw copy;
-        lastFill = copy;
+        const at = src.origin ? src.origin.x + ',' + src.origin.y : 'full';
+        state.calls.push('copyExternalImageToTexture:' + at + ':' + size.join('x'));
+        if (vals.copy instanceof Error) throw vals.copy;
+        lastFill = vals.copy;
       },
     },
     destroy() {},
@@ -99,7 +103,10 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
       colorSpace: 'display-p3',
       toneMapping: { mode: 'extended' },
     }),
-    getCurrentTexture: () => ({ createView: () => ({}) }),
+    getCurrentTexture: () => {
+      state.renders += 1;
+      return { createView: () => ({}) };
+    },
     unconfigure() {},
   };
   const listeners = {};
@@ -107,6 +114,8 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
     readyState,
     paused,
     ended: false,
+    currentTime: 0,
+    getVideoPlaybackQuality: () => ({ droppedVideoFrames: 3, totalVideoFrames: 100 }),
     videoWidth: videoSize ? videoSize[0] : 1920,
     videoHeight: videoSize ? videoSize[1] : 1080,
     addEventListener(t, fn) {
@@ -135,9 +144,9 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
         return {
           drawImage() {
             state.calls.push('drawImage');
-            if (c2d instanceof Error) throw c2d;
+            if (vals.c2d instanceof Error) throw vals.c2d;
           },
-          getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(c2d) }),
+          getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(vals.c2d) }),
         };
       }
     },
@@ -150,36 +159,42 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
     if (f === 'content/main.js' || f === 'content/overlay.js') continue; // main은 로드 시 start를 예약한다
     vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
   }
-  const canvas = { getContext: () => gpuCtx };
+  const canvas = { style: {}, getContext: () => gpuCtx };
+  state.canvas = canvas;
   state.renderer = ctx.__sdrhdr.renderer.createRenderer(canvas, video, () => {}, {
-    onProbe: (p) => {
+    onProbe: (p, path) => {
       state.probes.push(p);
-      if (onProbe) onProbe(p);
+      state.paths.push(path);
+      if (onProbe) onProbe(p, path);
     },
   });
+  if (mode) state.renderer.setMode(mode);
   return state;
 }
 
-test('L4: 일시정지 + readyState>=2 이면 attach 직후 1회만 렌더하고 정지', async () => {
+test('L4: 일시정지 + readyState>=2 이면 경로 결정 후 1회만 렌더하고 정지', async () => {
   const s = setup({ readyState: 4, paused: true });
   await s.renderer.start();
+  await s.settle();
   s.flush();
-  assert.strictEqual(s.submits, 1);
+  assert.strictEqual(s.renders, 1);
   assert.strictEqual(s.raf.length, 0);
   assert.ok(!s.listeners.loadeddata || s.listeners.loadeddata.size === 0);
   s.renderer.destroy();
 });
 
-test('L4: readyState<2 이면 loadeddata 1회 구독 후 발화 시 1회 렌더, detach에서 해제', async () => {
+test('L4: readyState<2 이면 loadeddata 1회 구독, 발화 후 경로 결정되면 1회 렌더, detach에서 해제', async () => {
   const s = setup({ readyState: 0, paused: true });
   await s.renderer.start();
   s.flush();
-  assert.strictEqual(s.submits, 0);
+  assert.strictEqual(s.renders, 0);
   assert.strictEqual(s.listeners.loadeddata.size, 1);
   s.video.readyState = 2;
   s.fire('loadeddata');
+  s.intervals[0](); // 500ms 폴링이 첫 frameProbe를 시작한다
+  await s.settle();
   s.flush();
-  assert.strictEqual(s.submits, 1);
+  assert.strictEqual(s.renders, 1);
   s.renderer.destroy();
   assert.strictEqual(s.listeners.loadeddata.size, 0);
   assert.strictEqual(s.listeners.play.size, 0);
@@ -233,30 +248,32 @@ test('N1: 재생 중 readyState>=2이면 시작 직후 1회, 세 경로 값과 �
   s.renderer.destroy();
 });
 
-test('N1: 일시정지 또는 readyState<2에서는 실행하지 않고, 5초 간격으로 반복', async () => {
+test('N1/P2: 경로 결정 전 첫 회차는 일시정지여도 실행, 이후는 재생 중 30초 간격', async () => {
   const s = setup({ readyState: 4, paused: true });
   await s.renderer.start();
   await s.settle();
-  assert.strictEqual(s.probes.length, 0);
+  assert.strictEqual(s.probes.length, 1);
+  s.now = 99999; // 결정 후 일시정지 중에는 실행하지 않음
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1);
   s.video.paused = false;
   s.video.readyState = 1;
+  s.now = 30000;
   s.intervals[0]();
   await s.settle();
-  assert.strictEqual(s.probes.length, 0);
+  assert.strictEqual(s.probes.length, 1);
   s.video.readyState = 4;
+  s.now = 29999; // 첫 회차(now=0)로부터 30초 미만이면 건너뜀
   s.intervals[0]();
   await s.settle();
   assert.strictEqual(s.probes.length, 1);
-  s.now = 4000; // 5초 미만이면 건너뜀
-  s.intervals[0]();
-  await s.settle();
-  assert.strictEqual(s.probes.length, 1);
-  s.now = 5001;
+  s.now = 30001;
   s.intervals[0]();
   await s.settle();
   assert.strictEqual(s.probes.length, 2);
   assert.strictEqual(s.probes[1].n, 2);
-  assert.strictEqual(s.probes[1].at, 5001);
+  assert.strictEqual(s.probes[1].at, 30001);
   s.renderer.destroy();
 });
 
@@ -308,7 +325,7 @@ test('N1: c2d 예외(또는 OffscreenCanvas 없음)여도 ext/copy는 기록된�
 });
 
 test('N1: detach 후에는 타이머가 해제되고 더 이상 probe하지 않는다', async () => {
-  const s = setup({ readyState: 4, paused: true });
+  const s = setup({ readyState: 0, paused: true });
   await s.renderer.start();
   s.renderer.destroy();
   assert.strictEqual(s.intervals[0], null);
@@ -319,10 +336,134 @@ test('N1: detach 후에는 타이머가 해제되고 더 이상 probe하지 않�
   assert.ok(!has(s.calls, 'copyTextureToBuffer'));
 });
 
-test('N1: probe는 기존 캔버스 렌더 루프의 submit 횟수에 영향을 주지 않는다(렌더 1회 = 1 submit)', async () => {
+test('N1: 캔버스 렌더 1회 = 캔버스 텍스처 획득 1회 (probe 렌더와 구분)', async () => {
   const s = setup({ readyState: 4, paused: true });
   await s.renderer.start();
+  await s.settle();
   s.flush();
-  assert.strictEqual(s.submits, 1);
+  assert.strictEqual(s.renders, 1);
+  s.renderer.destroy();
+});
+
+// ---- P2 입력 경로 / P3 진단: stub으로 호출 순서·자원 해제·전환 로직만 본다. 실제 GPU 동작 검증이 아니다. ----
+
+const copyCalls = (calls) => calls.filter((c) => c.startsWith('copyExternalImageToTexture:full'));
+
+test('P2: 첫 frameProbe 전에는 캔버스를 숨기고 렌더하지 않으며, 결정 후 표시', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start(); // 첫 probe 진행 중
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  s.flush();
+  assert.strictEqual(s.renders, 0);
+  assert.strictEqual(s.renderer.getStats().path, null);
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  assert.strictEqual(s.canvas.style.visibility, '');
+  s.flush();
+  assert.strictEqual(s.renders, 1);
+  s.renderer.destroy();
+});
+
+test('P2: ext 검음 + copy 정상이면 copy 경로. 텍스처 usage, 복사 호출, 외부 텍스처 미사용', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, copy: 60, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'copy');
+  assert.deepStrictEqual(s.paths, ['copy']);
+  const imports = s.calls.filter((c) => c === 'importExternalTexture').length;
+  s.video.currentTime = 1;
+  s.flush();
+  assert.strictEqual(s.renders, 1);
+  assert.ok(s.calls.includes('createTexture:rgba8unorm:1920x1080'));
+  const t = s.textures.find((x) => x.usage === (0x04 | 0x02 | 0x10));
+  assert.ok(t, 'TEXTURE_BINDING|COPY_DST|RENDER_ATTACHMENT');
+  assert.strictEqual(copyCalls(s.calls).length, 1);
+  assert.ok(s.calls.includes('copyExternalImageToTexture:full:1920x1080'));
+  assert.strictEqual(s.calls.filter((c) => c === 'importExternalTexture').length, imports);
+  s.renderer.destroy();
+  assert.ok(t.destroyed);
+});
+
+test('P2: 같은 currentTime이면 재복사 생략, 바뀌면 복사. copySkipped와 copyMs 기록', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, copy: 60, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  s.video.currentTime = 1;
+  s.flush();
+  s.flush(); // 같은 currentTime
+  assert.strictEqual(copyCalls(s.calls).length, 1);
+  s.video.currentTime = 1.0167;
+  s.flush();
+  assert.strictEqual(copyCalls(s.calls).length, 2);
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.copySkipped, 1);
+  assert.strictEqual(st.copyTimesMs.length, 2);
+  assert.strictEqual(s.renders, 3);
+  s.renderer.destroy();
+});
+
+test('P2: video 크기가 바뀌면 텍스처를 파괴 후 재생성하고 다시 복사', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, copy: 60, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  s.video.currentTime = 1;
+  s.flush();
+  const first = s.textures.find((x) => x.usage === (0x04 | 0x02 | 0x10));
+  s.video.videoWidth = 1280;
+  s.video.videoHeight = 720;
+  s.flush(); // currentTime은 같아도 새 텍스처에는 복사해야 한다
+  assert.ok(first.destroyed);
+  assert.ok(s.calls.includes('createTexture:rgba8unorm:1280x720'));
+  assert.ok(s.calls.includes('copyExternalImageToTexture:full:1280x720'));
+  s.renderer.destroy();
+});
+
+test('P2: ext 경로에서 나중에 ext 검음 + copy 정상이면 copy로 1회 전환, 되돌리지 않음', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 100, copy: 100, c2d: 100 });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  Object.assign(s.vals, { ext: 0, copy: 60, c2d: 60 });
+  s.now = 30001;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'copy');
+  assert.deepStrictEqual(s.paths, ['ext', 'copy']);
+  Object.assign(s.vals, { ext: 100, copy: 100, c2d: 100 });
+  s.now = 60002;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'copy');
+  assert.deepStrictEqual(s.paths, ['ext', 'copy', 'copy']);
+  s.renderer.destroy();
+});
+
+test('P2: stripes 모드는 경로 결정·probe 없이 렌더하고 캔버스가 보인다', async () => {
+  const s = setup({ readyState: 4, paused: false, mode: 'stripes' });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 0);
+  assert.strictEqual(s.canvas.style.visibility, '');
+  s.flush();
+  assert.strictEqual(s.renders, 1);
+  s.now = 999999;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 0);
+  s.renderer.setMode('itm'); // 결정 전 video 모드로 바뀌면 다시 숨긴다
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  s.renderer.destroy();
+});
+
+test('P3: frameProbe.ms와 경로별 동기 시간, getStats의 video 품질', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  const p = s.renderer.getStats().frameProbe;
+  for (const k of ['ms', 'extSyncMs', 'copySyncMs', 'c2dSyncMs'])
+    assert.strictEqual(typeof p[k], 'number', k);
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.videoDropped, 3);
+  assert.strictEqual(st.videoTotal, 100);
   s.renderer.destroy();
 });

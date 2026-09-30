@@ -79,19 +79,22 @@
     detach(); // 페이지 재생은 그대로 두고 오버레이만 제거 (GUIDELINES 2.5-4)
   }
 
-  // N2: 연속 2회 검은 오버레이로 판정되면 detach (detach 방향으로만 작동, GUIDELINES 2.4-3).
+  // N2: 선택된 경로의 출력이 연속 2회 검으면 detach (detach 방향으로만 작동, GUIDELINES 2.4-3).
   // stripes 모드는 video를 그리지 않으므로 가드를 적용하지 않는다.
-  function onProbe(a, probe) {
+  function onProbe(a, probe, path) {
     if (cur !== a) return;
     if (!settings || settings.mode === 'stripes') {
       a.blackStreak = 0;
       return;
     }
-    a.blackStreak = ns.detect.nextBlackStreak(a.blackStreak, probe);
+    a.blackStreak = ns.detect.nextBlackStreak(a.blackStreak, probe, path);
     if (a.blackStreak < ns.detect.BLACK_STREAK_LIMIT) return;
     blackVideos.add(a.video);
     blackFlag = true;
-    addError('blackFrame', { name: 'BlackFrame', message: 'ext≈0 while c2d/copy>0' });
+    addError('blackFrame', {
+      name: 'BlackFrame',
+      message: 'selected path (' + path + ') output ≈0 while c2d/copy>0',
+    });
     detach();
   }
 
@@ -110,7 +113,7 @@
       onFrame: () => {
         if (cur === a && checkDrm(video, a.sawEncrypted)) markDrm(video);
       },
-      onProbe: (probe) => onProbe(a, probe),
+      onProbe: (probe, path) => onProbe(a, probe, path),
     });
     cur = a;
     a.renderer.setMode(settings.mode);
@@ -189,6 +192,11 @@
             frames: last.render.frames,
             frameTimesMs: last.render.frameTimesMs,
             loopTimestamps: last.render.loopTimestamps,
+            path: last.render.path,
+            copyTimesMs: last.render.copyTimesMs,
+            copySkipped: last.render.copySkipped,
+            videoDropped: last.render.videoDropped,
+            videoTotal: last.render.videoTotal,
           }
         : { mode: settings ? settings.mode : null },
       frameProbe: last.render ? last.render.frameProbe : null,

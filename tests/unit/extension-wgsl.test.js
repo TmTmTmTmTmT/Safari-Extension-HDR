@@ -56,3 +56,24 @@ test('셰이더 본문(상수 제외)이 probe/shaders.js와 같다', () => {
   // 균형 프리셋에서는 상수까지 포함해 문자열이 완전히 같다.
   assert.strictEqual(ext.itm.VIDEO_ITM, probe.VIDEO_ITM);
 });
+
+test('복사 경로 셰이더: 바인딩 타입과 샘플 함수만 외부 텍스처용과 다르고 본문은 같다', () => {
+  const EXT_BIND = '@group(0) @binding(1) var tex: texture_external;';
+  const COPY_BIND = '@group(0) @binding(1) var tex: texture_2d<f32>;';
+  const EXT_SAMPLE = 'textureSampleBaseClampToEdge(tex, samp, in.uv)';
+  const COPY_SAMPLE = 'textureSampleLevel(tex, samp, in.uv, 0.0)';
+  const toExt = (src) => src.replace(COPY_BIND, EXT_BIND).replace(COPY_SAMPLE, EXT_SAMPLE);
+  assert.ok(
+    ext.itm.VIDEO_ITM_COPY.includes(COPY_BIND) && ext.itm.VIDEO_ITM_COPY.includes(COPY_SAMPLE),
+  );
+  assert.ok(!ext.itm.VIDEO_ITM_COPY.includes('texture_external'));
+  assert.ok(!ext.itm.VIDEO_ITM_COPY.includes('textureSampleBaseClampToEdge'));
+  assert.strictEqual(toExt(ext.itm.VIDEO_ITM_COPY), ext.itm.VIDEO_ITM);
+  assert.strictEqual(toExt(ext.itm.VIDEO_IDENTITY_COPY), ext.itm.VIDEO_IDENTITY);
+  // 복사용 ITM 상수도 균형 값과 같다.
+  const c = itmConsts(ext.itm.VIDEO_ITM_COPY);
+  const p = ext.params.PRESET_BALANCED;
+  assert.deepStrictEqual(c, { P: p.P, K: p.k, N: p.n, G: p.g, S: p.s, HS: p.hs });
+  // probe 쪽에는 복사용 셰이더가 없다(probe/ 무변경).
+  assert.ok(!('VIDEO_ITM_COPY' in probe));
+});
