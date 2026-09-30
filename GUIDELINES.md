@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1 (2026-09-30). 개정은 Opus만 한다.
+> 버전: v1.1 (2026-09-30, 2.5-1 렌더 루프 개정). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -45,7 +45,7 @@
 3. **[필수]** 검은 프레임 연속 감지는 보조 신호로만 쓰며, detach 방향으로만 작동한다.
 
 ### 2.5 렌더러
-1. **[필수]** 프레임 구동은 `requestVideoFrameCallback`이다. `importExternalTexture`는 프레임마다 다시 호출한다(외부 텍스처 재사용 금지).
+1. **[필수]** 프레임 구동은 PLAN.md C절 "렌더 루프"를 따른다(2026-09-30 개정: `requestAnimationFrame` 구동, rVFC는 Safari에서 표시 프레임보다 적게 호출되어 구동에 쓰지 않음). `importExternalTexture`는 렌더할 때마다 다시 호출한다(외부 텍스처 재사용 금지).
 2. **[필수]** 일시정지·seek 시 1회 렌더, 탭 비가시(`visibilitychange`) 시 루프 정지.
 3. **[필수]** 캔버스 설정은 `format:'rgba16float'`, `colorSpace:'display-p3'`, `toneMapping:{mode:'extended'}`로 고정한다. Phase 0 판정 전에 다른 값을 시도하는 분기를 넣지 않는다(폴백 경로는 Opus 지시 후).
 4. **[필수]** GPU 초기화 실패, device lost, SecurityError는 잡아서 detach하고 HUD에 기록한다. 페이지 재생을 방해하지 않는다.
