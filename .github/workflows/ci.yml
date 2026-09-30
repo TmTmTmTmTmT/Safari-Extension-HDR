@@ -35,8 +35,19 @@ jobs:
             exit 0
           fi
           xcodebuild -version
-          if grep -F -e "$PWD" -e "/Users/" "$proj/project.pbxproj"; then
+          pbx="$proj/project.pbxproj"
+          if [ ! -f "$pbx" ]; then
+            echo "pbxproj 없음: $pbx"
+            ls -la "$proj"
+            exit 1
+          fi
+          rc=0
+          grep -F -e "$PWD" -e "/Users/" "$pbx" || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "A16 실패: pbxproj에 절대경로가 있습니다."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "grep 실행 실패(rc=$rc)"
             exit 1
           fi
           xcodebuild -project "$proj" -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build

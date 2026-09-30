@@ -44,10 +44,21 @@ fi
 pbx="$proj/project.pbxproj"
 
 # 저장소 절대경로가 들어가면 CI(다른 경로)에서 빌드가 깨진다 (A16). 수정하지 않고 알린다.
-if grep -F -e "$PWD" -e "/Users/" "$pbx" >/dev/null; then
+# grep 종료 코드: 0=발견, 1=없음, 2=오류(파일 없음 등). 오류를 "없음"으로 보지 않는다.
+if [ ! -f "$pbx" ]; then
+  echo "오류: $pbx 파일이 없어 A16 검사를 할 수 없습니다. 아래 출력을 Opus에 전달하세요." >&2
+  ls -la "$proj" >&2 || true
+  exit 1
+fi
+rc=0
+grep -F -e "$PWD" -e "/Users/" "$pbx" >/dev/null || rc=$?
+if [ "$rc" -eq 0 ]; then
   echo "오류: A16 실패. $pbx 에 절대경로($PWD 또는 /Users/)가 있습니다. 수정하지 말고 이 출력을 Opus에 전달하세요." >&2
   grep -n -F -e "$PWD" -e "/Users/" "$pbx" >&2 || true
   exit 2
+elif [ "$rc" -ne 1 ]; then
+  echo "오류: grep 실행 실패(rc=$rc). A16 검사를 완료하지 못했습니다." >&2
+  exit 1
 fi
 echo "pbxproj 절대경로 검사 통과: $pbx"
 
