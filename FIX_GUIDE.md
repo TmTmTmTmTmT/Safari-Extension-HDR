@@ -1,77 +1,62 @@
-# FIX_GUIDE.md — M2 0b 검은 비디오 프레임 진단(N) + 프로브 지표(K1)
+# FIX_GUIDE.md — M2 VP9 복사 경로(P) + 프로브 지표(K1)
 
-> 작성: Opus. 근거: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`, 사용자 회신(stripes 스크린샷·"4단계로 보여져", itm/identity 검은 화면·소리 정상, 144p에서도 동일, Stats for nerds `vp09.00.51.08…`, `bt709`), STATUS.md "M2 0b 1차 회신".
+> 작성: Opus. 근거: 사용자 회신 frameProbe JSON(2026-09-30 13:47, ext 0 / copy 97.8 / c2d 145.0, 가드 detach 후 원본 정상 표시), `results/result-M1-20260930-probe-vp9-split-fullscreen.json`(프로브 VP9 오른쪽 출력 검정), 회신 "대부분 vp9, avc1 없음", "stripes: 프로브 밝기 중간 4, 조금 올리면 3", 확장 설명에 "`description` 매니페스트 엔트리가 없거나 비어 있습니다".
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
-> 이전 회차: F·H·J(M1 프로브), L1~L6(M2 CI·구현 검토, `7edf085`·`c6fc106`) 완료. 내용은 git 이력 참조. K1은 미구현이며 아래에 그대로 둔다.
+> 이전 회차: L1~L6, N1~N4(`36b880d`) 완료. N 회차 판정은 아래 "N5 판정"에 남긴다. K1은 미구현이며 그대로 둔다.
 
 ## 판정 요약
 
-- **G4는 보류.** 세 항목 중 두 개는 자료가 충족됐고, 비디오 프레임이 검게 나오는 결함이 남았다(PLAN.md 게이트 판정 기록 참조).
-  - `navigator.gpu`(isolated world): **충족.** gpu/adapter/device/configure 모두 true, configRead `rgba16float`/`display-p3`/`extended`, 렌더 루프 ProMotion ≈115회/s, jsP95 1 ms.
-  - SecurityError: 예외는 없다(errors 빈 배열). 그러나 프레임이 검으므로 "YouTube video를 읽을 수 있다"는 G4의 취지는 **미충족**이다. 예외 없는 검은 프레임은 taint와 결과가 같을 수 있어 원인을 가려야 한다.
-  - 오버레이 EDR: **잠정 충족.** stripes 스크린샷에서 1.0(A0)·1.25(BC)·1.5(CF)·2.0(E8)이 서로 다르고 3.0 이상은 같은 흰색으로 합쳐졌다. 스크린샷이 1.0을 회색으로 기록한 것은 캡처가 EDR 값을 헤드룸 기준으로 눌러 담았다는 뜻이며, 구분 한계 약 3은 0a 밝기 중간 G2 값(3)과 일치한다. 사용자 육안 확인(N4)으로 확정한다.
-- **검은 프레임 원인 가설**(현재 자료로는 구분 불가):
-  - H-a: Safari `importExternalTexture`가 이 소스(MSE, VP9)의 프레임을 지원하지 않고 예외 없이 검은 텍스처를 준다.
-  - H-b: 코덱과 무관하게 MSE(blob) video가 원인이다.
-  - H-c: isolated world(content script)에서 video 프레임 접근이 막힌다.
-  - 프로브(same-origin H.264 mp4, main world)는 정상이었으므로 차이는 코덱·MSE·실행 world 셋 중 하나 이상이다.
-- 이번 회차는 **원인 판별용 진단(N1·N3)과 사용자 보호 가드(N2)**만 한다. 대체 렌더 경로는 결과를 본 뒤 Opus가 정한다(N5 분기표).
+- **N5 판정: 표 1행(H-a).** ext≈0, copy>0, c2d>0이고 프로브의 same-origin·비MSE·main world VP9도 검다. 원인은 MSE나 isolated world가 아니라 **Safari 27.2 `importExternalTexture`의 VP9 결함**이다(PLAN.md A21). H.264는 0a에서 정상이었다.
+- **G4: 통과(조건부).** 확장 컨텍스트 조건은 모두 충족(PLAN.md 게이트 판정 기록). 조건은 복사 경로(P2)가 YouTube VP9에서 영상을 그리고 G3c 비용 기준을 통과하는 것이다.
+- YouTube 대부분이 VP9이므로 복사 경로는 선택이 아니라 기본 경로가 된다. H.264 강제(코덱 협상 조작)는 main world 주입이 필요하고 YouTube H.264는 1080p가 상한이라 2160p 목표와 충돌하므로 채택하지 않는다.
+- 관찰 두 가지(원인 미확인, P3로 측정):
+  - 회신 JSON의 `loopFps` 8.7(프레임 291개/약 33초)은 이전 1차(약 115)보다 크게 낮다. frameProbe 2회째가 33초에 실행돼 5초 주기와도 맞지 않는다. frameProbe(특히 4K `drawImage`·`copyExternalImageToTexture`·`mapAsync`)가 메인 스레드나 GPU 큐를 막았을 가능성이 있다.
+  - 프로브 VP9 1080p60 run에서 video 자체 드롭 327/671. Safari의 VP9 디코드 부하가 클 수 있다.
+- stripes: 확장 오버레이에서 1.25·1.5·2가 구분되고 한계 약 3, 프로브 밝기 중간에서 4(조금 밝히면 3). G2 기준(흰색 위 2단계 이상)과 같아 EDR 항목은 충족으로 본다. 회신의 "유튜브에선 stripes 해도 영상이 보임"은 가드가 이미 detach한 video에 재attach하지 않아서다(정상 동작). stripes 확인은 **모드를 stripes로 먼저 고른 뒤 새로고침**해야 한다.
 
 ---
 
-## N1. 프레임 경로 3종 되읽기 진단 (`diag.frameProbe`)
+## P1. manifest `description` 추가
 
-- **원인 판별 목표**: 같은 순간 같은 video 프레임을 세 경로로 읽어 어느 경로가 검은지 본다.
+- **원인**: Safari 확장 설정 화면에 "`description` 매니페스트 엔트리가 없거나 비어 있습니다" 표시.
+- **수정 방향**: `extension/manifest.json`에 `description`(한 문장, 예: "DRM 없는 SDR 영상을 EDR로 확장 표시")을 추가하고 manifest 단위 테스트의 필수 키에 넣는다.
+- **검증(1)**: `npm test`. (3) Safari 확장 설명에 문구 표시.
+
+## P2. 비디오 입력 경로 선택과 복사 경로 (PLAN.md C절 "비디오 입력 경로")
+
 - **수정 방향**:
-  1. attach 후 video가 `readyState >= 2`이고 재생 중일 때 1회, 이후 5초마다 1회(재생 중일 때만) 실행한다. 렌더 루프와 별개이며 렌더 루프를 막지 않는다(비동기, 실행 중이면 다음 회차 건너뜀).
-  2. 경로별 평균 밝기(0~255, RGB 평균)를 구한다. 모두 64×36 크기로 줄여 읽는다.
-     - `ext`: `importExternalTexture` → 전용 파이프라인(identity 샘플, 출력 형식 `rgba8unorm`, 64×36 렌더 타깃) → `copyTextureToBuffer`(bytesPerRow 256 정렬) → `mapAsync`. 기존 캔버스 파이프라인·형식은 바꾸지 않는다.
-     - `copy`: `queue.copyExternalImageToTexture({source: video, origin: 중앙 64×36 영역의 좌상단}, …)`로 `rgba8unorm` 64×36 텍스처에 복사 → 되읽기. 원본 크기 그대로 중앙 부분만 읽는다(축소 없음).
-     - `c2d`: `OffscreenCanvas(64, 36)` 2D 컨텍스트에 `drawImage(video, 0, 0, 64, 36)` → `getImageData` 평균.
-  3. 경로마다 예외를 따로 잡아 `name`만 기록한다(예: `SecurityError`). 한 경로 실패가 다른 경로를 막지 않는다.
-  4. diag에 `frameProbe: {at(ms, 첫 attach 기준), n(누적 횟수), ext, copy, c2d, extErr, copyErr, c2dErr}`로 최신 1회만 둔다. 픽셀 데이터 자체는 저장하지 않는다(GUIDELINES 2.6).
-  5. 평균 계산은 순수 함수(`hud.js` 또는 `detect.js`)로 두고 단위 테스트한다. GPU·Canvas 호출은 `renderer.js`에 둔다.
-- **영향 범위**: `extension/content/renderer.js`, `hud.js`(또는 `detect.js`), `main.js`(diag 반영), `docs/result-schema-m2.json`(schemaVersion 2, `frameProbe` 선택 필드 + `flags.blackFrame`), `scripts/parse-result.py`(M2 v2 열 추가, v1 호환), 테스트.
-- **검증(1)**: lint, `npm test`(평균 함수, bytesPerRow 패딩 제거 로직, diag 스키마 v2), `python3 -m pytest sim`(v1·v2 파싱). CI green.
-- **검증(3)**: N4 절차의 JSON.
+  1. renderer에 입력 경로 상태 `path: 'ext' | 'copy'`를 둔다. attach 직후 첫 frameProbe 결과로 정한다: `isBlackOverlay`가 true(ext≈0, copy 또는 c2d ≥ 8)이고 `copy` ≥ 8이면 `copy`, 아니면 `ext`. 첫 frameProbe 전에는 렌더하지 않는다(캔버스를 숨겨 원본 video가 보이게 한다. `visibility:hidden` 등, 판정 후 표시).
+  2. `copy` 경로: video 크기(`videoWidth×videoHeight`)의 `rgba8unorm` 텍스처(usage `TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT`, copyExternalImageToTexture 요구사항)를 만들고, 렌더할 때마다 `queue.copyExternalImageToTexture({source: video}, {texture}, [w, h])` 후 일반 `texture_2d<f32>` 샘플로 같은 ITM/identity 수식을 적용한다. 셰이더는 외부 텍스처용과 수식이 같아야 하며, 차이는 바인딩 타입과 샘플 함수뿐이다(수식 본문 공유, GUIDELINES 3.1). video 크기가 바뀌면(화질 변경) 텍스처를 다시 만든다.
+  3. 같은 video 프레임 재복사 생략: 렌더 직전 `video.currentTime`(또는 `getVideoPlaybackQuality().totalVideoFrames`)이 직전 복사 때와 같으면 복사를 건너뛰고 이전 텍스처로 렌더한다. ProMotion에서 60fps 소스 복사를 절반으로 줄이는 목적이다.
+  4. N2 가드는 유지하되 판정 대상을 "선택된 경로의 출력"으로 바꾼다: `copy` 경로에서 `copy`도 ≈0이고 c2d > 8이면 detach. 경로 전환은 attach당 1회(ext→copy)만 하고 반대 방향 전환은 하지 않는다.
+  5. frameProbe는 경로 선택 후 30초마다로 늘린다(비용 절감). `stripes` 모드에서는 실행하지 않는다.
+  6. diag에 `render.path`('ext'|'copy')를 추가한다(schemaVersion 3).
+- **영향 범위**: `extension/content/renderer.js`, `itm.wgsl.js`(복사 경로용 셰이더 조립. 수식 본문은 probe/shaders.js와 동일 유지), `detect.js`(경로 선택 순수 함수 `choosePath(probe)`), `main.js`, `hud.js`, `docs/result-schema-m2.json`, `scripts/parse-result.py`, 테스트.
+- **검증(1)**: `choosePath` 경계 테스트, WGSL 일관성 테스트 확장(두 셰이더의 수식 본문 동일), 스키마 v3, stub으로 복사 호출·텍스처 재생성·재복사 생략 조건. (3) P4.
 
-## N2. 검은 프레임 가드 (사용자 보호)
+## P3. 비용 측정 진단 (G3c 자료)
 
-- **원인**: 현재 오버레이가 원본 video를 검은 화면으로 덮는다. GUIDELINES 2.4-3("검은 프레임 연속 감지는 detach 방향으로만")의 범위에서 막는다.
 - **수정 방향**:
-  1. 순수 함수 `isBlackOverlay(probe)`: `ext`가 2 미만이고 `c2d` 또는 `copy`가 8 이상이면 true(예외로 값이 없으면 판단하지 않음).
-  2. N1 결과가 **2회 연속** true면 detach하고, `flags.blackFrame = true`, errors에 `{at:'blackFrame', name:'BlackFrame', message:'ext≈0 while c2d/copy>0'}`를 기록한다. 해당 video 요소는 이번 페이지 수명 동안 재attach하지 않는다(DRM WeakSet과 별도 집합. 새로고침하면 초기화).
-  3. 진단 편의를 위해 popup 모드가 `stripes`일 때는 가드를 적용하지 않는다(video를 그리지 않으므로).
-- **영향 범위**: `detect.js`(순수 함수), `main.js`, 테스트.
-- **검증(1)**: 순수 함수 경계값 테스트(ext 0/1.9/2, c2d 7.9/8, null 조합), 2회 연속 조건 테스트(가능한 범위의 stub).
+  1. diag `render`에 `displayMissRate`(K1과 같은 정의: 콜백 간격 > 1.5/displayHz를 놓친 갱신으로 셈, displayHz는 간격 중앙값으로 60/120 추정)와 `displayHz`, `copyMsP50`/`copyMsP95`(복사 호출의 JS 동기 시간), `copySkipped`(재복사 생략 횟수), `videoDropped`/`videoTotal`(`getVideoPlaybackQuality`)을 추가한다. `displayMissRate` 계산은 순수 함수로 두고 K1 구현 시 프로브와 공유할 수 있게 한다(지금은 extension 쪽에만 둔다. probe 파일은 수정하지 않는다).
+  2. frameProbe 1회에 걸린 시간 `frameProbe.ms`(시작~모든 경로 완료)와 경로별 동기 시간을 기록한다. `loopFps` 8.7 관찰의 원인 확인용이다.
+- **영향 범위**: `renderer.js`, `hud.js`, 스키마, parse-result, 테스트.
+- **검증(1)**: `displayMissRate` 단위 테스트(FIX_GUIDE K1 검증 사례와 같은 입력: 60Hz 규칙 ±2 ms → 0, 120Hz → 0, 60Hz 33 ms 공백 1회 → 1/600, displayHz 추정).
 
-## N3. 프로브에 VP9 픽스처 대조 추가
+## P4. 사용자 Mac 확인 절차 (docs/manual-checklist.md 0b 절 갱신)
 
-- **목표**: H-a(코덱) 대 H-b/H-c를 가른다. same-origin·main world·비MSE에서 VP9가 검은지 본다.
-- **수정 방향**: `scripts/make-fixtures.sh`에 `ramp-1080p60.webm`(VP9, libvpx-vp9, 12초, bt709 태그, 기존 램프와 같은 내용) 생성을 추가하고 커밋한다(파일 크기 1 MB 안팎 목표, 넘으면 STATUS.md에 기록). 2160p VP9는 만들지 않는다(인코딩 시간). 프로브 P0-4 픽스처 목록에 이 파일을 추가해 기존 "창 실행"·"전체화면 측정"으로 identity를 볼 수 있게 한다. `check-fixtures.sh`에 webm 검사(코덱 vp9, 1920×1080, 60fps)를 추가한다.
-- **영향 범위**: `scripts/make-fixtures.sh`, `scripts/check-fixtures.sh`, `fixtures/ramp-1080p60.webm`, `probe/probe.js`(목록만), 필요 시 `probe/index.html`.
-- **검증(1)**: check-fixtures PASS. (3) N4 절차.
-- MSE 재생 경로는 이번에 만들지 않는다(N1 결과로 필요할 때 Opus가 지시).
-
-## N4. 사용자 Mac 확인 절차 (docs/manual-checklist.md 0b 절에 추가)
-
-1. 확장 갱신: `git pull` 후 Xcode에서 다시 Run(확장 코드는 참조 방식이라 재생성 불필요 [추정]. 반영이 안 되면 Safari 재시작).
-2. 같은 YouTube 영상(VP9)에서 `identity` 모드로 재생 10초 이상 → popup JSON 복사 → `results/result-M2-<날짜>-ac-mid-yt-vp9-identity-probe.json`. 가드가 작동하면 오버레이가 사라지고 원본이 보이는 것이 정상이다.
-3. 가능하면 H.264로 재생되는 영상 1개로 같은 절차(Stats for nerds Codecs가 `avc1`인 영상. 없으면 생략하고 [미확인]).
-4. 프로브: `python3 -m http.server 8000` → `http://localhost:8000/probe/` → P0-4에서 `ramp-1080p60.webm` "창 실행"(identity) → 오른쪽 출력이 검은지 한 줄 메모 + JSON export.
-5. stripes 판독: 캔버스는 왼쪽부터 9줄(1.0 / 1.25 / 1.5 / 2 / 3 / 4 / 6 / 8 / 16)이다. 밝기 중간에서 30초 이상 기다린 뒤, 왼쪽부터 세어 서로 구분되는 마지막 줄의 번호와 값을 적는다.
-
-## N5. 결과별 다음 단계 (Opus 판정용, 구현 대상 아님)
-
-| frameProbe(유튜브)          | 프로브 VP9 | 해석                          | 다음 단계 후보                                               |
-| --------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------ |
-| ext≈0, copy>0, c2d>0        | 검음       | H-a: 외부 텍스처가 VP9 미지원 | 프레임마다 `copyExternalImageToTexture` 경로(비용 측정 필요) |
-| ext≈0, copy>0, c2d>0        | 정상       | H-b: MSE 경로 문제            | 위와 같음 + 프로브 MSE 사례로 확인                           |
-| ext≈0, copy≈0, c2d>0        | —          | WebGPU 비디오 경로 전반 불가  | Canvas2D 중간 단계(비용 큼) 또는 F-A 검토                    |
-| 셋 다 ≈0 또는 SecurityError | —          | H-c 또는 보호 프레임          | B절 G4 실패 분기: main world 주입 시험                       |
-| ext>0인데 화면 검음         | —          | 합성·출력 단계 문제           | 캔버스 합성 재조사                                           |
+1. `git pull` → Xcode Run → Safari 재시작 후 "서명되지 않은 확장 허용" 재확인.
+2. 전원 연결, 밝기 중간, 창 모드. YouTube VP9 영상(같은 영상)을 **2160p60**으로 재생, 모드 `itm`. 영상이 보이는지, 원본보다 하이라이트가 밝아 보이는지 한 줄. 30초 재생 후 popup JSON → `results/result-M2-<날짜>-ac-mid-2160p60-itm-copy-window.json`.
+3. 같은 영상 전체화면 30초 → JSON(`…-fullscreen.json`). 끊김 육안(없음/가끔/자주).
+4. 화질 1080p60으로 바꾸고 페이지 새로고침 → 전체화면 30초 → JSON. 끊김 육안.
+5. 비교 기준: 확장을 popup에서 끈 상태로 같은 영상 2160p60 전체화면 30초 → Stats for nerds의 "dropped of" 숫자 기록.
+6. 60Hz: 시스템 설정 → 디스플레이 → 주사율 60Hz로 바꾸고 3번만 반복.
+7. stripes: popup에서 모드를 `stripes`로 **먼저** 바꾼 뒤 페이지 새로고침 → 밝기 중간 30초 대기 → 왼쪽부터 구분되는 마지막 줄 번호.
 
 ---
+
+## N5 판정 (기록)
+
+- 결과: YouTube frameProbe ext 0 / copy 97.8 / c2d 145.0(예외 없음), 프로브 VP9 오른쪽 출력 검정 → 표 1행(H-a). 가드는 2회 연속 후 detach해 원본이 정상 표시됨(N2 동작 확인, (3)).
 
 ## K1. G3 지표를 3차 개정 정의로 교체
 
@@ -88,18 +73,18 @@
 
 ---
 
-## 이번 수정 범위 밖 (변경 금지, N·K 공통)
+## 이번 수정 범위 밖 (변경 금지, P·K 공통)
 
 - ITM 수식, 프리셋 수치(M4).
 - K1은 `probe/` 지표 전용이며 M2 브랜치에 섞지 않는다. N3의 프로브 변경은 픽스처 목록 추가만이다.
-- 대체 렌더 경로(copyExternalImageToTexture 구동, Canvas2D 중간 단계, main world 주입)는 N5 판정 전 구현 금지.
+- Canvas2D 중간 단계, main world 주입, 코덱 협상 조작(H.264 강제)은 구현 금지.
+- ITM 수식·프리셋 수치(M4), 캔버스 설정 고정값(GUIDELINES 2.5-3).
 - 커밋된 `xcode/`의 수기 편집·형식 변환(GUIDELINES 7-5).
 
-## 병렬 분할 (N 회차)
+## 병렬 분할 (P 회차)
 
-- W-A: N1 + N2 (`extension/`, 스키마, parse-result, 테스트).
-- W-B: N3 (`scripts/make-fixtures.sh`, `check-fixtures.sh`, `fixtures/*.webm`, `probe/` 목록) + N4 체크리스트 문구(`docs/manual-checklist.md`).
-- 파일 비중첩. 픽스처 인코딩은 sim-runner로 실행해도 된다.
+- P1~P3는 모두 `renderer.js`·`hud.js`·스키마를 건드려 파일이 겹친다. impl-worker 1개(또는 본 세션)가 순서대로 한다: P1 → P3(측정 필드) → P2.
+- P4 체크리스트 문구는 같은 작업자가 마지막에 반영한다.
 
 ## 병렬 분할 (K1)
 
