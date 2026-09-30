@@ -42,7 +42,7 @@
 | A17 | JS에서 EDR 헤드룸 수치 조회 불가(`dynamic-range: high`는 boolean) | [사실(스펙)] | 배율 파라미터의 근거 | — |
 | A18 | 내장 XDR 헤드룸은 SDR 밝기 설정에 따라 변동(밝기를 낮출수록 커짐) | [확인(0a 2차)] 전원 연결, 안정 후 P0-2: 밝기 낮음 4 / 중간 3 / 최대 2. 밝기 변경·재그리기 직후에는 약 30초 동안 2로 보이다가 안정값에 도달 | 0a P0-2/P0-5 |
 | A19 | (F-A) Safari 확장 appex ↔ 헬퍼 앱 통신은 App Group/XPC 또는 localhost 소켓으로 가능하며, 무료 개인 팀 서명에서도 해당 capability 사용 가능 | [미확인] | F-A 착수 시 FA-0 프로브로 확인 | FA-0 |
-| A20 | Safari `requestVideoFrameCallback`은 video가 표시하는 모든 프레임마다 호출됨 | [반증(0a 3차)] 60Hz 디스플레이에서 60fps video의 콜백이 약 30회/s(모든 모드, 캔버스 없는 B0 포함). ProMotion에서도 51~56회/s. 같은 run의 presentedFrames 기준 video 표시율은 약 54~57회/s로 video 자체는 정상 표시. 즉 rVFC 구동 오버레이는 60Hz에서 약 30fps로만 갱신됨 | 0a 3차 |
+| A20 | Safari `requestVideoFrameCallback`은 video가 표시하는 모든 프레임마다 호출됨 | [반증(0a 3차)] 60Hz 디스플레이에서 60fps video의 콜백이 약 30회/s(모든 모드, 캔버스 없는 B0 포함). ProMotion에서도 51~56회/s. 같은 run의 presentedFrames 기준 video 표시율은 약 54~57회/s로 video 자체는 정상 표시. 즉 rVFC 구동 오버레이는 60Hz에서 약 30fps로만 갱신됨. 4차(rVFC 비교 run V3)에서는 60Hz 53~56회/s, ProMotion 54~56회/s로 3차의 30회/s는 재현되지 않았으나(원인 미확인), 갱신 누락은 여전히 11~32%. 구동 수단으로 신뢰할 수 없다는 결론은 유지 | 0a 3·4차 |
 
 **해석이 갈리는 지점 → 결정**
 - 색 방향: 측색적 변환(709→P3 행렬)을 기반으로 하고, 채도·하이라이트 확장은 **프리셋 + 상세 슬라이더**로 둔다(사용자 답변 반영). 프리셋 수치는 S2/S4 시뮬레이션과 0a 헤드룸 측정 후 Opus가 확정한다.
@@ -70,7 +70,7 @@
 ### 통과/실패 기준
 - **G1 API**: configure 예외 없음, 되읽기가 가능하면 `toneMapping.mode==='extended'`.
 - **G2 EDR**: SDR white보다 밝은 단계가 **2개 이상 구분**됨. 참조 HDR 이미지는 밝은데 스트라이프가 1.0에서 포화되면 실패.
-- **G3 성능** (2026-09-30 2차 개정): 전체화면 오버레이 배치(video 위 단일 캔버스, 캔버스 = min(원본, 표시×DPR)), 전원 연결, 1080p60과 2160p60 모두에서 **(ITM 오버레이 갱신 누락률 − 기준선 누락률) < 1%p**, JS p95 < 4 ms. 갱신 누락률 = 측정 창(워밍업 제외)에서 소스 프레임 간격 슬롯 중 캔버스가 한 번도 렌더되지 않은 슬롯의 비율(구동 방식과 무관한 정의). 기준선 = 같은 구동 루프를 캔버스 없이 돌린 run. 기준선 자체가 5% 이상이면 측정 환경 문제로 보고 판정 보류. 이력: 1차 개정은 rVFC 콜백 기반 드롭률이었으나, 3차 회신에서 rVFC 자체가 60Hz에서 프레임의 절반만 호출돼(A20) 구동 방식을 분리했다.
+- **G3 성능** (2026-09-30 3차 개정): 전체화면 오버레이 배치(video 위 단일 캔버스, 캔버스 = min(원본, 표시×DPR)), 전원 연결, 1080p60과 2160p60, 60Hz와 ProMotion 모두에서 (1) **구동 루프의 디스플레이 갱신 누락률(R3) − 기준선(R0) < 1%p**, (2) JS p95 < 4 ms, (3) 움직이는 박스 끊김 육안 "없음". 디스플레이 갱신 누락률 = 측정 창에서 구동 콜백 간격이 디스플레이 갱신 간격의 1.5배를 넘어 놓친 갱신 수 / 기대 갱신 수(기대 갱신 수 = 측정 창 초 × 디스플레이 Hz). 이력: 1차 개정(rVFC 콜백 드롭률)은 rVFC가 표시 프레임보다 적게 호출돼(A20) 폐기. 2차 개정(소스 프레임 슬롯 누락률)은 구동 루프 주기와 소스 fps가 같은 60Hz에서 위상 지터만으로 거짓 누락이 생겨(캔버스 없는 R0가 콜백 600/600인데 5.67%) 폐기.
 - **G4 확장 컨텍스트(0b)**: content script에서 `navigator.gpu` 사용 가능, YouTube video SecurityError 없음, 오버레이 EDR이 G2와 동등.
 
 ### 실패 분기 (Opus가 FIX_GUIDE.md 또는 PLAN.md 개정으로 지시)
@@ -124,7 +124,7 @@ results/                       # 사용자 회신 JSON
 
 **역할**
 - **content script**: 런타임 로직 전체를 맡는다. 메인 플레이어 video 1개만 대상이다. 캔버스는 `.html5-video-container` 안 video 바로 뒤에 둔다. 컨트롤은 DOM상 뒤에 있으므로 z-index를 유지한다. letterbox는 `videoWidth/Height`로 콘텐츠 사각형을 계산한다. 캔버스 해상도는 `min(videoWidth×videoHeight, contentRect×DPR)`다.
-- **렌더 루프** (2026-09-30 개정, 확정은 FIX_GUIDE.md J 측정 후): `requestAnimationFrame`마다 `importExternalTexture`(매번 재import) → 풀스크린 삼각형 1패스. rVFC는 Safari에서 표시 프레임보다 적게 호출되므로(A20) 구동에 쓰지 않는다. video가 재생 중이 아니면(일시정지·seek 완료·ended) 1회 렌더 후 루프를 멈추고 `play`/`seeked` 이벤트로 재개한다. 탭 비가시 시 정지.
+- **렌더 루프** (2026-09-30 확정, 0a 4차): `requestAnimationFrame`마다 `importExternalTexture`(매번 재import) → 풀스크린 삼각형 1패스. rVFC는 Safari에서 표시 프레임보다 적게 호출되므로(A20) 구동에 쓰지 않는다. video가 재생 중이 아니면(일시정지·seek 완료·ended) 1회 렌더 후 루프를 멈추고 `play`/`seeked` 이벤트로 재개한다. 탭 비가시 시 정지. ProMotion(120Hz)에서는 60fps 소스에 대해 프레임당 2회 렌더한다. 비용 여유(2160p ITM GPU 약 2.4 ms)로 허용하고, 같은 프레임 재렌더 생략은 M6에서 검토한다.
 - **DRM 가드**: `mediaKeys`, `webkitKeys`, `encrypted`/`webkitneedkey` → 즉시 detach, 해당 video는 영구 no-op. 검은 프레임이 연속되면 보조로 detach.
 - **popup**: `storage.local`에 쓰기만 하고, content script가 `storage.onChanged`로 반영한다.
 - **background**: 두지 않는다(필요 시 Opus 승인).
@@ -170,6 +170,8 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
+
+**M1 판정 완료 (2026-09-30)**: G1·G2·G3 통과. M2(최소 확장 + Xcode) 착수 가능. M2의 렌더러는 C절 확정 렌더 루프(rAF)로 구현한다.
 
 ---
 
@@ -322,7 +324,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 |---|---|---|---|---|
 | G1 API | 2026-09-30 | results/result-M1-20260930-battery-max-fullscreen.json | **통과** | configure 예외 없음, 되읽기 `rgba16float`/`display-p3`/`extended`. 조건 무관 항목이라 재측정 불필요 |
 | G2 EDR | 2026-09-30 | results/result-M1-20260930-ac-{low,mid,max}-mixed.json | **통과** | 전원 연결 3단계 밝기 모두 SDR white 위 2단계 이상 구분(안정 후 4 / 3 / 2, 최소 조건인 밝기 최대에서도 1.25·1.5·2). 1차 잠정 판정 확정. 헤드룸 제약은 C절 "0a 헤드룸 제약"으로 M4에 넘김 |
-| G3 성능 | 2026-09-30 | 1차: …battery-max-fullscreen.json / 2차: …ac-{low,mid,max}-mixed.json / 3차: result-M1-20260930-ac-mid-{promotion,60hz}-matrix.json | **rVFC 구동으로는 불통과, 원인은 비용 아님 → 렌더 루프 개정 후 재판정** | 3차(오버레이 단일 캔버스 3600×2025 포함, B0~B3 각 2회): GPU ≤ 2.6 ms, JS p95 ≤ 2 ms로 비용 여유. 그러나 rVFC 콜백이 60Hz에서 약 30회/s(B0 기준선 포함 전 모드 50% 누락), ProMotion에서 51~56회/s(B0 8~13.5%, 5% 초과로 기준선 판정 보류 조건). 오버레이 비용(B3−B0)은 60Hz에서 −0.2%p/+2.0%p로 구분 불가. 원인은 Safari rVFC 호출 빈도(A20). C절 렌더 루프를 rAF 구동으로 개정하고 FIX_GUIDE.md J1~J4 측정 후 재판정. B절 실패 분기(해상도 축소, F-A) 착수 안 함 |
+| G3 성능 | 2026-09-30 | 4차: results/result-M1-20260930-ac-mid-actual60hz-raf.json, …-actualpromotion-raf.json (이전 회차 이력은 git) | **통과** | B절 3차 개정 기준. rAF 구동 run 전부 콜백 수 = 기대 갱신 수(60Hz 600/599~600, ProMotion 1200~1201/1199~1200) → 디스플레이 갱신 누락 0, R3−R0 = 0%p(두 해상도·두 주사율). JS p95 ≤ 1.05 ms. GPU(2160p ITM, 3600×2025) 60Hz 5.3 ms / ProMotion 2.4 ms로 예산 내. 끊김 육안 "없음"(두 주사율). 비교용 rVFC 구동(V3)은 11~32% 누락. 주: 사용자 보고로 4차 두 파일의 refreshRate 표기가 뒤바뀜(loopFps 60/120으로 확인, 파일명은 실제 주사율로 저장). 제한: 픽스처 기준이며 YouTube 실제 재생은 G4(0b)에서 함께 확인 |
 | G4 확장 컨텍스트 | — | — | 대기 | — |
 
 ---
