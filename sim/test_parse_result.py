@@ -95,3 +95,48 @@ def test_m2_and_m1_together(tmp_path):
     r = run(m1, write(tmp_path, "result-M2-sample.json", M2_SAMPLE))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "G1 API 값" in r.stdout and "rgba16float" in r.stdout
+
+
+def _v2_sample():
+    d = copy.deepcopy(M2_SAMPLE)
+    d["schemaVersion"] = 2
+    d["frameProbe"] = {
+        "at": 5012.5,
+        "n": 3,
+        "ext": 0.4,
+        "copy": 61.25,
+        "c2d": 60.5,
+        "extErr": None,
+        "copyErr": None,
+        "c2dErr": "SecurityError",
+    }
+    d["flags"]["blackFrame"] = True
+    return d
+
+
+def test_m2_v2_prints_frame_probe_columns(tmp_path):
+    r = run(write(tmp_path, "result-M2-v2.json", _v2_sample()))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "스키마 검증 실패" not in r.stdout
+    for s in ("frameProbe", "blackFrame", "61.25", "60.5", "SecurityError", "5012.5"):
+        assert s in r.stdout
+    for word in ("PASS", "FAIL", "통과", "판정:"):
+        assert word not in r.stdout
+
+
+def test_m2_v1_has_no_frame_probe_section(tmp_path):
+    r = run(write(tmp_path, "result-M2-v1.json", M2_SAMPLE))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "frameProbe" not in r.stdout
+
+
+def test_m2_v2_null_probe_ok_and_wrong_types_fail(tmp_path):
+    ok = _v2_sample()
+    ok["frameProbe"] = None
+    r = run(write(tmp_path, "result-M2-v2-null.json", ok))
+    assert r.returncode == 0, r.stdout + r.stderr
+    bad = _v2_sample()
+    bad["frameProbe"]["ext"] = "0"
+    r = run(write(tmp_path, "result-M2-v2-bad.json", bad))
+    assert r.returncode == 1
+    assert "스키마 검증 실패" in r.stdout

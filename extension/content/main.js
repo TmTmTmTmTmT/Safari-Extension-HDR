@@ -7,11 +7,13 @@
   const MAX_ERRORS = 20;
 
   const drmVideos = new WeakSet(); // DRM 판정된 video는 영구 no-op (GUIDELINES 2.4-2)
+  const blackVideos = new WeakSet(); // 검은 프레임 가드로 detach된 video는 페이지 수명 동안 재attach 금지 (DRM 집합과 별도)
   const errors = [];
   let settings = null;
-  let cur = null; // 현재 attach: { video, overlay, renderer, sawEncrypted, onEnc }
+  let cur = null; // 현재 attach: { video, overlay, renderer, sawEncrypted, onEnc, blackStreak }
   let last = { render: null, canvas: null, video: null }; // detach 직전 스냅샷
   let drmFlag = false;
+  let blackFlag = false;
   let findTimer = null;
   let findTries = 0;
   let lastDiagKey = null;
@@ -77,11 +79,27 @@
     detach(); // 페이지 재생은 그대로 두고 오버레이만 제거 (GUIDELINES 2.5-4)
   }
 
+  // N2: 연속 2회 검은 오버레이로 판정되면 detach (detach 방향으로만 작동, GUIDELINES 2.4-3).
+  // stripes 모드는 video를 그리지 않으므로 가드를 적용하지 않는다.
+  function onProbe(a, probe) {
+    if (cur !== a) return;
+    if (!settings || settings.mode === 'stripes') {
+      a.blackStreak = 0;
+      return;
+    }
+    a.blackStreak = ns.detect.nextBlackStreak(a.blackStreak, probe);
+    if (a.blackStreak < ns.detect.BLACK_STREAK_LIMIT) return;
+    blackVideos.add(a.video);
+    blackFlag = true;
+    addError('blackFrame', { name: 'BlackFrame', message: 'ext≈0 while c2d/copy>0' });
+    detach();
+  }
+
   function attach(found) {
     const { video, container } = found;
     const overlay = ns.overlay.createOverlay(container, video);
     overlay.update();
-    const a = { video, overlay, renderer: null, sawEncrypted: false, onEnc: null };
+    const a = { video, overlay, renderer: null, sawEncrypted: false, onEnc: null, blackStreak: 0 };
     a.onEnc = () => {
       a.sawEncrypted = true;
       markDrm(video);
@@ -92,6 +110,7 @@
       onFrame: () => {
         if (cur === a && checkDrm(video, a.sawEncrypted)) markDrm(video);
       },
+      onProbe: (probe) => onProbe(a, probe),
     });
     cur = a;
     a.renderer.setMode(settings.mode);
@@ -111,7 +130,7 @@
       }
       return;
     }
-    if (drmVideos.has(found.video)) return;
+    if (drmVideos.has(found.video) || blackVideos.has(found.video)) return;
     if (checkDrm(found.video, false)) {
       markDrm(found.video);
       return;
@@ -172,7 +191,13 @@
             loopTimestamps: last.render.loopTimestamps,
           }
         : { mode: settings ? settings.mode : null },
-      flags: { drm: drmFlag, attached: !!cur, fullscreen: !!document.fullscreenElement },
+      frameProbe: last.render ? last.render.frameProbe : null,
+      flags: {
+        drm: drmFlag,
+        attached: !!cur,
+        fullscreen: !!document.fullscreenElement,
+        blackFrame: blackFlag,
+      },
       errors,
     };
   }

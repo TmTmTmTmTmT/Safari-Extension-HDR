@@ -340,6 +340,11 @@ def summarize_m2(name, data):
             ],
         )
     )
+    if "frameProbe" in data or "blackFrame" in flags:  # schemaVersion 2 이상. v1 파일은 건너뛴다.
+        fp = data.get("frameProbe") or {}
+        print("\nframeProbe (v2, 밝기 0~255) / flags.blackFrame")
+        cols = ["at", "n", "ext", "copy", "c2d", "extErr", "copyErr", "c2dErr"]
+        print(table(cols + ["blackFrame"], [[fmt(fp.get(c)) for c in cols] + [fmt(flags.get("blackFrame"))]]))
     errs = data.get("errors") or []
     print("errors (%d)" % len(errs))
     if errs:

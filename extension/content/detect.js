@@ -33,6 +33,23 @@
     };
   }
 
+  const BLACK_EXT_MAX = 2; // ext가 이 값 미만이면 검음
+  const BLACK_REF_MIN = 8; // c2d/copy가 이 값 이상이면 원본은 검지 않음
+  const BLACK_STREAK_LIMIT = 2; // 연속 판정 횟수 (FIX_GUIDE N2)
+
+  // 순수: frameProbe로 오버레이가 검은 화면인지 판단. 값이 없으면(예외 등) 판단하지 않고 false.
+  function isBlackOverlay(probe) {
+    const p = probe || {};
+    const num = (v) => typeof v === 'number' && Number.isFinite(v);
+    if (!num(p.ext) || p.ext >= BLACK_EXT_MAX) return false;
+    return (num(p.c2d) && p.c2d >= BLACK_REF_MIN) || (num(p.copy) && p.copy >= BLACK_REF_MIN);
+  }
+
+  // 순수: 연속 횟수 갱신. 검지 않거나 판단 불가면 0으로 되돌린다.
+  function nextBlackStreak(streak, probe) {
+    return isBlackOverlay(probe) ? (streak || 0) + 1 : 0;
+  }
+
   // DOM: 메인 플레이어 video와 container. 실패 시 예외 없이 null (GUIDELINES 2.3-2).
   function findMainVideo(doc) {
     try {
@@ -48,5 +65,14 @@
     }
   }
 
-  globalThis.__sdrhdr.detect = { SELECTORS, isDrm, contentRect, canvasResolution, findMainVideo };
+  globalThis.__sdrhdr.detect = {
+    SELECTORS,
+    BLACK_STREAK_LIMIT,
+    isDrm,
+    isBlackOverlay,
+    nextBlackStreak,
+    contentRect,
+    canvasResolution,
+    findMainVideo,
+  };
 })();

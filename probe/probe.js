@@ -3,7 +3,17 @@
 (function () {
   const core = globalThis.__probeCore;
   const shaders = globalThis.__probeShaders;
-  const FIXTURES = ['ramp-1080p60', 'ramp-2160p60', 'colorbars-1080p60', 'colorbars-2160p60'];
+  const FIXTURES = [
+    'ramp-1080p60',
+    'ramp-2160p60',
+    'colorbars-1080p60',
+    'colorbars-2160p60',
+    'ramp-1080p60-vp9',
+  ];
+  // 픽스처 이름 -> 파일 경로. VP9 대조용(N3)은 webm이며 G3 일괄 측정(MATRIX_FIXTURES)에는 넣지 않는다.
+  function fixtureUrl(name) {
+    return '../fixtures/' + (name === 'ramp-1080p60-vp9' ? 'ramp-1080p60.webm' : name + '.mp4');
+  }
   // 첫 rVFC 콜백 후 워밍업을 버리고 최대 WINDOW_MAX_SEC를 측정한다 (FIX_GUIDE F2).
   const RUN_MAX_SEC = core.WARMUP_SEC + core.WINDOW_MAX_SEC;
   const GPU_SAMPLE_EVERY = 10;
@@ -360,7 +370,7 @@
     for (const name of FIXTURES) {
       let ok = false;
       try {
-        const r = await fetch('../fixtures/' + name + '.mp4', { method: 'HEAD' });
+        const r = await fetch(fixtureUrl(name), { method: 'HEAD' });
         ok = r.ok;
       } catch (e) {
         ok = false;
@@ -451,7 +461,7 @@
     let readBuf = null;
     try {
       setStatus(name + ' ' + mode + ' 로딩...');
-      video.src = '../fixtures/' + name + '.mp4';
+      video.src = fixtureUrl(name);
       video.muted = true;
       video.playsInline = true;
       await new Promise((resolve, reject) => {

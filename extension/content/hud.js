@@ -41,6 +41,47 @@
     return v ? path + '?v=' + v[1] : path;
   }
 
+  // 순수: WebGPU copyTextureToBuffer의 bytesPerRow는 256의 배수여야 한다.
+  function alignBytesPerRow(rowBytes) {
+    return Math.ceil(rowBytes / 256) * 256;
+  }
+
+  // 순수: RGBA 8bit 버퍼(행 패딩 포함)의 RGB 평균 밝기 0~255. 알파 제외, 패딩 바이트 제외.
+  // 입력이 유효하지 않거나 버퍼가 모자라면 null (FIX_GUIDE N1).
+  function meanBrightness(data, width, height, bytesPerRow) {
+    const ok = [width, height, bytesPerRow].every((v) => Number.isInteger(v) && v > 0);
+    if (!ok || !data || bytesPerRow < width * 4) return null;
+    if (data.length < bytesPerRow * (height - 1) + width * 4) return null;
+    let sum = 0;
+    for (let y = 0; y < height; y++) {
+      const row = y * bytesPerRow;
+      for (let x = 0; x < width; x++) {
+        const i = row + x * 4;
+        sum += data[i] + data[i + 1] + data[i + 2];
+      }
+    }
+    return sum / (width * height * 3);
+  }
+
+  const numOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const round2 = (v) => (v === null ? null : Math.round(v * 100) / 100);
+  const nameOrNull = (v) => (typeof v === 'string' ? v : null);
+
+  // 순수: frameProbe 진단 객체. 없으면 null. 밝기는 소수 둘째 자리 반올림 (픽셀 데이터는 저장하지 않는다).
+  function normalizeFrameProbe(p) {
+    if (!p || typeof p !== 'object') return null;
+    return {
+      at: round2(numOrNull(p.at)),
+      n: numOrNull(p.n),
+      ext: round2(numOrNull(p.ext)),
+      copy: round2(numOrNull(p.copy)),
+      c2d: round2(numOrNull(p.c2d)),
+      extErr: nameOrNull(p.extErr),
+      copyErr: nameOrNull(p.copyErr),
+      c2dErr: nameOrNull(p.c2dErr),
+    };
+  }
+
   const orNull = (v) => (v === undefined ? null : v);
   // M2 스키마 타입: api.adapter/device/configure는 boolean|null, configRead.toneMapping은 string|null.
   const boolOrNull = (v) => (v === undefined || v === null ? null : !!v);
@@ -63,7 +104,7 @@
     const flags = s.flags || {};
     const sum = summarize(render.frameTimesMs, render.loopTimestamps);
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -107,10 +148,12 @@
         jsP50: sum.jsP50,
         jsP95: sum.jsP95,
       },
+      frameProbe: normalizeFrameProbe(s.frameProbe),
       flags: {
         drm: !!flags.drm,
         attached: !!flags.attached,
         fullscreen: !!flags.fullscreen,
+        blackFrame: !!flags.blackFrame,
       },
       errors: (Array.isArray(s.errors) ? s.errors : []).slice(0, MAX_ERRORS).map((e) => ({
         at: orNull(e && e.at),
@@ -120,5 +163,12 @@
     };
   }
 
-  globalThis.__sdrhdr.hud = { summarize, sanitizePageUrl, buildDiag };
+  globalThis.__sdrhdr.hud = {
+    summarize,
+    sanitizePageUrl,
+    alignBytesPerRow,
+    meanBrightness,
+    normalizeFrameProbe,
+    buildDiag,
+  };
 })();

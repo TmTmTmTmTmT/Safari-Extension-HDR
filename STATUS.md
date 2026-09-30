@@ -51,6 +51,13 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
 - Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
 
+## M2 검은 프레임 진단 구현 (FIX_GUIDE N1~N4, 구현 완료 · Mac 확인 대기)
+
+- N1 frameProbe(ext/copy/c2d 평균 밝기, 진단 schemaVersion 2), N2 검은 프레임 가드(2회 연속 detach, stripes 제외), N3 프로브용 `fixtures/ramp-1080p60.webm`(VP9, 약 50 KB), N4 체크리스트 절차 추가
+- 구현 선택(보고): frameProbe `at`은 renderer 생성 기준(재attach 시 0부터), 판단 불가 회차에서 연속 카운트 초기화, 폴링 주기 500 ms, 프로브 픽스처 이름 `ramp-1080p60-vp9`
+- → verify: lint 통과, npm test 74/74, pytest sim 94/94, check-fixtures 5/5 PASS(기존 mp4 4개는 재생성해도 바이트 동일) / (1). GPU 호출(importExternalTexture, copyExternalImageToTexture, mapAsync, OffscreenCanvas)과 프로브 webm 재생, 가드 detach는 미검증 / (3). main.js 2회 연속 detach 통합 경로는 stub 테스트 없음
+- 다음: 사용자 Mac에서 N4 절차(Xcode Run 재실행 → identity JSON, 프로브 webm) 후 JSON 회신 → Opus가 N5 표로 판정
+
 ## M2 CI 진행 (7edf085 이후)
 
 - 러너 converter 임시 프로젝트 생성·컴파일까지 성공, `ValidateEmbeddedBinary`에서 실패: 앱 ID `io.github.tmtmtmtmtmt.SDRHDR`, 확장 ID `io.github.tmtmtmtmtmt.sdrhdr.Extension`(대소문자 불일치로 접두 검증 실패). 원인 추정: converter가 앱 ID 마지막 요소를 앱 이름으로 만듦. 조치: 기본 `--bundle-identifier`를 `io.github.tmtmtmtmtmt.SDRHDR`로 변경(make-xcode.sh, ci.yml). PLAN.md M2-3의 기본값 표기(`…sdrhdr`)와 달라짐, Opus 확인 필요

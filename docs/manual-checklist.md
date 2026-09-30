@@ -50,6 +50,14 @@
 - 조건마다 popup의 진단 JSON을 "복사"로 복사해 `results/result-M2-<YYYYMMDD>-<전원>-<밝기>-<해상도>-<모드>.json`으로 저장한다. "JSON 저장" 링크의 Safari popup 동작은 [미확인]이므로 복사를 기본 경로로 한다. 전원은 `ac`, 밝기는 `mid`, 해상도는 `1080p60`/`2160p60`, 모드는 `stripes`/`identity`/`itm`으로 적는다.
 - 확인하지 못한 항목은 비워 두지 말고 [미확인]으로 적는다.
 
+### 0b 검은 프레임 진단 절차 (FIX_GUIDE N4)
+
+1. 확장 갱신: `git pull` 후 Xcode에서 다시 Run한다. 확장 코드는 참조 방식이라 xcode 재생성은 필요 없을 것으로 [추정]한다. 반영이 안 되면 Safari를 재시작한다.
+2. 같은 YouTube 영상(VP9)에서 popup 모드를 `identity`로 두고 10초 이상 재생한 뒤 popup JSON을 복사해 `results/result-M2-<날짜>-ac-mid-yt-vp9-identity-probe.json`으로 저장한다(예: `result-M2-20261001-ac-mid-yt-vp9-identity-probe.json`). 가드가 작동하면 오버레이가 사라지고 원본이 보이는 것이 정상이다.
+3. 가능하면 H.264로 재생되는 영상 1개로 같은 절차를 한다(Stats for nerds의 Codecs가 `avc1`인 영상). 없으면 생략하고 [미확인]으로 적는다.
+4. 프로브: 저장소 루트에서 `python3 -m http.server 8000`을 실행하고 `http://localhost:8000/probe/`를 연다. P0-4에서 `ramp-1080p60-vp9`(파일 `fixtures/ramp-1080p60.webm`)의 "창 실행"을 셰이더 identity로 누르고, 오른쪽 출력이 검은지 한 줄 메모한 뒤 JSON export를 저장한다. 이 픽스처는 G3 일괄 측정 대상이 아니다.
+5. stripes 판독: 밝기 중간에서 popup 모드를 `stripes`로 두고 30초 이상 기다린다. 캔버스는 왼쪽부터 9줄(1.0 / 1.25 / 1.5 / 2 / 3 / 4 / 6 / 8 / 16)이다. 왼쪽부터 세어 서로 구분되는 마지막 줄의 번호와 값을 적는다(예: 5번째, 값 3). 판독하지 못하면 [미확인]으로 적는다.
+
 `python3 scripts/parse-result.py`는 `milestone:'M2'` 파일을 `docs/result-schema-m2.json`으로 검증하고 값만 표로 출력한다(판정 없음).
 
 ## 재측정 절차 (FIX_GUIDE.md "사용자 재측정 요청", 렌더 루프 rAF 검증)

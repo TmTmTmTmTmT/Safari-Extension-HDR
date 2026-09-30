@@ -51,4 +51,16 @@ make_ramp 1920 1080
 make_ramp 3840 2160
 make_bars 1920 1080
 make_bars 3840 2160
-ls -l "$OUT"/*.mp4
+
+# VP9 대조 픽스처(FIX_GUIDE N3): 기존 ramp-1080p60.mp4를 입력으로 재인코딩한다.
+# 이유: geq를 720프레임 1080p에 다시 돌리는 것보다 빠르고, 램프·이동 박스 내용이 mp4와 정확히 같다(내용 동일성).
+# 반드시 make_ramp 1920 1080 뒤에 실행한다. limited range·bt709 태그를 명시해 유지한다. 2160p VP9는 만들지 않는다.
+make_ramp_vp9() {
+  "$FFMPEG" -hide_banner -loglevel error -y -i "$OUT/ramp-1080p60.mp4" \
+    -c:v libvpx-vp9 -b:v 0 -crf 32 -deadline good -cpu-used 2 -row-mt 1 \
+    -pix_fmt yuv420p -r "$FPS" -an \
+    -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+    "$OUT/ramp-1080p60.webm"
+}
+make_ramp_vp9
+ls -l "$OUT"/*.mp4 "$OUT"/*.webm

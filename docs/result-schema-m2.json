@@ -92,13 +92,28 @@
         "jsP95": { "type": ["number", "null"] }
       }
     },
+    "frameProbe": {
+      "type": ["object", "null"],
+      "description": "schemaVersion 2 이상. 최신 1회. ext/copy/c2d는 64x36 평균 밝기(RGB, 0~255), *Err는 예외 name만.",
+      "properties": {
+        "at": { "type": ["number", "null"] },
+        "n": { "type": ["number", "null"] },
+        "ext": { "type": ["number", "null"] },
+        "copy": { "type": ["number", "null"] },
+        "c2d": { "type": ["number", "null"] },
+        "extErr": { "type": ["string", "null"] },
+        "copyErr": { "type": ["string", "null"] },
+        "c2dErr": { "type": ["string", "null"] }
+      }
+    },
     "flags": {
       "type": "object",
       "required": ["drm", "attached", "fullscreen"],
       "properties": {
         "drm": { "type": ["boolean", "null"] },
         "attached": { "type": ["boolean", "null"] },
-        "fullscreen": { "type": ["boolean", "null"] }
+        "fullscreen": { "type": ["boolean", "null"] },
+        "blackFrame": { "type": ["boolean", "null"], "description": "schemaVersion 2 이상" }
       }
     },
     "errors": {

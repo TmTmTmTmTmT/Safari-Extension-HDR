@@ -187,10 +187,11 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'video',
     'canvas',
     'render',
+    'frameProbe',
     'flags',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 1);
+  assert.strictEqual(d.schemaVersion, 2);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -224,7 +225,13 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
   assert.ok(isT(d.render.loopFps, 'number'));
   assert.ok(isT(d.render.jsP50, 'number'));
   assert.ok(isT(d.render.jsP95, 'number'));
-  assert.deepStrictEqual(d.flags, { drm: false, attached: true, fullscreen: false });
+  assert.deepStrictEqual(d.flags, {
+    drm: false,
+    attached: true,
+    fullscreen: false,
+    blackFrame: false,
+  });
+  assert.strictEqual(d.frameProbe, null);
   assert.strictEqual(d.errors.length, 20);
   assert.deepStrictEqual(Object.keys(d.errors[0]), ['at', 'name', 'message']);
 });
@@ -270,7 +277,107 @@ test('buildDiag: 빈 state에서도 모든 필드가 있고 값은 null/기본',
   assert.strictEqual(d.video.videoWidth, null);
   assert.strictEqual(d.render.frames, 0);
   assert.strictEqual(d.render.loopFps, null);
-  assert.deepStrictEqual(d.flags, { drm: false, attached: false, fullscreen: false });
+  assert.deepStrictEqual(d.flags, {
+    drm: false,
+    attached: false,
+    fullscreen: false,
+    blackFrame: false,
+  });
+  assert.strictEqual(d.frameProbe, null);
   assert.deepStrictEqual(d.errors, []);
   assert.strictEqual(plain(ns.hud.buildDiag()).milestone, 'M2');
+});
+
+test('meanBrightness: RGB 평균, 알파 제외, 행 패딩 제거', () => {
+  const { meanBrightness, alignBytesPerRow } = ns.hud;
+  assert.strictEqual(alignBytesPerRow(256), 256);
+  assert.strictEqual(alignBytesPerRow(64 * 4), 256);
+  assert.strictEqual(alignBytesPerRow(257), 512);
+  assert.strictEqual(alignBytesPerRow(12), 256);
+  // 2x2, bytesPerRow 256. 픽셀 = (10,20,30,a) 4개, 패딩은 255로 채워 평균에 섞이지 않아야 한다.
+  const data = new Uint8Array(256 * 2).fill(255);
+  for (let y = 0; y < 2; y++)
+    for (let x = 0; x < 2; x++) data.set([10, 20, 30, 0], y * 256 + x * 4);
+  near(meanBrightness(data, 2, 2, 256), 20);
+  // 패딩 없는 조밀 버퍼(canvas getImageData 형태)
+  near(meanBrightness(new Uint8Array([0, 0, 0, 255, 255, 255, 255, 0]), 2, 1, 8), 127.5);
+  // 마지막 행은 패딩 없이 끝나도 된다.
+  near(meanBrightness(new Uint8Array(256 + 8).fill(100), 2, 2, 256), 100);
+  assert.strictEqual(meanBrightness(new Uint8Array(4), 2, 2, 256), null); // 버퍼 부족
+  assert.strictEqual(meanBrightness(new Uint8Array(16), 2, 2, 4), null); // bytesPerRow < width*4
+  assert.strictEqual(meanBrightness(null, 2, 2, 8), null);
+  assert.strictEqual(meanBrightness(new Uint8Array(16), 0, 2, 8), null);
+});
+
+test('normalizeFrameProbe: 숫자 2자리 반올림, 예외는 name 문자열만', () => {
+  const { normalizeFrameProbe } = ns.hud;
+  assert.strictEqual(normalizeFrameProbe(null), null);
+  assert.strictEqual(normalizeFrameProbe(undefined), null);
+  const p = plain(
+    normalizeFrameProbe({
+      at: 5000.126,
+      n: 2,
+      ext: 0.123456,
+      copy: undefined,
+      c2d: NaN,
+      extErr: null,
+      copyErr: 'SecurityError',
+      c2dErr: { name: 'x' },
+      pixels: [1, 2, 3],
+    }),
+  );
+  assert.deepStrictEqual(p, {
+    at: 5000.13,
+    n: 2,
+    ext: 0.12,
+    copy: null,
+    c2d: null,
+    extErr: null,
+    copyErr: 'SecurityError',
+    c2dErr: null,
+  });
+});
+
+test('isBlackOverlay: 경계값 (ext<2 이고 c2d 또는 copy>=8)', () => {
+  const { isBlackOverlay } = ns.detect;
+  assert.strictEqual(isBlackOverlay({ ext: 0, copy: 60, c2d: 60 }), true);
+  assert.strictEqual(isBlackOverlay({ ext: 1.9, copy: null, c2d: 8 }), true);
+  assert.strictEqual(isBlackOverlay({ ext: 1.9, copy: 8, c2d: null }), true);
+  assert.strictEqual(isBlackOverlay({ ext: 2, copy: 60, c2d: 60 }), false);
+  assert.strictEqual(isBlackOverlay({ ext: 0, copy: 7.9, c2d: 7.9 }), false);
+  assert.strictEqual(isBlackOverlay({ ext: 0, copy: 7.9, c2d: 8 }), true);
+  // 예외로 값이 없으면 판단하지 않음
+  assert.strictEqual(isBlackOverlay({ ext: null, copy: 60, c2d: 60 }), false);
+  assert.strictEqual(isBlackOverlay({ ext: 0, copy: null, c2d: null }), false);
+  assert.strictEqual(isBlackOverlay({ copy: 60, c2d: 60 }), false);
+  assert.strictEqual(isBlackOverlay(null), false);
+  assert.strictEqual(isBlackOverlay(undefined), false);
+});
+
+test('nextBlackStreak: 2회 연속일 때만 한도 도달, 아니면 리셋', () => {
+  const { nextBlackStreak, BLACK_STREAK_LIMIT } = ns.detect;
+  const black = { ext: 0, copy: 50, c2d: 50 };
+  const ok = { ext: 40, copy: 50, c2d: 50 };
+  const unknown = { ext: null, copy: 50, c2d: 50 };
+  assert.strictEqual(BLACK_STREAK_LIMIT, 2);
+  let s = nextBlackStreak(0, black);
+  assert.strictEqual(s, 1);
+  assert.ok(s < BLACK_STREAK_LIMIT);
+  s = nextBlackStreak(s, black);
+  assert.ok(s >= BLACK_STREAK_LIMIT);
+  assert.strictEqual(nextBlackStreak(1, ok), 0);
+  assert.strictEqual(nextBlackStreak(1, unknown), 0);
+  assert.strictEqual(nextBlackStreak(undefined, black), 1);
+});
+
+test('schema v2: frameProbe 선택 필드와 flags.blackFrame 선언, required는 v1 그대로', () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'result-schema-m2.json'), 'utf8'),
+  );
+  assert.ok(!schema.required.includes('frameProbe'));
+  assert.ok(!schema.properties.flags.required.includes('blackFrame'));
+  assert.deepStrictEqual(schema.properties.flags.properties.blackFrame.type, ['boolean', 'null']);
+  const d = plain(ns.hud.buildDiag({ frameProbe: { n: 1, ext: 0 } }));
+  for (const k of Object.keys(d.frameProbe))
+    assert.ok(k in schema.properties.frameProbe.properties, k);
 });
