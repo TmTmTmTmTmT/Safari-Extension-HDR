@@ -35,9 +35,12 @@ jobs:
             exit 0
           fi
           xcodebuild -version
-          pbx="$proj/project.pbxproj"
-          if [ ! -f "$pbx" ]; then
-            echo "pbxproj 없음: $pbx"
+          pbx=""
+          for f in project.pbxproj project.xcproj; do
+            [ -f "$proj/$f" ] && pbx="$proj/$f" && break
+          done
+          if [ -z "$pbx" ]; then
+            echo "프로젝트 파일(project.pbxproj/project.xcproj) 없음: $proj"
             ls -la "$proj"
             exit 1
           fi

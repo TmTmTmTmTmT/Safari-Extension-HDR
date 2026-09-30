@@ -44,6 +44,8 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 
 ## Opus 확인 필요
 
+- make-xcode.sh 실행(2026-09-30 사용자 Mac, Xcode-beta): converter 옵션 확인 통과, `xcode/SDRHDR/SDRHDR.xcodeproj/`에 `project.pbxproj`가 아닌 `project.xcproj`(새 형식)가 생성됨. `xcodebuild -list` 성공(targets SDRHDR, SDRHDR Extension, scheme SDRHDR), `/Users/` 문자열 없음. 스크립트·CI의 A16 검사를 두 파일명 모두 허용하도록 임시 완화함. 러너 Xcode가 이 형식을 빌드할 수 있는지는 CI로 확인 필요(불가 시 안정판 Xcode로 재생성 여부는 Opus 판단). 안정판 Xcode 다운로드는 Mac에서 미완료(`Xcode.appdownload`)
+
 - M2 구현 중 발견(코드 결정 보류): (a) main.js가 로드 시 접근 0을 지키려 `Promise.resolve().then(start)`로 시작(PLAN이 "유일한 부작용 시작점"과 "로드 시 접근 없음"을 함께 요구) (b) renderer에 `hooks.onFrame`, `getStats()` 추가, overlay가 video `loadedmetadata`/`resize` 구독 (c) 일시정지 상태 attach 시 `loadeddata` 미구독이라 첫 프레임이 play/seeked 전까지 안 그려짐 (d) 진단 값 형식 상세(`configRead.toneMapping`은 mode 문자열, 링 버퍼 600개 기준 통계)
 - M2 스키마 `api.adapter/device/configure` 타입 미정(현재 제한 없음), 체크리스트 파일명 표기(`ac`/`mid`/`1080p60`/`2160p60`/모드), make-xcode.sh 저장소 루트 판정(package.json·manifest·스크립트 존재), 절대경로 검출 시 rc=2
 - ci.yml ubuntu job이 test:dom을 실행하지 않음(WebKit 설치 필요). 추가 여부 결정

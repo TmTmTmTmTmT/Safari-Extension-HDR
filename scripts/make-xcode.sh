@@ -41,12 +41,16 @@ if [ -z "$proj" ]; then
   echo "오류: xcode/ 아래에 .xcodeproj 를 찾지 못했습니다." >&2
   exit 1
 fi
-pbx="$proj/project.pbxproj"
+# Xcode 베타 converter는 project.pbxproj 대신 project.xcproj 를 만든다(2026-09-30 사용자 Mac 관측).
+pbx=""
+for f in project.pbxproj project.xcproj; do
+  [ -f "$proj/$f" ] && pbx="$proj/$f" && break
+done
 
 # 저장소 절대경로가 들어가면 CI(다른 경로)에서 빌드가 깨진다 (A16). 수정하지 않고 알린다.
 # grep 종료 코드: 0=발견, 1=없음, 2=오류(파일 없음 등). 오류를 "없음"으로 보지 않는다.
-if [ ! -f "$pbx" ]; then
-  echo "오류: $pbx 파일이 없어 A16 검사를 할 수 없습니다. 아래 출력을 Opus에 전달하세요." >&2
+if [ -z "$pbx" ]; then
+  echo "오류: $proj 안에 project.pbxproj/project.xcproj 가 없어 A16 검사를 할 수 없습니다. 아래 출력을 Opus에 전달하세요." >&2
   ls -la "$proj" >&2 || true
   exit 1
 fi
