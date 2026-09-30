@@ -45,11 +45,17 @@
     return (num(p.c2d) && p.c2d >= BLACK_REF_MIN) || (num(p.copy) && p.copy >= BLACK_REF_MIN);
   }
 
-  // 순수: 입력 경로 선택 (PLAN C절 "비디오 입력 경로"). ext가 검고 copy가 정상이면 'copy', 아니면 'ext'.
+  // 순수: 입력 경로 선택 (PLAN C절, FIX_GUIDE Q1).
+  // 'pending': 기준 경로(c2d/copy)가 모두 어둡거나 값이 없어 ext 검정 여부를 판단할 수 없음.
+  // 'none': ext가 검고 copy도 검은데 c2d만 정상 (N2 가드와 같은 결과로 detach).
   function choosePath(probe) {
     const p = probe || {};
-    const copyOk = typeof p.copy === 'number' && Number.isFinite(p.copy) && p.copy >= BLACK_REF_MIN;
-    return isBlackOverlay(p) && copyOk ? 'copy' : 'ext';
+    const num = (v) => typeof v === 'number' && Number.isFinite(v);
+    const copyOk = num(p.copy) && p.copy >= BLACK_REF_MIN;
+    const c2dOk = num(p.c2d) && p.c2d >= BLACK_REF_MIN;
+    if (!copyOk && !c2dOk) return 'pending';
+    if (!num(p.ext) || p.ext >= BLACK_EXT_MAX) return 'ext';
+    return copyOk ? 'copy' : 'none';
   }
 
   // 순수: 선택된 경로의 출력이 검은지. ext는 isBlackOverlay, copy는 copy 자체가 검고 c2d가 정상일 때 (FIX_GUIDE P2-4).

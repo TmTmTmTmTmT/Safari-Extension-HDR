@@ -1,6 +1,8 @@
 'use strict';
 (function () {
   const MAX_ERRORS = 20;
+  // 연속 콜백 간격이 이 값을 넘으면 일시정지·비가시 등 측정 창의 끊김으로 본다 (FIX_GUIDE Q2).
+  const LOOP_BREAK_MS = 500;
 
   // 선형 보간 백분위. 비수치 제외, 빈 입력은 null.
   function percentile(values, p) {
@@ -20,10 +22,16 @@
     const times = Array.isArray(frameTimesMs) ? frameTimesMs : [];
     const ts = Array.isArray(loopTimestamps) ? loopTimestamps : [];
     let loopFps = null;
-    if (ts.length >= 2) {
-      const span = ts[ts.length - 1] - ts[0];
-      if (span > 0) loopFps = ((ts.length - 1) * 1000) / span;
+    // 끊김(>500 ms) 간격은 개수와 시간 모두에서 뺀다.
+    let spanMs = 0;
+    let gapCount = 0;
+    for (let i = 1; i < ts.length; i++) {
+      const gap = ts[i] - ts[i - 1];
+      if (gap > LOOP_BREAK_MS) continue;
+      spanMs += gap;
+      gapCount += 1;
     }
+    if (gapCount > 0 && spanMs > 0) loopFps = (gapCount * 1000) / spanMs;
     return {
       frames: times.length,
       loopFps,
@@ -47,6 +55,7 @@
 
   // 순수: 측정 창(ms)에서 콜백 간격이 1.5/displayHz를 넘으면 round(간격 x hz) - 1개 갱신을 놓친 것으로 센다.
   // 결과 = 놓친 갱신 수 / (창 초 x displayHz). 계산 불가면 null (FIX_GUIDE P3/K1 정의).
+  // 간격이 500 ms를 넘으면 끊김으로 보고 누락 수와 창 길이 모두에서 제외한다 (FIX_GUIDE Q2).
   function displayMissRate(loopTimes, windowStart, windowEnd, displayHz) {
     if (!Array.isArray(loopTimes)) return null;
     if (!(displayHz > 0) || !(windowEnd > windowStart)) return null;
@@ -56,11 +65,18 @@
     if (ts.length < 2) return null;
     const limitMs = 1500 / displayHz;
     let missed = 0;
+    let excludedMs = 0;
     for (let i = 1; i < ts.length; i++) {
       const gap = ts[i] - ts[i - 1];
+      if (gap > LOOP_BREAK_MS) {
+        excludedMs += gap;
+        continue;
+      }
       if (gap > limitMs) missed += Math.max(0, Math.round((gap * displayHz) / 1000) - 1);
     }
-    return missed / (((windowEnd - windowStart) / 1000) * displayHz);
+    const measuredMs = windowEnd - windowStart - excludedMs;
+    if (!(measuredMs > 0)) return null;
+    return missed / ((measuredMs / 1000) * displayHz);
   }
 
   // 순수: 경로와 v 쿼리만 남긴다 (GUIDELINES 2.6-1). URL 전역이 없는 환경을 위해 정규식으로 파싱.
@@ -189,7 +205,7 @@
         loopFps: sum.loopFps,
         jsP50: sum.jsP50,
         jsP95: sum.jsP95,
-        path: render.path === 'ext' || render.path === 'copy' ? render.path : null,
+        path: ['ext', 'copy', 'pending'].includes(render.path) ? render.path : null,
         displayHz,
         displayMissRate: miss === null ? null : Math.round(miss * 1e5) / 1e5,
         copyMsP50: round2(percentile(copyTimes, 50)),

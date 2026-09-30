@@ -28,6 +28,8 @@
     gpuPromise: null,
     errors: [],
     perfRuns: [],
+    vp9Paths: [],
+    vp9Files: {},
     fixtures: {},
     running: false,
     pending: false,
@@ -389,6 +391,21 @@
       list.appendChild(document.createElement('br'));
     }
     $('btnMatrix').disabled = !core.MATRIX_FIXTURES.every((f) => state.fixtures[f]);
+    await checkVp9Files();
+  }
+
+  // P0-6 대상 파일 존재 확인. G3 일괄 측정 목록(FIXTURES, MATRIX_FIXTURES)과는 별개다.
+  async function checkVp9Files() {
+    for (const t of core.VP9_TARGETS) {
+      let ok = false;
+      try {
+        ok = (await fetch('../fixtures/' + t.file, { method: 'HEAD' })).ok;
+      } catch (e) {
+        ok = false;
+      }
+      state.vp9Files[t.file] = ok;
+    }
+    $('btnVp9').disabled = !core.VP9_TARGETS.some((t) => state.vp9Files[t.file]);
   }
 
   function setStatus(t) {
@@ -914,6 +931,384 @@
       : '경고: G3 조건(전원 연결 + 전체화면 + overlay 배치)을 만족하는 run이 없다. 전원 선택과 "G3 진단 일괄 측정" 버튼 사용을 확인한다. (export는 진행됨)';
   }
 
+  // ---------- P0-6 VP9 입력 방식 (FIX_GUIDE Q3) ----------
+  // 변형 1회 측정. 미검증(사용자 Mac에서만 동작 확인 가능). 중단되면 null. 예외는 errorName으로 기록하고 건너뛴다.
+  async function runVp9Variant(file, variant) {
+    const video = $('origVideo');
+    const canvas = $('vidCanvas');
+    const base = { fixture: file, variant };
+    let ctx = null;
+    let tex2d = null;
+    let srcW = null;
+    let srcH = null;
+    let res = null;
+    const fullscreenStart = inFullscreen();
+    try {
+      setVp9Status(file + ' ' + variant + ' 로딩...');
+      video.src = '../fixtures/' + file;
+      video.muted = true;
+      video.playsInline = true;
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = resolve;
+        video.onerror = () => reject(new Error('video 로드 실패'));
+      });
+      if (state.aborted) return null;
+      srcW = video.videoWidth;
+      srcH = video.videoHeight;
+      const gpu = await getGpu();
+      const device = gpu.device;
+      canvas.style.display = '';
+      const rect = video.getBoundingClientRect();
+      res = core.canvasResolution(
+        srcW,
+        srcH,
+        rect.width,
+        rect.height,
+        globalThis.devicePixelRatio || 1,
+      );
+      if (!res) throw new Error('캔버스 해상도 계산 실패 (표시 크기 0)');
+      canvas.width = res.width;
+      canvas.height = res.height;
+      ctx = configureCanvas(canvas, device, EDR_CFG);
+
+      const useExt = variant === 'V-ext' || variant === 'V-vf';
+      const isBmp = variant === 'V-bmp' || variant === 'V-bmpR';
+      const module = device.createShaderModule({
+        code: useExt ? shaders.VIDEO_IDENTITY : shaders.VIDEO_IDENTITY_2D,
+      });
+      const makePipeline = (format) =>
+        device.createRenderPipeline({
+          layout: 'auto',
+          vertex: { module, entryPoint: 'vs' },
+          fragment: { module, entryPoint: 'fs', targets: [{ format }] },
+          primitive: { topology: 'triangle-list' },
+        });
+      const pipeline = makePipeline(EDR_CFG.format);
+      const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+      // 일반 2D 텍스처(복사·비트맵 변형). bmpR은 캔버스 크기, 나머지는 원본 크기.
+      let texW = srcW;
+      let texH = srcH;
+      let texView = null;
+      if (!useExt) {
+        if (variant === 'V-bmpR') {
+          texW = res.width;
+          texH = res.height;
+        }
+        tex2d = device.createTexture({
+          size: [texW, texH],
+          format: variant === 'V-copyB' ? 'bgra8unorm' : 'rgba8unorm',
+          usage:
+            GPUTextureUsage.TEXTURE_BINDING |
+            GPUTextureUsage.COPY_DST |
+            GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        texView = tex2d.createView();
+      }
+
+      // 비동기 변형: 렌더 루프를 기다리지 않고 이전 결과 텍스처로 렌더한다. 동시에 1건만 진행.
+      let inflight = false;
+      let asyncErr = null;
+      const asyncSamples = [];
+      const startBitmap = () => {
+        inflight = true;
+        const t0 = performance.now();
+        const p =
+          variant === 'V-bmpR'
+            ? createImageBitmap(video, { resizeWidth: res.width, resizeHeight: res.height })
+            : createImageBitmap(video);
+        p.then((bm) => {
+          try {
+            device.queue.copyExternalImageToTexture({ source: bm }, { texture: tex2d }, [
+              Math.min(bm.width, texW),
+              Math.min(bm.height, texH),
+            ]);
+          } finally {
+            bm.close();
+          }
+          const now = performance.now();
+          asyncSamples.push({ t: now, ms: now - t0 });
+          inflight = false;
+        }).catch((e) => {
+          asyncErr = asyncErr || e;
+          inflight = false;
+        });
+      };
+
+      // 입력 준비(동기 부분). 반환 resource를 bind group 1번에 넣고, frame이 있으면 렌더 후 닫는다.
+      const prepareInput = (startAsync) => {
+        if (variant === 'V-ext')
+          return { resource: device.importExternalTexture({ source: video }) };
+        if (variant === 'V-vf') {
+          const frame = new VideoFrame(video);
+          return { resource: device.importExternalTexture({ source: frame }), frame };
+        }
+        if (isBmp) {
+          if (startAsync && !inflight) startBitmap();
+        } else if (startAsync) {
+          device.queue.copyExternalImageToTexture({ source: video }, { texture: tex2d }, [
+            srcW,
+            srcH,
+          ]);
+        }
+        return { resource: texView };
+      };
+
+      const encodeDraw = (enc, view, pipe, resource) => {
+        const bind = device.createBindGroup({
+          layout: pipe.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource },
+          ],
+        });
+        const pass = enc.beginRenderPass({
+          colorAttachments: [
+            { view, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } },
+          ],
+        });
+        pass.setPipeline(pipe);
+        pass.setBindGroup(0, bind);
+        pass.draw(3);
+        pass.end();
+      };
+
+      const loop = [];
+      let loopStartTs = null;
+      let q0 = null;
+      let q1 = null;
+      const quality = () =>
+        video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+      const totalSec = core.VP9_WARMUP_SEC + core.VP9_WINDOW_SEC;
+      const step = (ts) => {
+        if (asyncErr) throw asyncErr;
+        const t0 = performance.now();
+        if (loopStartTs === null) loopStartTs = ts;
+        const elapsed = (ts - loopStartTs) / 1000;
+        if (q0 === null && elapsed >= core.VP9_WARMUP_SEC) q0 = quality();
+        const input = prepareInput(true);
+        const enc = device.createCommandEncoder();
+        encodeDraw(enc, ctx.getCurrentTexture().createView(), pipeline, input.resource);
+        device.queue.submit([enc.finish()]);
+        if (input.frame) input.frame.close();
+        loop.push({ t: ts, js: performance.now() - t0 });
+        return elapsed >= totalSec;
+      };
+
+      setVp9Status(file + ' ' + variant + ' 실행 중...');
+      await video.play();
+      await new Promise((resolve, reject) => {
+        let rafId = null;
+        let finished = false;
+        const finish = (err) => {
+          if (finished) return;
+          finished = true;
+          state.cancel = null;
+          if (rafId !== null) cancelAnimationFrame(rafId);
+          if (err) reject(err);
+          else resolve();
+        };
+        state.cancel = () => finish();
+        video.onended = () => finish();
+        const onRaf = (ts) => {
+          if (finished) return;
+          try {
+            if (!video.paused && !video.ended && step(ts)) {
+              finish();
+              return;
+            }
+            rafId = requestAnimationFrame(onRaf);
+          } catch (e) {
+            finish(e);
+          }
+        };
+        rafId = requestAnimationFrame(onRaf);
+      });
+      if (state.aborted) return null;
+      if (asyncErr) throw asyncErr;
+      q1 = quality();
+      const fullscreen = fullscreenStart && inFullscreen();
+      video.pause();
+
+      // 출력 평균 밝기: 마지막 프레임을 64x36 rgba8unorm으로 1회 되읽는다. 실패해도 변형 기록은 남긴다.
+      let brightness = null;
+      try {
+        if (isBmp) {
+          for (let i = 0; i < 10 && inflight; i++) await sleep(50);
+        }
+        const rt = device.createTexture({
+          size: [core.READBACK_W, core.READBACK_H],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        });
+        const bpr = core.alignBytesPerRow(core.READBACK_W * 4);
+        const buf = device.createBuffer({
+          size: bpr * core.READBACK_H,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+        try {
+          const input = prepareInput(false);
+          const enc = device.createCommandEncoder();
+          encodeDraw(enc, rt.createView(), makePipeline('rgba8unorm'), input.resource);
+          enc.copyTextureToBuffer({ texture: rt }, { buffer: buf, bytesPerRow: bpr }, [
+            core.READBACK_W,
+            core.READBACK_H,
+          ]);
+          device.queue.submit([enc.finish()]);
+          if (input.frame) input.frame.close();
+          await core.withTimeout(buf.mapAsync(GPUMapMode.READ), core.GPU_TIMEOUT_MS, 'readback');
+          const data = new Uint8Array(buf.getMappedRange().slice(0));
+          buf.unmap();
+          brightness = core.meanBrightness(data, core.READBACK_W, core.READBACK_H, bpr);
+        } finally {
+          rt.destroy();
+          buf.destroy();
+        }
+      } catch (e) {
+        logError('P0-6 readback ' + file + ' ' + variant, e);
+      }
+
+      return core.buildVp9Path(
+        Object.assign({}, base, {
+          srcW,
+          srcH,
+          canvasW: res.width,
+          canvasH: res.height,
+          fullscreen,
+          loop,
+          asyncSamples,
+          meanBrightness: brightness,
+          videoDropped: q0 && q1 ? q1.droppedVideoFrames - q0.droppedVideoFrames : null,
+          videoTotal: q0 && q1 ? q1.totalVideoFrames - q0.totalVideoFrames : null,
+        }),
+      );
+    } catch (e) {
+      if (state.aborted) return null;
+      logError('P0-6 ' + file + ' ' + variant, e);
+      return core.buildVp9Path(
+        Object.assign({}, base, {
+          srcW,
+          srcH,
+          canvasW: res ? res.width : null,
+          canvasH: res ? res.height : null,
+          fullscreen: fullscreenStart && inFullscreen(),
+          errorName: e && e.name ? String(e.name) : 'Error',
+        }),
+      );
+    } finally {
+      state.cancel = null;
+      if (tex2d) tex2d.destroy();
+      unconfigureCanvas(ctx);
+      releaseVideo(video);
+    }
+  }
+
+  function setVp9Status(t) {
+    $('vp9Status').textContent = t;
+  }
+
+  function renderVp9Table() {
+    const cols = [
+      'fixture',
+      'variant',
+      'srcRes',
+      'canvasRes',
+      'frames',
+      'jsP50',
+      'jsP95',
+      'jsMax',
+      'asyncP50',
+      'asyncP95',
+      'displayMissRate',
+      'displayHz',
+      'loopFps',
+      'meanBrightness',
+      'videoDropped',
+      'videoTotal',
+      'errorName',
+    ];
+    const t = $('vp9Table');
+    t.textContent = '';
+    const head = t.insertRow();
+    for (const c of cols) head.insertCell().textContent = c;
+    for (const r of state.vp9Paths) {
+      const row = t.insertRow();
+      for (const c of cols) row.insertCell().textContent = r[c] === null ? '-' : String(r[c]);
+    }
+  }
+
+  // 클릭 1회로 전체화면 진입 -> 변형 순차 실행 -> 해제. 사용자 제스처 안에서 동기 호출해야 한다.
+  function runVp9Batch() {
+    if (state.running || state.pending) return;
+    if (!core.VP9_TARGETS.some((t) => state.vp9Files[t.file])) {
+      setVp9Status('일괄 측정 불가: 픽스처 없음');
+      return;
+    }
+    const stage = $('stage');
+    state.pending = true;
+    stage.classList.add('overlay');
+    enterFullscreen(stage).then(
+      async () => {
+        state.pending = false;
+        await nextFrames();
+        await vp9Loop(stage);
+      },
+      (e) => {
+        state.pending = false;
+        stage.classList.remove('overlay');
+        logError('fullscreen', e);
+        setVp9Status('일괄 측정: 전체화면 진입 실패');
+      },
+    );
+  }
+
+  async function vp9Loop(stage) {
+    const plan = core.vp9Plan().filter((p) => state.vp9Files[p.fixture]);
+    const progress = $('matrixProgress');
+    const onFsChange = () => {
+      if (inFullscreen()) return;
+      state.aborted = true;
+      if (state.cancel) state.cancel();
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    state.running = true;
+    state.aborted = false;
+    state.vp9Paths = [];
+    renderVp9Table();
+    let completed = 0;
+    progress.hidden = false;
+    try {
+      for (let i = 0; i < plan.length; i++) {
+        if (i > 0) await sleep(GAP_MS);
+        if (state.aborted) break;
+        progress.textContent = core.vp9ProgressText(i + 1, plan.length, plan[i]);
+        const rec = await runVp9Variant(plan[i].fixture, plan[i].variant);
+        if (!rec) break;
+        state.vp9Paths.push(rec);
+        renderVp9Table();
+        completed++;
+      }
+    } catch (e) {
+      logError('P0-6 일괄 측정', e);
+    } finally {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+      progress.hidden = true;
+      state.running = false;
+      state.aborted = false;
+      releaseVideo($('origVideo'));
+      $('vidCanvas').style.display = '';
+      exitFullscreen();
+      stage.classList.remove('overlay');
+      setVp9Status(
+        completed < plan.length
+          ? '일괄 측정 중단: 완료 ' + completed + ' / ' + plan.length + ' 변형만 기록'
+          : '일괄 측정 완료: ' + completed + ' / ' + plan.length,
+      );
+    }
+  }
+
   // ---------- export ----------
   async function exportJson() {
     // H1-3: export는 GPU에 의존하지 않는다. api가 없으면 타임아웃 있는 collectApi를 1회 시도하고, 실패해도 진행한다.
@@ -949,6 +1344,7 @@
         secondsSinceDraw: step ? state.stepSecondsSinceDraw : null,
       },
       perfRuns: state.perfRuns,
+      vp9Paths: state.vp9Paths,
       visualJudder: $('judderChoice').value,
       flags: { drm: false, hdrSource: false, fullscreen },
       errors: state.errors,
@@ -972,6 +1368,7 @@
     });
     $('btnFixtures').addEventListener('click', checkFixtures);
     $('btnMatrix').addEventListener('click', runMatrix);
+    $('btnVp9').addEventListener('click', runVp9Batch);
     $('btnExport').addEventListener('click', () =>
       exportJson().catch((e) => logError('export', e)),
     );

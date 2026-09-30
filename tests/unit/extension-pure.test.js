@@ -390,17 +390,32 @@ test('schema v2: frameProbe 선택 필드와 flags.blackFrame 선언, required�
 
 // ---- P2 choosePath / P3 displayMissRate·estimateDisplayHz ----
 
-test('choosePath: ext 검음(<2) + copy>=8이면 copy, 그 외 ext', () => {
+test('choosePath 경계 표 (FIX_GUIDE Q1)', () => {
   const { choosePath } = ns.detect;
-  assert.strictEqual(choosePath({ ext: 0, copy: 97.8, c2d: 145 }), 'copy');
-  assert.strictEqual(choosePath({ ext: 1.9, copy: 8, c2d: null }), 'copy');
-  assert.strictEqual(choosePath({ ext: 1.9, copy: 7.9, c2d: 145 }), 'ext'); // copy가 검으면 전환하지 않음
-  assert.strictEqual(choosePath({ ext: 2, copy: 60, c2d: 60 }), 'ext');
-  assert.strictEqual(choosePath({ ext: 40, copy: 60, c2d: 60 }), 'ext');
-  assert.strictEqual(choosePath({ ext: null, copy: 60, c2d: 60 }), 'ext');
-  assert.strictEqual(choosePath({ ext: 0, copy: null, c2d: 60 }), 'ext');
-  assert.strictEqual(choosePath(null), 'ext');
-  assert.strictEqual(choosePath(undefined), 'ext');
+  const table = [
+    // [probe, 기대값]
+    [{ ext: 0, copy: 97.8, c2d: 145 }, 'copy'],
+    [{ ext: 1.9, copy: 8, c2d: null }, 'copy'],
+    [{ ext: 1.9, copy: 8, c2d: 0 }, 'copy'],
+    [{ ext: 1.9, copy: 7.9, c2d: 145 }, 'none'], // ext·copy 검음, c2d만 정상
+    [{ ext: 0, copy: null, c2d: 60 }, 'none'],
+    [{ ext: 1.9, copy: 7.9, c2d: 7.9 }, 'pending'], // 기준 경로 모두 8 미만
+    [{ ext: 0, copy: 0, c2d: 0 }, 'pending'],
+    [{ ext: 100, copy: 7.9, c2d: 7.9 }, 'pending'], // ext가 밝아도 기준이 어두우면 보류
+    [{ ext: 2, copy: 60, c2d: 60 }, 'ext'],
+    [{ ext: 2, copy: 8, c2d: 0 }, 'ext'],
+    [{ ext: 2, copy: 7.9, c2d: 8 }, 'ext'],
+    [{ ext: 40, copy: 60, c2d: 60 }, 'ext'],
+    [{ ext: null, copy: 60, c2d: 60 }, 'ext'], // ext 값 없음(예외)은 ext로 두어 렌더 오류가 detach
+    [{ ext: null, copy: null, c2d: null }, 'pending'],
+    [{ ext: 50, copy: null, c2d: null }, 'pending'],
+    [{ ext: 50, copy: NaN, c2d: undefined }, 'pending'],
+    [{ ext: 0, copy: null, c2d: 7.9 }, 'pending'],
+    [null, 'pending'],
+    [undefined, 'pending'],
+  ];
+  for (const [probe, want] of table)
+    assert.strictEqual(choosePath(probe), want, JSON.stringify(probe));
 });
 
 test('isBlackSelected/nextBlackStreak: 선택된 경로의 출력 기준', () => {
@@ -436,6 +451,27 @@ test('displayMissRate: 60Hz에서 33ms 공백 1회는 1/600', () => {
   // 긴 공백은 round(간격 x hz) - 1개로 센다 (100ms -> 5개)
   const g = [0, 100, 116.7];
   assert.strictEqual(displayMissRate(g, 0, 1000, 60), 5 / 60);
+});
+
+test('displayMissRate Q2: 500ms 초과 간격은 누락 수와 분모에서 제외', () => {
+  const { displayMissRate, summarize } = ns.hud;
+  // 60Hz 규칙 시퀀스 중간에 2초 공백 1회 -> 누락 0
+  const a = seq(1000 / 60, 301);
+  const b = seq(1000 / 60, 301).map((v) => v + a[300] + 2000);
+  const t = a.concat(b);
+  assert.strictEqual(displayMissRate(t, t[0], t[t.length - 1], 60), 0);
+  // 공백 전후의 실제 누락은 그대로 센다 (33 ms 공백 1회 + 2초 공백 1회 -> 1/(측정 초 x 60))
+  const c = t.filter((_, i) => i !== 100);
+  const measuredSec = (c[c.length - 1] - c[0] - 2000) / 1000;
+  near(displayMissRate(c, c[0], c[c.length - 1], 60), 1 / (measuredSec * 60));
+  // 500ms 경계: 정확히 500ms는 끊김이 아니라 누락으로 센다 (round(0.5 x 60) - 1 = 29)
+  assert.strictEqual(displayMissRate([0, 500], 0, 1000, 60), 29 / 60);
+  // 전부 끊김이면 계산 불가
+  assert.strictEqual(displayMissRate([0, 2000], 0, 2000, 60), null);
+  // loopFps도 끊김 간격 제외: 60fps 구간 + 2초 공백 -> 여전히 60
+  near(summarize([], t).loopFps, 60);
+  near(summarize([], [0, 2000, 2000 + 1000 / 60, 2000 + 2000 / 60]).loopFps, 60);
+  assert.strictEqual(summarize([], [0, 2000]).loopFps, null);
 });
 
 test('displayMissRate: 창 밖 시각은 무시, 계산 불가는 null', () => {
@@ -495,7 +531,17 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
   for (const k of Object.keys(d.render)) assert.ok(k in schema.properties.render.properties, k);
   for (const k of Object.keys(d.frameProbe))
     assert.ok(k in schema.properties.frameProbe.properties, k);
-  assert.deepStrictEqual(schema.properties.render.properties.path.enum, ['ext', 'copy', null]);
+  assert.deepStrictEqual(schema.properties.render.properties.path.enum, [
+    'ext',
+    'copy',
+    'pending',
+    null,
+  ]);
+  assert.strictEqual(
+    plain(ns.hud.buildDiag({ render: { path: 'pending' } })).render.path,
+    'pending',
+  );
+  assert.strictEqual(plain(ns.hud.buildDiag({ render: { path: 'none' } })).render.path, null);
   assert.ok(!schema.properties.render.required.includes('path'));
   const e = plain(ns.hud.buildDiag({}));
   assert.deepStrictEqual(

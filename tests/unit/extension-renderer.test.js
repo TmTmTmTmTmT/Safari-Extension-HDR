@@ -10,7 +10,17 @@ const root = path.join(__dirname, '..', '..', 'extension');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 // opts.ext/copy/c2d: 각 경로가 돌려줄 픽셀 값(0~255) 또는 Error(예외). onProbe는 hooks로 전달된다.
-function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, videoSize, mode }) {
+function setup({
+  readyState,
+  paused,
+  ext = 100,
+  copy = 100,
+  c2d = 100,
+  onProbe,
+  onUndecided,
+  videoSize,
+  mode,
+}) {
   const vals = { ext, copy, c2d };
   const state = {
     vals,
@@ -162,6 +172,7 @@ function setup({ readyState, paused, ext = 100, copy = 100, c2d = 100, onProbe, 
   const canvas = { style: {}, getContext: () => gpuCtx };
   state.canvas = canvas;
   state.renderer = ctx.__sdrhdr.renderer.createRenderer(canvas, video, () => {}, {
+    onUndecided,
     onProbe: (p, path) => {
       state.probes.push(p);
       state.paths.push(path);
@@ -465,5 +476,132 @@ test('P3: frameProbe.ms와 경로별 동기 시간, getStats의 video 품질', a
   const st = s.renderer.getStats();
   assert.strictEqual(st.videoDropped, 3);
   assert.strictEqual(st.videoTotal, 100);
+  s.renderer.destroy();
+});
+
+// ---- Q1 경로 보류 / Q2 버퍼 비움: stub으로 재시도 로직만 본다. 실제 GPU 동작 검증이 아니다. ----
+
+test('Q1: 기준 경로가 어두우면 pending, 캔버스 숨김, 렌더 없음, 1초 간격 재시도', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 100, copy: 3, c2d: 3 });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'pending');
+  assert.deepStrictEqual(s.paths, ['pending']);
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  s.flush();
+  assert.strictEqual(s.renders, 0);
+  s.now = 999; // 1초 미만이면 재시도하지 않는다
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1);
+  s.now = 1000;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 2);
+  // 밝아지면 결정되고 캔버스가 보이며 이후 30초 주기
+  Object.assign(s.vals, { ext: 100, copy: 100, c2d: 100 });
+  s.now = 2000;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  assert.strictEqual(s.canvas.style.visibility, '');
+  s.flush();
+  assert.strictEqual(s.renders, 1);
+  s.now = 3000;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 3);
+  s.now = 32001;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 4);
+  s.renderer.destroy();
+});
+
+test('Q1: pending 재시도는 재생 중일 때만', async () => {
+  const s = setup({ readyState: 4, paused: true, ext: 100, copy: 3, c2d: 3 });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1); // 첫 회차는 일시정지여도 실행
+  s.now = 5000;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1);
+  s.video.paused = false;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 2);
+  s.renderer.destroy();
+});
+
+test('Q1: pending 60회 상한 후 중단, 숨긴 상태 유지, path pending, onUndecided 1회', async () => {
+  let undecided = 0;
+  const s = setup({
+    readyState: 4,
+    paused: false,
+    ext: 100,
+    copy: 3,
+    c2d: 3,
+    onUndecided: () => {
+      undecided += 1;
+    },
+  });
+  await s.renderer.start();
+  await s.settle();
+  for (let i = 1; i < 80; i++) {
+    s.now = i * 1000;
+    s.intervals[0]();
+    await s.settle();
+  }
+  assert.strictEqual(s.probes.length, 60);
+  assert.strictEqual(undecided, 1);
+  assert.strictEqual(s.renderer.getStats().path, 'pending');
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  s.flush();
+  assert.strictEqual(s.renders, 0);
+  s.renderer.destroy();
+});
+
+test('Q1: ext·copy 검음 + c2d 정상이면 none (렌더하지 않고 재시도하지 않음)', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, copy: 3, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  assert.deepStrictEqual(s.paths, ['none']);
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  s.flush();
+  assert.strictEqual(s.renders, 0);
+  s.now = 99999;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1);
+  s.renderer.destroy();
+});
+
+test('Q2: play·seeked·가시 복귀 시 루프·JS·복사 버퍼를 비운다', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, copy: 60, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  const fill = () => {
+    s.video.currentTime += 1;
+    s.flush();
+  };
+  fill();
+  fill();
+  let st = s.renderer.getStats();
+  assert.ok(
+    st.loopTimestamps.length > 0 && st.frameTimesMs.length > 0 && st.copyTimesMs.length > 0,
+  );
+  for (const ev of ['play', 'seeked']) {
+    s.flush();
+    s.fire(ev);
+    st = s.renderer.getStats();
+    assert.deepStrictEqual(
+      [st.loopTimestamps.length, st.frameTimesMs.length, st.copyTimesMs.length],
+      [0, 0, 0],
+      ev,
+    );
+    fill();
+    assert.ok(s.renderer.getStats().loopTimestamps.length > 0);
+  }
   s.renderer.destroy();
 });

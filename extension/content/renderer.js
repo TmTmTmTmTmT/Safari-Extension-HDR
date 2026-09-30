@@ -12,6 +12,8 @@
   const PROBE_FORMAT = 'rgba8unorm';
   const PROBE_INTERVAL_MS = 30000; // 경로 선택 후 주기 (FIX_GUIDE P2-5)
   const PROBE_POLL_MS = 500;
+  const PROBE_PENDING_MS = 1000; // 경로 보류 중 재시도 주기 (FIX_GUIDE Q1)
+  const PENDING_MAX = 60; // 보류 결과가 이 횟수에 이르면 더 시도하지 않는다
   const TEX_COPY_SRC = 0x01;
   const TEX_COPY_DST = 0x02;
   const TEX_TEXTURE_BINDING = 0x04;
@@ -51,6 +53,7 @@
     const loopTs = [];
     const api = { gpu: null, adapter: null, device: null, configure: null, configRead: null };
     const onProbe = hooks && typeof hooks.onProbe === 'function' ? hooks.onProbe : null;
+    const onUndecided = hooks && typeof hooks.onUndecided === 'function' ? hooks.onUndecided : null;
     const createdAt = performance.now();
     let probeTimer = null;
     let probeBusy = false;
@@ -58,8 +61,11 @@
     let probeN = 0;
     let probePipeline = null;
     let frameProbe = null;
-    // 입력 경로: null(첫 frameProbe 전) | 'ext' | 'copy'. ext->copy만 허용하고 되돌리지 않는다.
+    // 입력 경로: null(첫 frameProbe 전) | 'pending'(판단 불가, 재시도 중) | 'none'(detach 대상) | 'ext' | 'copy'.
+    // ext->copy만 허용하고 되돌리지 않는다.
     let path = null;
+    let pendingCount = 0;
+    let undecided = false; // 보류 상한 도달: 더 시도하지 않고 캔버스를 숨긴 채 둔다
     let copyTex = null;
     let copyView = null;
     let copySize = null;
@@ -85,7 +91,7 @@
 
     // video 모드에서 경로가 정해지기 전에는 렌더하지 않는다. stripes는 경로와 무관.
     function pathReady() {
-      return mode === 'stripes' || path !== null;
+      return mode === 'stripes' || path === 'ext' || path === 'copy';
     }
 
     // 결정 전 video 모드에서는 캔버스를 숨겨 원본 video가 보이게 한다.
@@ -209,7 +215,7 @@
     // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
     function renderOnce() {
       const isVideo = mode !== 'stripes';
-      if (isVideo && (video.readyState < 2 || path === null)) return false;
+      if (isVideo && (video.readyState < 2 || !pathReady())) return false;
       const useCopy = isVideo && path === 'copy';
       if (useCopy && !updateCopyTexture()) return false;
       const pipeline = useCopy ? copyPipeline() : pipelines[mode];
@@ -407,12 +413,26 @@
           copySyncMs: copy.syncMs,
           c2dSyncMs: c2d.syncMs,
         };
-        // 첫 결과로 경로를 정하고, 이후 ext에서 copy로 1회만 전환한다 (반대 방향 없음).
+        // 경로가 정해지기 전(null/pending)에는 결과를 따르고, 이후 ext에서 copy로 1회만 전환한다 (반대 방향 없음).
         const chosen = globalThis.__sdrhdr.detect.choosePath(frameProbe);
-        if (path === null || (path === 'ext' && chosen === 'copy')) {
+        if (path === null || path === 'pending' || (path === 'ext' && chosen === 'copy')) {
           path = chosen;
           updateVisibility();
           kick();
+          if (path === 'pending') {
+            pendingCount += 1;
+            probeDue = performance.now() + PROBE_PENDING_MS;
+            if (pendingCount >= PENDING_MAX && !undecided) {
+              undecided = true;
+              if (onUndecided) {
+                try {
+                  onUndecided();
+                } catch (e) {
+                  // 콜백 오류가 재생을 방해하지 않게 한다.
+                }
+              }
+            }
+          }
         }
         if (onProbe) {
           try {
@@ -427,9 +447,11 @@
     }
 
     // 경로 결정 전 첫 회차는 readyState>=2이면 즉시(일시정지 포함, 첫 프레임 표시용).
-    // 결정 후에는 재생 중일 때만 30초마다. stripes 모드와 실행 중에는 건너뜀.
+    // 보류 중에는 재생 중일 때만 1초마다(상한 있음), 결정 후에는 재생 중일 때만 30초마다.
+    // stripes 모드와 실행 중에는 건너뜀.
     function probePoll() {
       if (probeBusy || destroyed || !running || !device || mode === 'stripes') return;
+      if (undecided || path === 'none') return;
       if (video.readyState < 2) return;
       if (path !== null && (video.paused || video.ended)) return;
       const now = performance.now();
@@ -438,12 +460,24 @@
       runProbe().catch(() => {});
     }
 
-    const onWake = () => kick();
+    // 일시정지·seek·비가시 구간이 측정 창에 섞이지 않도록 버퍼를 비운다 (FIX_GUIDE Q2).
+    function clearRings() {
+      frameTimes.length = 0;
+      copyTimes.length = 0;
+      loopTs.length = 0;
+    }
+    const onWake = () => {
+      clearRings();
+      kick();
+    };
     // 일시정지로 attach된 경우 첫 프레임용 (FIX_GUIDE L4). 1회 구독이며 detach에서도 해제한다.
     const onLoaded = () => kick();
     const onVisibility = () => {
       if (document.hidden) cancel();
-      else kick();
+      else {
+        clearRings();
+        kick();
+      }
     };
 
     function start() {

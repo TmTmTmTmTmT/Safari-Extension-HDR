@@ -192,3 +192,93 @@ def test_m2_v3_wrong_types_fail(tmp_path):
     ok["render"].update({"path": None, "displayHz": None, "displayMissRate": None})
     r = run(write(tmp_path, "result-M2-v3-null.json", ok))
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def _v5_result():
+    """results/의 M1 v4 파일 하나를 바탕으로 v5(vp9Paths 추가) 샘플을 만든다."""
+    src = sorted(glob.glob(os.path.join(ROOT, "results", "result-M1-*.json")))[0]
+    with open(src, encoding="utf-8") as f:
+        d = json.load(f)
+    d["schemaVersion"] = 5
+    d["vp9Paths"] = [
+        {
+            "fixture": "ramp-2160p60.webm",
+            "variant": "V-bmp",
+            "srcRes": "3840x2160",
+            "canvasRes": "3840x2160",
+            "fullscreen": True,
+            "frames": 478,
+            "windowSec": 7.97,
+            "jsP50": 0.812,
+            "jsP95": 1.734,
+            "jsMax": 6.5,
+            "asyncP50": 21.375,
+            "asyncP95": 33.25,
+            "displayMissRate": 0.00417,
+            "displayHz": 60,
+            "loopFps": 59.97,
+            "meanBrightness": 97.81,
+            "videoDropped": 3,
+            "videoTotal": 480,
+            "errorName": None,
+        },
+        {
+            "fixture": "ramp-2160p60.webm",
+            "variant": "V-vf",
+            "srcRes": "3840x2160",
+            "canvasRes": None,
+            "fullscreen": True,
+            "frames": 0,
+            "windowSec": None,
+            "jsP50": None,
+            "jsP95": None,
+            "jsMax": None,
+            "asyncP50": None,
+            "asyncP95": None,
+            "displayMissRate": None,
+            "displayHz": None,
+            "loopFps": None,
+            "meanBrightness": None,
+            "videoDropped": None,
+            "videoTotal": None,
+            "errorName": "ReferenceError",
+        },
+    ]
+    return d
+
+
+def test_v5_prints_vp9_paths_table_values_only(tmp_path):
+    r = run(write(tmp_path, "result-M1-v5.json", _v5_result()))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "스키마 검증 실패" not in r.stdout
+    for s in ("P0-6 VP9 입력 방식", "V-bmp", "V-vf", "21.375", "33.25", "0.00417", "97.81", "ReferenceError", "asyncP50", "meanBrightness"):
+        assert s in r.stdout
+    for word in ("판정:", "통과", "불통과"):
+        assert word not in r.stdout
+
+
+def test_v1_to_v4_have_no_vp9_paths_section():
+    files = sorted(glob.glob(os.path.join(ROOT, "results", "result-M1-*.json")))
+    r = run(*files)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "P0-6 VP9 입력 방식" not in r.stdout
+
+
+def test_v5_empty_vp9_paths_ok_and_bad_types_fail(tmp_path):
+    ok = _v5_result()
+    ok["vp9Paths"] = []
+    r = run(write(tmp_path, "result-M1-v5-empty.json", ok))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "P0-6 VP9 입력 방식" not in r.stdout
+    bad = _v5_result()
+    bad["vp9Paths"][0]["variant"] = "V-unknown"
+    r = run(write(tmp_path, "result-M1-v5-bad-variant.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    bad = _v5_result()
+    bad["vp9Paths"][0]["jsP95"] = "1.7"
+    r = run(write(tmp_path, "result-M1-v5-bad-js.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    bad = _v5_result()
+    del bad["vp9Paths"][0]["fixture"]
+    r = run(write(tmp_path, "result-M1-v5-missing.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout

@@ -203,6 +203,17 @@ def table(headers, rows):
     return "\n".join(out)
 
 
+VP9_COLS = ["fixture", "variant", "srcRes", "canvasRes", "fullscreen", "frames", "jsP50", "jsP95", "jsMax", "asyncP50", "asyncP95", "displayMissRate", "displayHz", "loopFps", "meanBrightness", "videoDropped", "videoTotal", "errorName"]
+
+
+def print_vp9_paths(paths):
+    """v5 vp9Paths 표(P0-6 VP9 입력 방식). 없거나 비었으면(v1~v4) 출력하지 않는다. 값만 출력하고 판정하지 않는다."""
+    if not isinstance(paths, list) or not paths:
+        return
+    print("\nP0-6 VP9 입력 방식 (v5, 값만)")
+    print(table(VP9_COLS, [[fmt(p.get(c)) for c in VP9_COLS] for p in paths if isinstance(p, dict)]))
+
+
 def summarize(name, data):
     print("\n## %s" % name)
     env = data.get("env", {})
@@ -276,6 +287,7 @@ def summarize(name, data):
         mx = lambda vs: max([v for v in vs if isinstance(v, (int, float))], default=None)
         print(table(["srcRes", "runs", "dropRate 최대", "jsP95 최대"], [[k, str(w["n"]), fmt(mx(w["drop"])), fmt(mx(w["p95"]))] for k, w in sorted(worst.items())]))
     print_mode_tables(runs, power)
+    print_vp9_paths(data.get("vp9Paths"))
     print("\nflags: %s" % fmt(data.get("flags")))
     errs = data.get("errors") or []
     print("errors (%d)%s" % (len(errs), "".join("\n  - " + e for e in errs)))

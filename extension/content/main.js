@@ -87,7 +87,11 @@
       a.blackStreak = 0;
       return;
     }
-    a.blackStreak = ns.detect.nextBlackStreak(a.blackStreak, probe, path);
+    // 'none'(ext·copy 검음, c2d만 정상)은 연속 횟수 없이 N2 가드와 같은 결과로 detach한다 (FIX_GUIDE Q1).
+    a.blackStreak =
+      path === 'none'
+        ? ns.detect.BLACK_STREAK_LIMIT
+        : ns.detect.nextBlackStreak(a.blackStreak, probe, path);
     if (a.blackStreak < ns.detect.BLACK_STREAK_LIMIT) return;
     blackVideos.add(a.video);
     blackFlag = true;
@@ -114,6 +118,13 @@
         if (cur === a && checkDrm(video, a.sawEncrypted)) markDrm(video);
       },
       onProbe: (probe, path) => onProbe(a, probe, path),
+      onUndecided: () => {
+        if (cur === a)
+          addError('path', {
+            name: 'PathUndecided',
+            message: 'frameProbe 60회 이상 경로 판단 불가 (캔버스 숨김 유지)',
+          });
+      },
     });
     cur = a;
     a.renderer.setMode(settings.mode);

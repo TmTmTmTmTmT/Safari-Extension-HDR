@@ -511,8 +511,9 @@ test('buildResult: perf.g3와 env.windowMode 파생, 파일명 반영', () => {
     perfRuns: [fsRun, r0, r3, v3],
     visualJudder: 'sometimes',
   });
-  assert.strictEqual(core.SCHEMA_VERSION, 4);
-  assert.strictEqual(ac.schemaVersion, 4);
+  assert.strictEqual(core.SCHEMA_VERSION, 5);
+  assert.strictEqual(ac.schemaVersion, 5);
+  assert.deepStrictEqual(J(ac.vp9Paths), []);
   assert.strictEqual(ac.env.windowMode, 'fullscreen');
   assert.strictEqual(ac.perf.visualJudder, 'sometimes');
   assert.deepStrictEqual(J(ac.perf.g3), {
@@ -642,4 +643,232 @@ test('shaders: 스트라이프 단계는 PLAN B절 P0-2와 일치, 진입점 존
     assert.ok(shaders[k].includes('@fragment fn fs'), k);
   }
   assert.ok(shaders.STRIPES.includes('1.00, 1.25, 1.50, 2.00, 3.00, 4.00, 6.00, 8.00, 16.00'));
+});
+
+// ---------- P0-6 VP9 입력 방식 (FIX_GUIDE Q3) ----------
+// 결정적 지터(+-jitter 교대)를 넣은 콜백 시각열 (ms). extension-pure.test.js의 seq와 같다.
+function tsSeq(periodMs, count, jitter = 0) {
+  return Array.from({ length: count }, (_, i) => i * periodMs + (i % 2 ? jitter : -jitter));
+}
+
+test('vp9Plan: webm 2종은 6변형, mp4 대조는 V-ext와 V-copy8만, 총 14', () => {
+  const plan = J(core.vp9Plan());
+  assert.strictEqual(plan.length, 14);
+  const of = (f) => plan.filter((p) => p.fixture === f).map((p) => p.variant);
+  assert.deepStrictEqual(of('ramp-2160p60.webm'), J(core.VP9_VARIANTS));
+  assert.deepStrictEqual(of('ramp-1080p60.webm'), J(core.VP9_VARIANTS));
+  assert.deepStrictEqual(of('ramp-2160p60.mp4'), ['V-ext', 'V-copy8']);
+  assert.deepStrictEqual(J(core.VP9_VARIANTS), [
+    'V-ext',
+    'V-copy8',
+    'V-copyB',
+    'V-bmp',
+    'V-bmpR',
+    'V-vf',
+  ]);
+  // G3 일괄 측정 목록에는 넣지 않는다
+  for (const f of core.MATRIX_FIXTURES) assert.ok(!f.includes('webm'));
+  assert.strictEqual(
+    core.vp9ProgressText(2, 14, plan[1]),
+    'P0-6 2 / 14 (ramp-2160p60.webm V-copy8)',
+  );
+});
+
+// extension/content/hud.js displayMissRate·estimateDisplayHz 테스트(tests/unit/extension-pure.test.js)와 같은 사례
+test('displayMissRate: 60Hz 규칙 +-2ms 지터는 0, 120Hz도 0', () => {
+  const t60 = tsSeq(1000 / 60, 601, 2);
+  assert.strictEqual(core.displayMissRate(t60, t60[0], t60[600], 60), 0);
+  const t120 = tsSeq(1000 / 120, 1201, 2);
+  assert.strictEqual(core.displayMissRate(t120, t120[0], t120[1200], 120), 0);
+});
+
+test('displayMissRate: 60Hz에서 33ms 공백 1회는 1/600', () => {
+  const t = tsSeq(1000 / 60, 601).filter((_, i) => i !== 300);
+  assert.strictEqual(core.displayMissRate(t, 0, 10000, 60), 1 / 600);
+  assert.strictEqual(core.displayMissRate([0, 100, 116.7], 0, 1000, 60), 5 / 60);
+});
+
+test('displayMissRate: 창 밖 시각은 무시, 계산 불가는 null', () => {
+  const t = [-500, 0, 16.7, 33.4, 50.1, 5000];
+  assert.strictEqual(core.displayMissRate(t, 0, 100, 60), 0);
+  assert.strictEqual(core.displayMissRate([0], 0, 100, 60), null);
+  assert.strictEqual(core.displayMissRate([], 0, 100, 60), null);
+  assert.strictEqual(core.displayMissRate(null, 0, 100, 60), null);
+  assert.strictEqual(core.displayMissRate([0, 16, 33], 0, 100, 0), null);
+  assert.strictEqual(core.displayMissRate([0, 16, 33], 100, 100, 60), null);
+});
+
+test('displayMissRate: 500ms 초과 간격은 누락 수와 창 길이 모두에서 제외 (Q2)', () => {
+  // 60Hz 규칙 시퀀스 중간에 2초 공백 1회 -> 누락 0
+  const t = tsSeq(1000 / 60, 601).map((v, i) => (i > 300 ? v + 2000 : v));
+  assert.strictEqual(core.displayMissRate(t, t[0], t[600], 60), 0);
+  // 공백 제외 후에도 33ms 공백 1회는 1/600 유지 (창 12초에서 2초 제외 -> 600 갱신 기대)
+  const u = tsSeq(1000 / 60, 601)
+    .filter((_, i) => i !== 100)
+    .map((v, i) => (i > 300 ? v + 2000 : v));
+  near(core.displayMissRate(u, u[0], u[u.length - 1], 60), 1 / 600, 1e-3);
+  // 공백만으로 창이 끝나면 계산 불가
+  assert.strictEqual(core.displayMissRate([0, 2000], 0, 2000, 60), null);
+});
+
+test('estimateDisplayHz: 간격 중앙값으로 60/120 추정, 일시정지 공백에 강함', () => {
+  assert.strictEqual(core.estimateDisplayHz(tsSeq(16.7, 100)), 60);
+  assert.strictEqual(core.estimateDisplayHz(tsSeq(8.3, 100)), 120);
+  assert.strictEqual(core.estimateDisplayHz(tsSeq(8.3, 100, 1)), 120);
+  const withPause = tsSeq(16.7, 100).map((v, i) => (i >= 50 ? v + 5000 : v));
+  assert.strictEqual(core.estimateDisplayHz(withPause), 60);
+  assert.strictEqual(core.estimateDisplayHz([0]), null);
+  assert.strictEqual(core.estimateDisplayHz([]), null);
+  assert.strictEqual(core.estimateDisplayHz(null), null);
+});
+
+test('loopFpsExcludingBreaks: 500ms 초과 간격은 개수와 시간에서 제외', () => {
+  near(core.loopFpsExcludingBreaks(tsSeq(1000 / 60, 61)), 60, 1e-6);
+  const t = tsSeq(1000 / 60, 61).map((v, i) => (i >= 30 ? v + 2000 : v));
+  near(core.loopFpsExcludingBreaks(t), 60, 1e-6);
+  assert.strictEqual(core.loopFpsExcludingBreaks([0]), null);
+  assert.strictEqual(core.loopFpsExcludingBreaks(null), null);
+  assert.strictEqual(core.loopFpsExcludingBreaks([0, 3000]), null);
+});
+
+test('alignBytesPerRow / meanBrightness: 64x36 되읽기 집계', () => {
+  assert.strictEqual(core.alignBytesPerRow(64 * 4), 256);
+  assert.strictEqual(core.alignBytesPerRow(257), 512);
+  const bpr = 512; // 패딩 포함
+  const data = new Uint8Array(bpr * 2).fill(255); // 패딩과 알파는 255여도 결과에 영향 없음
+  for (let y = 0; y < 2; y++) {
+    for (let x = 0; x < 3; x++) {
+      const i = y * bpr + x * 4;
+      data[i] = 30;
+      data[i + 1] = 60;
+      data[i + 2] = 90;
+    }
+  }
+  near(core.meanBrightness(data, 3, 2, bpr), 60);
+  assert.strictEqual(core.meanBrightness(new Uint8Array(10), 3, 2, bpr), null);
+  assert.strictEqual(core.meanBrightness(data, 3, 2, 8), null);
+  assert.strictEqual(core.meanBrightness(null, 3, 2, bpr), null);
+  assert.strictEqual(core.meanBrightness(data, 0, 2, bpr), null);
+});
+
+test('vp9Stats: 첫 콜백 + 1초 이후 8초 창만 집계', () => {
+  const ts = tsSeq(1000 / 60, 700).map((t) => t + 5000);
+  const loop = ts.map((t, i) => ({ t, js: i % 10 === 0 ? 10 : 2 }));
+  const async = [
+    { t: ts[0] + 10, ms: 99 }, // 워밍업 구간: 제외
+    { t: ts[100] + 10, ms: 20 },
+    { t: ts[200] + 10, ms: 30 },
+  ];
+  const st = core.vp9Stats(loop, async, {});
+  // 창: [ts[0]+1000, ts[0]+9000] -> 700프레임(11.67초) 중 60번째 이후 480프레임
+  assert.ok(st.frames >= 479 && st.frames <= 481, String(st.frames));
+  assert.strictEqual(st.displayHz, 60);
+  assert.strictEqual(st.displayMissRate, 0);
+  near(st.loopFps, 60, 1e-6);
+  assert.strictEqual(st.js.max, 10);
+  near(st.js.p50, 2);
+  assert.strictEqual(st.asyncMs.n, 2);
+  near(st.asyncMs.p50, 25);
+  const empty = core.vp9Stats([], [], {});
+  assert.strictEqual(empty.frames, 0);
+  assert.strictEqual(empty.displayMissRate, null);
+  assert.strictEqual(empty.js.p50, null);
+});
+
+test('buildVp9Path: 측정값, 비동기 없음은 async null, 예외는 건너뜀 기록', () => {
+  const ts = tsSeq(1000 / 60, 700).map((t) => t + 1000);
+  const loop = ts.map((t) => ({ t, js: 3.14159 }));
+  const ok = J(
+    core.buildVp9Path({
+      fixture: 'ramp-2160p60.webm',
+      variant: 'V-copy8',
+      srcW: 3840,
+      srcH: 2160,
+      canvasW: 3840,
+      canvasH: 2160,
+      fullscreen: true,
+      loop,
+      asyncSamples: [{ t: ts[200], ms: 7 }],
+      meanBrightness: 97.8123,
+      videoDropped: 2,
+      videoTotal: 480,
+    }),
+  );
+  assert.strictEqual(ok.fixture, 'ramp-2160p60.webm');
+  assert.strictEqual(ok.variant, 'V-copy8');
+  assert.strictEqual(ok.srcRes, '3840x2160');
+  assert.strictEqual(ok.canvasRes, '3840x2160');
+  assert.strictEqual(ok.fullscreen, true);
+  assert.strictEqual(ok.jsP50, 3.142);
+  assert.strictEqual(ok.jsMax, 3.142);
+  assert.strictEqual(ok.asyncP50, null); // 동기 변형은 준비 지연 없음
+  assert.strictEqual(ok.asyncP95, null);
+  assert.strictEqual(ok.displayHz, 60);
+  assert.strictEqual(ok.displayMissRate, 0);
+  assert.strictEqual(ok.meanBrightness, 97.81);
+  assert.strictEqual(ok.videoDropped, 2);
+  assert.strictEqual(ok.videoTotal, 480);
+  assert.strictEqual(ok.errorName, null);
+
+  const bmp = J(
+    core.buildVp9Path({
+      fixture: 'ramp-1080p60.webm',
+      variant: 'V-bmp',
+      loop,
+      asyncSamples: [
+        { t: ts[200], ms: 10 },
+        { t: ts[300], ms: 20 },
+      ],
+    }),
+  );
+  assert.strictEqual(bmp.asyncP50, 15);
+  assert.strictEqual(bmp.srcRes, null);
+  assert.strictEqual(bmp.videoDropped, null);
+
+  const bad = J(
+    core.buildVp9Path({
+      fixture: 'ramp-2160p60.webm',
+      variant: 'V-vf',
+      srcW: 3840,
+      srcH: 2160,
+      loop: [],
+      errorName: 'ReferenceError',
+    }),
+  );
+  assert.strictEqual(bad.errorName, 'ReferenceError');
+  assert.strictEqual(bad.frames, 0);
+  for (const k of [
+    'jsP50',
+    'jsP95',
+    'jsMax',
+    'displayMissRate',
+    'displayHz',
+    'loopFps',
+    'meanBrightness',
+  ])
+    assert.strictEqual(bad[k], null, k);
+});
+
+test('buildResult: vp9Paths를 최상위에 싣고 없으면 빈 배열', () => {
+  const rec = core.buildVp9Path({ fixture: 'a.webm', variant: 'V-ext', loop: [] });
+  const r = core.buildResult({ vp9Paths: [rec] });
+  assert.strictEqual(r.schemaVersion, 5);
+  assert.strictEqual(r.vp9Paths.length, 1);
+  assert.strictEqual(r.vp9Paths[0].variant, 'V-ext');
+  assert.deepStrictEqual(J(core.buildResult({}).vp9Paths), []);
+  // 기존 필드는 그대로
+  assert.strictEqual(r.perf.g3, null);
+  assert.deepStrictEqual(J(r.errors), []);
+});
+
+test('result-schema.json: vp9Paths 항목 키가 buildVp9Path 출력과 일치', () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'result-schema.json'), 'utf8'),
+  );
+  const props = schema.properties.vp9Paths.items.properties;
+  const rec = core.buildVp9Path({ fixture: 'a.webm', variant: 'V-ext', loop: [] });
+  for (const k of Object.keys(rec)) assert.ok(k in props, k);
+  assert.ok(!schema.required.includes('vp9Paths'));
+  assert.deepStrictEqual(J(props.variant.enum), J(core.VP9_VARIANTS));
+  assert.ok(schema.properties.schemaVersion.description.includes('v5'));
 });

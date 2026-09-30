@@ -17,7 +17,7 @@
     "schemaVersion": {
       "type": "integer",
       "minimum": 1,
-      "description": "v1: 창 모드를 사용자가 선택, run 전체 집계. v2: 워밍업 제외 측정 창 집계, windowMode는 run에서 파생, perf.g3 추가. v3: run.mode/layout, env.refreshRate, edr.secondsSinceDraw, perf.g3를 해상도별 {baselineDrop,itmDrop,delta,jsP95Max}로 개정. v4: run.driver/missRate/loopFps/videoPresentedFps, mode R0/R2/R3/V3, perf.visualJudder, perf.g3를 해상도별 {baselineMiss,itmMiss,delta,rvfcMiss,loopFps,videoPresentedFps,jsP95Max,gpuMsMax}로 개정. v1~v3 파일도 유효."
+      "description": "v1: 창 모드를 사용자가 선택, run 전체 집계. v2: 워밍업 제외 측정 창 집계, windowMode는 run에서 파생, perf.g3 추가. v3: run.mode/layout, env.refreshRate, edr.secondsSinceDraw, perf.g3를 해상도별 {baselineDrop,itmDrop,delta,jsP95Max}로 개정. v4: run.driver/missRate/loopFps/videoPresentedFps, mode R0/R2/R3/V3, perf.visualJudder, perf.g3를 해상도별 {baselineMiss,itmMiss,delta,rvfcMiss,loopFps,videoPresentedFps,jsP95Max,gpuMsMax}로 개정. v5: 최상위 vp9Paths[] 추가(P0-6 VP9 입력 방식 실험), 기존 필드 변경 없음. v1~v4 파일도 유효."
     },
     "milestone": { "type": "string" },
     "createdAt": { "type": ["string", "null"] },
@@ -223,6 +223,56 @@
         "drm": { "type": "boolean" },
         "hdrSource": { "type": "boolean" },
         "fullscreen": { "type": "boolean" }
+      }
+    },
+    "vp9Paths": {
+      "type": "array",
+      "description": "v5. P0-6 VP9 입력 방식 실험 결과(변형 1회당 1건). 없으면(v1~v4) 실험 없음. 측정하지 못한 값과 건너뛴 변형은 null이며 errorName에 예외 name이 들어간다.",
+      "items": {
+        "type": "object",
+        "required": ["fixture", "variant"],
+        "properties": {
+          "fixture": { "type": "string", "description": "fixtures/ 안 파일명" },
+          "variant": {
+            "type": "string",
+            "enum": ["V-ext", "V-copy8", "V-copyB", "V-bmp", "V-bmpR", "V-vf"]
+          },
+          "srcRes": { "type": ["string", "null"] },
+          "canvasRes": { "type": ["string", "null"] },
+          "fullscreen": { "type": "boolean" },
+          "frames": { "type": "integer", "minimum": 0, "description": "측정 창 안 렌더 콜백 수" },
+          "windowSec": { "type": ["number", "null"] },
+          "jsP50": {
+            "type": ["number", "null"],
+            "description": "프레임당 JS 동기 시간(ms). 입력 준비 + 렌더 인코딩 + submit"
+          },
+          "jsP95": { "type": ["number", "null"] },
+          "jsMax": { "type": ["number", "null"] },
+          "asyncP50": {
+            "type": ["number", "null"],
+            "description": "비동기 변형(V-bmp, V-bmpR)의 비트맵 준비 지연(ms). 해당 없으면 null"
+          },
+          "asyncP95": { "type": ["number", "null"] },
+          "displayMissRate": {
+            "type": ["number", "null"],
+            "description": "디스플레이 갱신 누락률(0~1). 콜백 간격이 1.5/displayHz를 넘으면 round(간격 x hz) - 1개 누락. 500 ms 초과 간격은 누락 수와 창 길이에서 제외."
+          },
+          "displayHz": { "type": ["integer", "null"], "enum": [60, 120, null] },
+          "loopFps": { "type": ["number", "null"] },
+          "meanBrightness": {
+            "type": ["number", "null"],
+            "description": "마지막 프레임 출력을 64x36 rgba8unorm으로 되읽은 RGB 평균(0~255)"
+          },
+          "videoDropped": {
+            "type": ["integer", "null"],
+            "description": "측정 창 동안 getVideoPlaybackQuality 드롭 증가량"
+          },
+          "videoTotal": { "type": ["integer", "null"] },
+          "errorName": {
+            "type": ["string", "null"],
+            "description": "변형이 예외로 건너뛰어졌을 때 예외 name"
+          }
+        }
       }
     },
     "errors": { "type": "array", "items": { "type": "string" } }

@@ -51,6 +51,14 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
 - Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
 
+## M2 Q 회차 구현 (FIX_GUIDE Q1~Q4, 구현 완료 · Mac 확인 대기)
+
+- 배경: 0b 3차에서 복사 경로 G3c 불통과(2160p 복사 JS p95 14 ms, PLAN.md A22), 시작 약 30초 검정
+- Q1 경로 `pending`(캔버스 숨김, 1초 재시도 60회 상한, 결정 후 pending/none은 경로 불변), `none`은 즉시 detach, Q2 500 ms 초과 공백을 displayMissRate·loopFps에서 제외·play/seeked/가시 복귀 시 버퍼 비움, Q3 프로브 P0-6 VP9 입력 방식 6종 일괄 측정(schemaVersion 5, `vp9Paths`), `fixtures/ramp-2160p60.webm`(VP9, 약 99 KB)
+- → verify: lint 통과, npm test 107/107, pytest sim 100/100, check-fixtures 6/6 PASS, results 전체 parse-result rc=0 / (1). Safari 동작(pending 중 원본 표시, 전환 시간, createImageBitmap·VideoFrame 경로, 변형별 비용·밝기)은 미검증 / (3)
+- Opus 확인 필요: (a) 변형 측정 "8초(앞 1초 제외)"를 앞 1초 버리고 8초 측정(변형당 약 9초)으로 구현 (b) P0-6의 "JS 동기 시간"은 rAF 콜백 전체(입력 준비+인코딩+submit)이며 A22의 복사 호출 시간과 기준이 다름 (c) 밝기 되읽기는 캔버스 자체가 아니라 같은 입력을 64×36 rgba8unorm에 재렌더 (d) 예외 난 변형은 수치를 모두 null로 두고 errorName만 기록 (e) 결정 후 pending/none 결과는 경로 불변(N2 연속 2회 가드가 처리) (f) K1 미구현, schemaVersion 6으로 미룸
+- 다음: 사용자 Mac에서 FIX_GUIDE Q4 절차 → 확장 JSON + 프로브 P0-6 JSON(ProMotion·60Hz 각 1회) 회신 → Opus가 Q5 판정
+
 ## M2 복사 경로 구현 (FIX_GUIDE P1~P4, 구현 완료 · Mac 확인 대기)
 
 - 배경: 0b 2차에서 YouTube VP9는 `importExternalTexture`가 검고 `copyExternalImageToTexture`·Canvas2D는 정상(PLAN.md A21, G4 조건부 통과)

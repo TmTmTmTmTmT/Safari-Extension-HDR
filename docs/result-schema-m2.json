@@ -92,8 +92,8 @@
         "jsP95": { "type": ["number", "null"] },
         "path": {
           "type": ["string", "null"],
-          "enum": ["ext", "copy", null],
-          "description": "schemaVersion 3 이상. 입력 경로: ext(외부 텍스처) | copy(복사). 첫 frameProbe 전은 null."
+          "enum": ["ext", "copy", "pending", null],
+          "description": "schemaVersion 3 이상. 입력 경로: ext(외부 텍스처) | copy(복사) | pending(판단 불가, 캔버스 숨김). 첫 frameProbe 전은 null."
         },
         "displayHz": {
           "type": ["number", "null"],
