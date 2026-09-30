@@ -1,78 +1,75 @@
-# FIX_GUIDE.md — M2 Xcode 형식 불일치·구현 검토 + 프로브 지표(K1)
+# FIX_GUIDE.md — M2 0b 검은 비디오 프레임 진단(N) + 프로브 지표(K1)
 
-> 작성: Opus. 근거: STATUS.md "Opus 확인 필요"(M2 항목), PR #4 CI 로그(`23f3af2`: 러너 Xcode 26.2~26.6, `project.xcproj` 읽기 실패 exit 74), 사용자 Mac `make-xcode.sh` 출력.
+> 작성: Opus. 근거: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`, 사용자 회신(stripes 스크린샷·"4단계로 보여져", itm/identity 검은 화면·소리 정상, 144p에서도 동일, Stats for nerds `vp09.00.51.08…`, `bt709`), STATUS.md "M2 0b 1차 회신".
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
-> 이전 회차: F1~F5(`63291b6`), H1~H5(`5fedb89`), J1~J4(`7abf8a8`) 완료. K1은 미구현이며 아래에 그대로 둔다.
+> 이전 회차: F·H·J(M1 프로브), L1~L6(M2 CI·구현 검토, `7edf085`·`c6fc106`) 완료. 내용은 git 이력 참조. K1은 미구현이며 아래에 그대로 둔다.
 
 ## 판정 요약
 
-- macOS CI 실패는 코드 결함이 아니다. 사용자 Mac의 Xcode 베타 converter가 새 형식 `project.xcproj`를 만들었고, 러너(최신 26.6)는 `project.pbxproj`만 읽는다. 러너에 27 계열이 없어 (b) 러너 쪽 선택은 불가.
-- 결정: **(d) CI가 러너 Xcode로 converter를 직접 실행해 임시 프로젝트를 만들고 무서명 빌드한다.** 커밋된 `xcode/`는 사용자 Mac 설치용이며 CI에서는 A16(절대경로) 검사만 한다. 커밋된 프로젝트가 `project.pbxproj` 형식이면 그것도 빌드한다.
-  - (a) 안정판 26.x 재생성은 macOS 27.2에서 실행 가능 여부가 미확인이고, 사용자 Xcode 버전에 CI가 계속 묶인다. 기각.
-  - (c) 빌드 생략은 A15(확장이 빌드되는가) 검증을 잃는다. 기각.
-  - (d)는 extension/ 변경이 러너 Xcode에서 빌드되는지를 매 push 검증하므로 A15 목적을 유지한다. 커밋 프로젝트의 빌드 가능성은 사용자 Mac Run으로 확인한다(0b 절차에 이미 포함).
-- M2 구현 중 보고된 결정 보류 항목은 대부분 승인한다(L3). 일시정지 attach 첫 프레임 누락만 수정한다(L4).
-- 이 수정은 **0b 사용자 측정을 막지 않는다.** 사용자는 현재 `xcode/`로 Mac에서 Run·측정을 병행해도 된다.
+- **G4는 보류.** 세 항목 중 두 개는 자료가 충족됐고, 비디오 프레임이 검게 나오는 결함이 남았다(PLAN.md 게이트 판정 기록 참조).
+  - `navigator.gpu`(isolated world): **충족.** gpu/adapter/device/configure 모두 true, configRead `rgba16float`/`display-p3`/`extended`, 렌더 루프 ProMotion ≈115회/s, jsP95 1 ms.
+  - SecurityError: 예외는 없다(errors 빈 배열). 그러나 프레임이 검으므로 "YouTube video를 읽을 수 있다"는 G4의 취지는 **미충족**이다. 예외 없는 검은 프레임은 taint와 결과가 같을 수 있어 원인을 가려야 한다.
+  - 오버레이 EDR: **잠정 충족.** stripes 스크린샷에서 1.0(A0)·1.25(BC)·1.5(CF)·2.0(E8)이 서로 다르고 3.0 이상은 같은 흰색으로 합쳐졌다. 스크린샷이 1.0을 회색으로 기록한 것은 캡처가 EDR 값을 헤드룸 기준으로 눌러 담았다는 뜻이며, 구분 한계 약 3은 0a 밝기 중간 G2 값(3)과 일치한다. 사용자 육안 확인(N4)으로 확정한다.
+- **검은 프레임 원인 가설**(현재 자료로는 구분 불가):
+  - H-a: Safari `importExternalTexture`가 이 소스(MSE, VP9)의 프레임을 지원하지 않고 예외 없이 검은 텍스처를 준다.
+  - H-b: 코덱과 무관하게 MSE(blob) video가 원인이다.
+  - H-c: isolated world(content script)에서 video 프레임 접근이 막힌다.
+  - 프로브(same-origin H.264 mp4, main world)는 정상이었으므로 차이는 코덱·MSE·실행 world 셋 중 하나 이상이다.
+- 이번 회차는 **원인 판별용 진단(N1·N3)과 사용자 보호 가드(N2)**만 한다. 대체 렌더 경로는 결과를 본 뒤 Opus가 정한다(N5 분기표).
 
 ---
 
-## L1. macOS CI: 러너에서 converter로 임시 프로젝트 생성 후 빌드
+## N1. 프레임 경로 3종 되읽기 진단 (`diag.frameProbe`)
 
-- **원인**: 커밋 프로젝트 형식(`project.xcproj`)을 러너 Xcode 26.x가 읽지 못함.
+- **원인 판별 목표**: 같은 순간 같은 video 프레임을 세 경로로 읽어 어느 경로가 검은지 본다.
 - **수정 방향**:
-  1. ci.yml `macos` job 순서: `xcodebuild -version` 기록 → (커밋된 `xcode/`가 있으면) A16 검사: `.xcodeproj` 안의 `project.pbxproj` 또는 `project.xcproj`에서 `$PWD`·`/Users/` 검출 시 실패(현행 규칙 유지) → **임시 빌드**: `$RUNNER_TEMP/xc`에 `xcrun safari-web-extension-converter extension --project-location "$RUNNER_TEMP/xc" --app-name SDRHDR --bundle-identifier io.github.tmtmtmtmtmt.sdrhdr --macos-only --swift --no-open --no-prompt --force`(옵션은 make-xcode.sh와 동일, `--force`는 임시 경로라 허용. 러너 converter `--help`에 없으면 생략) → 생성된 `.xcodeproj`를 `-alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build`.
-  2. 커밋된 `.xcodeproj`에 `project.pbxproj`가 있으면 그것도 같은 명령으로 빌드한다. `project.xcproj`만 있으면 "커밋 프로젝트는 새 형식이라 러너에서 빌드 생략(사용자 Mac Run으로 확인)"을 출력한다(실패 아님).
-  3. `xcode/`가 없어도 임시 빌드는 한다(더 이상 "프로젝트 없음"으로 조기 종료하지 않는다).
-  4. 진단용 `ls -d /Applications/Xcode*` 줄은 제거한다.
-- **영향 범위**: `.github/workflows/ci.yml`만.
-- **검증**: (2) PR #4 macos job green, 로그에 임시 프로젝트 빌드 `** BUILD SUCCEEDED **`와 커밋 프로젝트 "빌드 생략" 문구. 실패하면 로그를 STATUS.md에 요약하고 Opus로 반환(스크립트 우회 금지).
+  1. attach 후 video가 `readyState >= 2`이고 재생 중일 때 1회, 이후 5초마다 1회(재생 중일 때만) 실행한다. 렌더 루프와 별개이며 렌더 루프를 막지 않는다(비동기, 실행 중이면 다음 회차 건너뜀).
+  2. 경로별 평균 밝기(0~255, RGB 평균)를 구한다. 모두 64×36 크기로 줄여 읽는다.
+     - `ext`: `importExternalTexture` → 전용 파이프라인(identity 샘플, 출력 형식 `rgba8unorm`, 64×36 렌더 타깃) → `copyTextureToBuffer`(bytesPerRow 256 정렬) → `mapAsync`. 기존 캔버스 파이프라인·형식은 바꾸지 않는다.
+     - `copy`: `queue.copyExternalImageToTexture({source: video, origin: 중앙 64×36 영역의 좌상단}, …)`로 `rgba8unorm` 64×36 텍스처에 복사 → 되읽기. 원본 크기 그대로 중앙 부분만 읽는다(축소 없음).
+     - `c2d`: `OffscreenCanvas(64, 36)` 2D 컨텍스트에 `drawImage(video, 0, 0, 64, 36)` → `getImageData` 평균.
+  3. 경로마다 예외를 따로 잡아 `name`만 기록한다(예: `SecurityError`). 한 경로 실패가 다른 경로를 막지 않는다.
+  4. diag에 `frameProbe: {at(ms, 첫 attach 기준), n(누적 횟수), ext, copy, c2d, extErr, copyErr, c2dErr}`로 최신 1회만 둔다. 픽셀 데이터 자체는 저장하지 않는다(GUIDELINES 2.6).
+  5. 평균 계산은 순수 함수(`hud.js` 또는 `detect.js`)로 두고 단위 테스트한다. GPU·Canvas 호출은 `renderer.js`에 둔다.
+- **영향 범위**: `extension/content/renderer.js`, `hud.js`(또는 `detect.js`), `main.js`(diag 반영), `docs/result-schema-m2.json`(schemaVersion 2, `frameProbe` 선택 필드 + `flags.blackFrame`), `scripts/parse-result.py`(M2 v2 열 추가, v1 호환), 테스트.
+- **검증(1)**: lint, `npm test`(평균 함수, bytesPerRow 패딩 제거 로직, diag 스키마 v2), `python3 -m pytest sim`(v1·v2 파싱). CI green.
+- **검증(3)**: N4 절차의 JSON.
 
-## L2. make-xcode.sh: converter 부재 시 정확한 안내
+## N2. 검은 프레임 가드 (사용자 보호)
 
-- **원인**: `xcode-select`가 Command Line Tools를 가리키면 converter 자체가 없는데, 스크립트는 "옵션이 없다"고 7줄을 출력해 원인을 오도했다.
-- **수정 방향**: 옵션 확인 전에 `xcrun --find safari-web-extension-converter`를 실행한다. 실패하면 "Xcode 앱이 선택되지 않음: `xcode-select -p` 확인, `sudo xcode-select -s /Applications/<Xcode>.app/Contents/Developer`"를 출력하고 종료 코드 1. 옵션 누락 시에는 `--help` 출력 앞부분(40줄)을 함께 표시한다. 생성 후 `xcodebuild -version`을 출력해 어떤 Xcode로 만들었는지 남긴다.
-- **영향 범위**: `scripts/make-xcode.sh`.
-- **검증**: (1) `bash -n`, `xcrun` 없는 환경(클라우드)에서 실행 시 안내 문구·rc=1 확인(저장소 루트 검사 통과 조건을 만족시킨 상태로). (3)은 불필요.
+- **원인**: 현재 오버레이가 원본 video를 검은 화면으로 덮는다. GUIDELINES 2.4-3("검은 프레임 연속 감지는 detach 방향으로만")의 범위에서 막는다.
+- **수정 방향**:
+  1. 순수 함수 `isBlackOverlay(probe)`: `ext`가 2 미만이고 `c2d` 또는 `copy`가 8 이상이면 true(예외로 값이 없으면 판단하지 않음).
+  2. N1 결과가 **2회 연속** true면 detach하고, `flags.blackFrame = true`, errors에 `{at:'blackFrame', name:'BlackFrame', message:'ext≈0 while c2d/copy>0'}`를 기록한다. 해당 video 요소는 이번 페이지 수명 동안 재attach하지 않는다(DRM WeakSet과 별도 집합. 새로고침하면 초기화).
+  3. 진단 편의를 위해 popup 모드가 `stripes`일 때는 가드를 적용하지 않는다(video를 그리지 않으므로).
+- **영향 범위**: `detect.js`(순수 함수), `main.js`, 테스트.
+- **검증(1)**: 순수 함수 경계값 테스트(ext 0/1.9/2, c2d 7.9/8, null 조합), 2회 연속 조건 테스트(가능한 범위의 stub).
 
-## L3. M2 구현 결정 보류 항목 판정 (코드 변경 없음, 기록만)
+## N3. 프로브에 VP9 픽스처 대조 추가
 
-| 항목                                                                                         | 판정                                                                                                                                                                     |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| main.js 끝에서 `Promise.resolve().then(start)`로 시작                                        | **승인.** "부작용 시작점은 main.js"와 "로드 시 동기 접근 없음"을 모두 만족한다. start 내부 예외는 삼키되 diag `errors`에 기록한다(현행이 기록하지 않으면 L4와 함께 추가) |
-| renderer `hooks.onFrame`, `getStats()`                                                       | **승인.** M2-1 동작 구현에 필요한 최소 인터페이스                                                                                                                        |
-| overlay의 video `loadedmetadata`/`resize` 구독                                               | **승인.** 화질 변경 시 캔버스 크기 갱신에 필요. detach에서 해제 필수                                                                                                     |
-| diag 값 형식(`configRead.toneMapping`=mode 문자열, 통계는 최근 600개 기준, `errors` 최대 20) | **승인**                                                                                                                                                                 |
-| 체크리스트 파일명 표기 `ac`/`mid`/`1080p60`/`2160p60`/모드                                   | **승인.** M1 관례와 같음                                                                                                                                                 |
-| make-xcode.sh 저장소 루트 판정, 절대경로 rc=2                                                | **승인**                                                                                                                                                                 |
+- **목표**: H-a(코덱) 대 H-b/H-c를 가른다. same-origin·main world·비MSE에서 VP9가 검은지 본다.
+- **수정 방향**: `scripts/make-fixtures.sh`에 `ramp-1080p60.webm`(VP9, libvpx-vp9, 12초, bt709 태그, 기존 램프와 같은 내용) 생성을 추가하고 커밋한다(파일 크기 1 MB 안팎 목표, 넘으면 STATUS.md에 기록). 2160p VP9는 만들지 않는다(인코딩 시간). 프로브 P0-4 픽스처 목록에 이 파일을 추가해 기존 "창 실행"·"전체화면 측정"으로 identity를 볼 수 있게 한다. `check-fixtures.sh`에 webm 검사(코덱 vp9, 1920×1080, 60fps)를 추가한다.
+- **영향 범위**: `scripts/make-fixtures.sh`, `scripts/check-fixtures.sh`, `fixtures/ramp-1080p60.webm`, `probe/probe.js`(목록만), 필요 시 `probe/index.html`.
+- **검증(1)**: check-fixtures PASS. (3) N4 절차.
+- MSE 재생 경로는 이번에 만들지 않는다(N1 결과로 필요할 때 Opus가 지시).
 
-## L4. 일시정지 상태 attach 시 첫 프레임 렌더
+## N4. 사용자 Mac 확인 절차 (docs/manual-checklist.md 0b 절에 추가)
 
-- **원인**: 재개 이벤트가 `play`/`seeked`뿐이라, 자동재생이 막혀 일시정지로 attach되면 캔버스가 비어 있고(검거나 투명) 원본 video를 가린다. C절 "일시정지 시 1회 렌더"와 어긋난다.
-- **수정 방향**: attach 직후 `video.readyState >= 2`(HAVE_CURRENT_DATA)면 1회 렌더한다. 아니면 `loadeddata`를 1회 구독해 1회 렌더한다. 재생 중이면 기존 루프를 따른다. 리스너는 detach에서 해제한다.
-- **영향 범위**: `extension/content/renderer.js`(필요 시 `main.js`), 해당 단위 테스트(렌더 호출 횟수를 stub으로 검사할 수 있는 범위만. 불가하면 테스트 없이 STATUS.md에 사유 기록).
-- **검증**: (1) lint·`npm test`. (3) 0b 체크리스트에 "일시정지 상태로 페이지 로드 → 오버레이에 첫 프레임 표시" 항목 1줄 추가.
+1. 확장 갱신: `git pull` 후 Xcode에서 다시 Run(확장 코드는 참조 방식이라 재생성 불필요 [추정]. 반영이 안 되면 Safari 재시작).
+2. 같은 YouTube 영상(VP9)에서 `identity` 모드로 재생 10초 이상 → popup JSON 복사 → `results/result-M2-<날짜>-ac-mid-yt-vp9-identity-probe.json`. 가드가 작동하면 오버레이가 사라지고 원본이 보이는 것이 정상이다.
+3. 가능하면 H.264로 재생되는 영상 1개로 같은 절차(Stats for nerds Codecs가 `avc1`인 영상. 없으면 생략하고 [미확인]).
+4. 프로브: `python3 -m http.server 8000` → `http://localhost:8000/probe/` → P0-4에서 `ramp-1080p60.webm` "창 실행"(identity) → 오른쪽 출력이 검은지 한 줄 메모 + JSON export.
+5. stripes 판독: 캔버스는 왼쪽부터 9줄(1.0 / 1.25 / 1.5 / 2 / 3 / 4 / 6 / 8 / 16)이다. 밝기 중간에서 30초 이상 기다린 뒤, 왼쪽부터 세어 서로 구분되는 마지막 줄의 번호와 값을 적는다.
 
-## L5. M2 진단 스키마 타입 확정
+## N5. 결과별 다음 단계 (Opus 판정용, 구현 대상 아님)
 
-- **수정 방향**: `docs/result-schema-m2.json`에서 `api.adapter`·`api.device`·`api.configure`를 `boolean|null`(성공 true, 실패 false, 시도 전 null), `api.configRead.toneMapping`을 `string|null`로 정한다. `buildDiag`가 이 타입을 내도록 맞추고 단위 테스트에 타입 검사를 추가한다.
-- **영향 범위**: `docs/result-schema-m2.json`, `extension/content/hud.js`(필요 시 `main.js`/`renderer.js`의 값 대입), `tests/unit/extension-*.test.js`, `sim/test_parse_result.py`(샘플 값).
-- **검증**: (1) lint, `npm test`, `python3 -m pytest sim`.
-
-## L6. CI ubuntu job에 DOM 테스트 추가
-
-- **원인**: `npm run test:dom`이 어디서도 실행되지 않는다. M3의 DOM 판별 검증 수단이므로 지금 CI에 넣는다.
-- **수정 방향**: ubuntu job에 `npx playwright install --with-deps webkit` 후 `npm run test:dom` 단계를 추가한다. Playwright 버전은 package-lock의 것을 쓴다. 이 VM에서 WebKit 설치가 실패하는 것은 VM egress 문제로 보고, CI 결과로 판단한다.
-- **영향 범위**: `.github/workflows/ci.yml`(L1과 같은 파일이므로 같은 작업자가 처리).
-- **검증**: (2) ubuntu job에서 `m2-detect.spec.js` 3건 통과.
-
----
-
-## 병렬 분할 (L 회차)
-
-- W-A: L1 + L6(ci.yml), L2(make-xcode.sh).
-- W-B: L4, L5(extension/, docs/result-schema-m2.json, tests, sim/test_parse_result.py), 0b 체크리스트 1줄 추가(docs/manual-checklist.md).
-- L3는 STATUS.md 기록만(본 세션).
-- 파일 비중첩. K1은 여전히 별도 PR(이 브랜치에 섞지 않음).
+| frameProbe(유튜브)          | 프로브 VP9 | 해석                          | 다음 단계 후보                                               |
+| --------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------ |
+| ext≈0, copy>0, c2d>0        | 검음       | H-a: 외부 텍스처가 VP9 미지원 | 프레임마다 `copyExternalImageToTexture` 경로(비용 측정 필요) |
+| ext≈0, copy>0, c2d>0        | 정상       | H-b: MSE 경로 문제            | 위와 같음 + 프로브 MSE 사례로 확인                           |
+| ext≈0, copy≈0, c2d>0        | —          | WebGPU 비디오 경로 전반 불가  | Canvas2D 중간 단계(비용 큼) 또는 F-A 검토                    |
+| 셋 다 ≈0 또는 SecurityError | —          | H-c 또는 보호 프레임          | B절 G4 실패 분기: main world 주입 시험                       |
+| ext>0인데 화면 검음         | —          | 합성·출력 단계 문제           | 캔버스 합성 재조사                                           |
 
 ---
 
@@ -91,11 +88,18 @@
 
 ---
 
-## 이번 수정 범위 밖 (변경 금지, L·K 공통)
+## 이번 수정 범위 밖 (변경 금지, N·K 공통)
 
 - ITM 수식, 프리셋 수치(M4).
-- K1은 `probe/` 전용이며 M2 브랜치에 섞지 않는다. L 회차는 `extension/`·CI·스크립트만 다룬다.
+- K1은 `probe/` 지표 전용이며 M2 브랜치에 섞지 않는다. N3의 프로브 변경은 픽스처 목록 추가만이다.
+- 대체 렌더 경로(copyExternalImageToTexture 구동, Canvas2D 중간 단계, main world 주입)는 N5 판정 전 구현 금지.
 - 커밋된 `xcode/`의 수기 편집·형식 변환(GUIDELINES 7-5).
+
+## 병렬 분할 (N 회차)
+
+- W-A: N1 + N2 (`extension/`, 스키마, parse-result, 테스트).
+- W-B: N3 (`scripts/make-fixtures.sh`, `check-fixtures.sh`, `fixtures/*.webm`, `probe/` 목록) + N4 체크리스트 문구(`docs/manual-checklist.md`).
+- 파일 비중첩. 픽스처 인코딩은 sim-runner로 실행해도 된다.
 
 ## 병렬 분할 (K1)
 

@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.2 (2026-09-30, D-M2 M2-3 CI 개정·A15/A16 갱신)
+> 버전: v1.3 (2026-09-30, G4 보류 기록·A9/A10 갱신)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -31,8 +31,8 @@
 | A6 | WebGL HDR(`drawingBufferStorage`/ToneMapping)은 Safari 미지원 | [확인(0a)] `drawingBufferStorage` 없음 | 2023년 WebKit "No signal". 존재 여부만 프로브 | 0a |
 | A7 | Canvas2D `colorType:"float16"` HDR은 WebKit에서 구현 진행 중 | [확인(0a)] Safari 27.2 미지원 → G1/G2 1차 폴백 경로 없음 | WebKit PR #71719. 보조 폴백 | 0a |
 | A8 | `importExternalTexture` 샘플은 descriptor colorSpace(기본 srgb) 기준 인코딩 RGB | [추정] | BT.709 transfer 처리 방식 미확인 | 0a P0-4 |
-| A9 | content script(isolated world)에서 `navigator.gpu` 사용 가능 | [미확인] | — | **0b** |
-| A10 | YouTube MSE(blob:) video는 origin-clean이라 SecurityError가 나지 않음 | [추정] | — | **0b** |
+| A9 | content script(isolated world)에서 `navigator.gpu` 사용 가능 | [확인(0b 1차)] adapter·device·configure 성공, 되읽기 extended | — | **0b** |
+| A10 | YouTube MSE(blob:) video는 origin-clean이라 SecurityError가 나지 않음 | [부분 확인(0b 1차)] 예외는 없으나 importExternalTexture 결과가 검음. 읽기 가능 여부는 미확인(FIX_GUIDE N1) | — | **0b** |
 | A11 | 창 모드 페이지 캔버스에서도 EDR 유지 | [미확인] | — | 0a/0b |
 | A12 | 배터리/저전력에서 헤드룸 축소 | [추정] | 웹에서 배터리 상태 조회 불가 | 0a 기록 |
 | A13 | YouTube 전체화면은 `#movie_player` 요소 전체화면이라 오버레이가 유지됨 | [추정] | — | 0b/M3 |
@@ -391,7 +391,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | G1 API | 2026-09-30 | results/result-M1-20260930-battery-max-fullscreen.json | **통과** | configure 예외 없음, 되읽기 `rgba16float`/`display-p3`/`extended`. 조건 무관 항목이라 재측정 불필요 |
 | G2 EDR | 2026-09-30 | results/result-M1-20260930-ac-{low,mid,max}-mixed.json | **통과** | 전원 연결 3단계 밝기 모두 SDR white 위 2단계 이상 구분(안정 후 4 / 3 / 2, 최소 조건인 밝기 최대에서도 1.25·1.5·2). 1차 잠정 판정 확정. 헤드룸 제약은 C절 "0a 헤드룸 제약"으로 M4에 넘김 |
 | G3 성능 | 2026-09-30 | 4차: results/result-M1-20260930-ac-mid-actual60hz-raf.json, …-actualpromotion-raf.json (이전 회차 이력은 git) | **통과** | B절 3차 개정 기준. rAF 구동 run 전부 콜백 수 = 기대 갱신 수(60Hz 600/599~600, ProMotion 1200~1201/1199~1200) → 디스플레이 갱신 누락 0, R3−R0 = 0%p(두 해상도·두 주사율). JS p95 ≤ 1.05 ms. GPU(2160p ITM, 3600×2025) 60Hz 5.3 ms / ProMotion 2.4 ms로 예산 내. 끊김 육안 "없음"(두 주사율). 비교용 rVFC 구동(V3)은 11~32% 누락. 주: 사용자 보고로 4차 두 파일의 refreshRate 표기가 뒤바뀜(loopFps 60/120으로 확인, 파일명은 실제 주사율로 저장). 제한: 픽스처 기준이며 YouTube 실제 재생은 G4(0b)에서 함께 확인 |
-| G4 확장 컨텍스트 | — | — | 대기 | — |
+| G4 확장 컨텍스트 | 2026-09-30 | results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json, stripes 스크린샷 | **보류** | `navigator.gpu`(isolated world) 충족, 오버레이 EDR 잠정 충족(구분 한계 약 3 = 밝기 중간 G2와 일치, 육안 재확인 필요). 결함: YouTube(MSE, VP9) 프레임이 예외 없이 검게 렌더됨(144p 포함). 원인 판별은 FIX_GUIDE N1~N5 |
 
 ---
 
