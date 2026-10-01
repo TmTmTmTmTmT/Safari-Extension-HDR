@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.6 (2026-10-01, M5: 2.6-3 진단 영역 규칙). 개정은 Opus만 한다.
+> 버전: v1.7 (2026-10-01, T 회차: 2.5-7 재렌더 생략, 2.6-2 요청 시 진단, 3-1 JS 미러 런타임 미로드). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -52,10 +52,11 @@
 4. **[필수]** GPU 초기화 실패, device lost, SecurityError는 잡아서 detach하고 HUD에 기록한다. 페이지 재생을 방해하지 않는다.
 5. **[권장]** 파이프라인·샘플러·유니폼 버퍼는 attach 시 1회 생성하고 파라미터 변경 시 유니폼만 갱신한다.
 6. **[필수]** 비디오 입력 경로는 PLAN C절 "비디오 입력 경로"(ext → vf → copy 자동 선택)를 따른다. 소스가 바뀌면 경로 결정부터 다시 한다. `VideoFrame`은 submit 직후 반드시 `close()`한다(예외 경로 포함).
+7. **[필수]** 같은 소스 프레임은 다시 그리지 않는다(vf: `VideoFrame.timestamp` 동일, copy: 복사 생략). 단 설정·모드·경로·소스·캔버스 크기 변경, play·seeked, 가시 복귀 뒤에는 반드시 다시 그린다. 생략한 tick도 루프 통계(loopTs·srcTs·frameTimes)는 기록한다(FIX_GUIDE TA).
 
 ### 2.6 진단·개인정보 (M2 추가)
 1. **[필수]** 진단 JSON(`sdrhdr.diag`, 결과 파일)에는 영상 제목, 채널, 쿠키, 계정 정보, 전체 URL을 넣지 않는다. 페이지는 경로와 `v` 쿼리만 기록한다.
-2. **[필수]** 진단 기록은 `storage.local`에 최신 1개만 유지하고 외부로 전송하지 않는다.
+2. **[필수]** 진단 기록은 `storage.local`에 최신 1개만 유지하고 외부로 전송하지 않는다. content script는 주기적으로 진단을 쓰지 않고, popup의 요청 키(`sdrhdr.diagRequest`)가 바뀔 때 **보이는 탭만** 1회 쓴다(FIX_GUIDE T2).
 3. **[필수]** `stripes`·`identity`·`baseline` 모드는 진단용이며 popup의 "진단" 영역(`<details>`, 기본 접힘) 밖으로 노출하지 않는다(PLAN D-M5 M5-2). 페이지 HUD는 사용자 확인용이라 이 규칙 대상이 아니지만 개인정보 규칙(2.6-1)은 따른다.
 
 ### 2.7 수명주기 (M3 추가)
@@ -69,7 +70,7 @@
 1. **[필수]** ITM 수식은 세 곳에 존재한다: WGSL(`itm.wgsl.js`), JS 미러, numpy(`sim/`). 하나를 바꾸면 **같은 커밋에서** 셋 다 갱신한다.
    - M2 예외: JS 미러는 M4에서 만든다. M2는 WGSL 본문이 `probe/shaders.js`와 같고 상수가 `params.js`·`sim/presets.py` 균형 값과 같음을 테스트한다(PLAN D-M2 M2-5).
    - M4a 예외: 강도 혼합(PLAN D-M4a)은 WGSL과 numpy 두 곳에 같은 커밋으로 넣는다. JS 미러는 M4에서 만들 때 혼합을 포함한다. WGSL 테스트는 곡선 본문(`ITM_FN`)이 probe와 같음을 계속 검사한다.
-   - M4(PLAN D-M4) 이후: JS 미러는 `content/tonecurve.js` 한 곳이다. ITM 상수는 WGSL uniform으로 옮기고 probe 셰이더와의 문자열 일치 검사는 끝낸다. 대신 JS 미러 vs numpy 참조(`tests/unit/fixtures/tonecurve-ref.json`, `python -m sim.export_ref`로 재생성) 오차 < 1e-4와 WGSL uniform 필드 순서 = `params.js` 직렬화 순서를 검사한다.
+   - M4(PLAN D-M4) 이후: JS 미러는 `content/tonecurve.js` 한 곳이다(런타임 미로드, manifest `content_scripts`에 넣지 않고 테스트가 직접 로드, FIX_GUIDE T5). ITM 상수는 WGSL uniform으로 옮기고 probe 셰이더와의 문자열 일치 검사는 끝낸다. 대신 JS 미러 vs numpy 참조(`tests/unit/fixtures/tonecurve-ref.json`, `python -m sim.export_ref`로 재생성) 오차 < 1e-4와 WGSL uniform 필드 순서 = `params.js` 직렬화 순서를 검사한다.
 2. **[필수]** JS 미러 vs numpy 오차 < 1e-4 테스트를 유지한다. 테스트 입력은 램프, 컬러바, 프리셋 3종 + 범위 경계값을 포함한다.
 3. **[필수]** 곡선·프리셋 수치는 PLAN.md C절 초안을 쓰고, 변경은 M4에서 Opus가 GUIDELINES/PLAN 개정으로만 한다. Sonnet은 S2/S4/S5 결과를 STATUS.md에 보고만 한다.
 4. **[필수]** 셰이더 출력에 NaN/Inf가 나오지 않게 `Y=0` 분기를 명시한다(`f(Y)/Y` 계산).
