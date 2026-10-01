@@ -98,6 +98,8 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - → verify: lint 통과, npm test 176/176, test:dom 14/14, pytest sim 157/157, 과거 results parse-result 통과, v8 합성 진단 parse-result 확인 / (1) 로컬 Mac. **WGSL 컴파일·선명도 GPU 비용·체감은 미검증(사용자 Mac 필요)**
 - 해석(계획 문구 보강, Opus 확인 요청): ① 채도 슬라이더 표시 범위 50~150%(저장 0.5~1.5). ② `LUMA_709` 계수를 sim과 같은 유도값(0.2126390059, 0.7151686788, 0.0721923154)으로 통일해 기존 WGSL의 반올림 값(0.2126/0.7152/0.0722)과 약 4e-5 차이. ③ 선명도는 `texture_external`에도 `textureDimensions`를 쓰며 이 호출이 Safari 27.2에서 허용되는지는 미검증. ④ 프리셋 `선명`의 popup 문구는 "선명 (밝기 중간 이상 권장)"
 
+- M4 1차 회신(2026-10-01, `results/result-M4-20261001-accurate-first.json`, 프리셋 accurate·강도 43%·선명도 0·채도 105%, 밝기 미기재): 사용자 보고 "잘됨". 새 셰이더(uniform·혼합·채도)가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, loopFps 71·displayMissRate 0·JS p95 1 ms·video 드롭 0, 30fps 소스). 체크리스트 M4 절의 나머지(프리셋 비교, 뭉개짐 시작 강도, 선명도 GPU 비용·끊김, 채도 선호)는 [미확인]. 확장 끄고 켜기를 반복한 이벤트 로그는 정상(중복 disable은 popup 모드 토글)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
