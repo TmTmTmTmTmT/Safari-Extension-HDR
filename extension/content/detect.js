@@ -7,6 +7,25 @@
     video: 'video.html5-main-video',
   };
 
+  // YouTube 이벤트·클래스 이름도 셀렉터와 같이 이 파일에만 둔다 (GUIDELINES 2.7-1).
+  const NAV_EVENT = 'yt-navigate-finish';
+  const PIP_EVENTS = [
+    'enterpictureinpicture',
+    'leavepictureinpicture',
+    'webkitpresentationmodechanged',
+  ];
+  const AD_CLASS = 'ad-showing';
+  const PIP_PRESENTATION_MODE = 'picture-in-picture';
+  const HDR_TRANSFERS = ['pq', 'hlg'];
+  // [미확인] 아래 셀렉터는 추측값이다 (GUIDELINES 2.7-4). 2026-10-01 스냅샷(PLAN M3-8)에는 조상에 ytd-watch-flexy가
+  // 없어 theater·miniplayer를 확인하지 못했고, HDR 영상의 설정 버튼도 ytp-4k-quality-badge였다.
+  // hdrBadge는 ytp-<품질>-quality-badge 패턴에 맞춘 추정이며 판정(main.js)에는 쓰지 않고 진단에만 쓴다.
+  const MODE_SELECTORS = {
+    theater: 'ytd-watch-flexy[theater]',
+    miniplayer: 'ytd-miniplayer[active]',
+    hdrBadge: '.ytp-settings-button.ytp-hdr-quality-badge',
+  };
+
   // 순수: DRM 신호가 하나라도 있으면 true (GUIDELINES 2.4).
   function isDrm(sig) {
     const s = sig || {};
@@ -95,6 +114,15 @@
     return isBlackSelected(probe, path) ? (streak || 0) + 1 : 0;
   }
 
+  // DOM: 플레이어 루트. MutationObserver 범위를 #movie_player로 한정하는 데 쓴다 (GUIDELINES 2.7-3). 실패 시 null.
+  function findPlayer(doc) {
+    try {
+      return doc.querySelector(SELECTORS.player) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // DOM: 메인 플레이어 video와 container. 실패 시 예외 없이 null (GUIDELINES 2.3-2).
   function findMainVideo(doc) {
     try {
@@ -104,14 +132,128 @@
       if (!container) return null;
       const video = container.querySelector(SELECTORS.video);
       if (!video) return null;
-      return { video, container };
+      return { video, container, player };
     } catch (e) {
       return null;
     }
   }
 
+  // 순수: HDR 원본 판정 (PLAN D-M3 M3-2). 1순위 VideoFrame.colorSpace.transfer, 정보가 없을 때만 2순위 DOM 배지.
+  // primaries가 bt2020이어도 SDR transfer면 HDR이 아니다.
+  function isHdrSource(input) {
+    const i = input || {};
+    const cs = i.frameColorSpace;
+    const transfer = cs && typeof cs === 'object' ? cs.transfer : null;
+    if (typeof transfer === 'string' && transfer) return HDR_TRANSFERS.includes(transfer);
+    return i.badge === true;
+  }
+
+  // 순수: 화면 모드 우선순위 fullscreen > miniplayer > theater > default (진단용).
+  function playerMode(flags) {
+    const f = flags || {};
+    if (f.isFullscreen) return 'fullscreen';
+    if (f.isMiniplayer) return 'miniplayer';
+    if (f.isTheater) return 'theater';
+    return 'default';
+  }
+
+  // 순수: PiP 여부. Safari webkitPresentationMode 또는 표준 pictureInPictureElement.
+  function isPipActive(video, doc) {
+    try {
+      if (!video) return false;
+      return (
+        video.webkitPresentationMode === PIP_PRESENTATION_MODE ||
+        (!!doc && doc.pictureInPictureElement === video)
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // DOM: 광고 재생 중 여부. 실패 시 false.
+  function isAdShowing(doc) {
+    try {
+      const player = doc.querySelector(SELECTORS.player);
+      return !!player && player.classList.contains(AD_CLASS);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // DOM: 화면 모드·광고·HDR 배지 플래그. 셀렉터가 실패하면 해당 값은 false.
+  function readPlayerFlags(doc) {
+    const has = (sel) => {
+      try {
+        return !!doc.querySelector(sel);
+      } catch (e) {
+        return false;
+      }
+    };
+    let isFullscreen = false;
+    try {
+      isFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement);
+    } catch (e) {
+      isFullscreen = false;
+    }
+    return {
+      isTheater: has(MODE_SELECTORS.theater),
+      isMiniplayer: has(MODE_SELECTORS.miniplayer),
+      isFullscreen,
+      adShowing: isAdShowing(doc),
+      hdrBadge: has(MODE_SELECTORS.hdrBadge),
+    };
+  }
+
+  // 순수: 수명주기 상태 전이 표 (PLAN D-M3 M3-1). st={state, skip}, ev는 문자열. 입력 st는 바꾸지 않는다.
+  // drm은 요소 단위로 영구: srcChange로 풀리지 않는다. blackFrame·hdrSource는 srcChange로 풀리고 pip은 pipLeave로 풀린다.
+  const STICKY_SKIPS = ['drm', 'noGpu', 'disabled'];
+  function nextLifecycle(st, ev) {
+    const cur = { state: (st && st.state) || 'idle', skip: (st && st.skip) || null };
+    const next = (state, skip) => ({ state, skip: skip || null });
+    const sticky = cur.state === 'skipped' && STICKY_SKIPS.includes(cur.skip);
+    const live = cur.state === 'probing' || cur.state === 'active';
+    switch (ev) {
+      case 'attach':
+        return sticky ? cur : next('probing');
+      case 'srcChange':
+        if (sticky || (cur.state === 'skipped' && cur.skip === 'pip')) return cur;
+        return cur.state === 'idle' ? cur : next('probing');
+      case 'decided':
+        return cur.state === 'probing' ? next('active') : cur;
+      case 'drm':
+        return next('skipped', 'drm');
+      case 'error':
+        return cur.skip === 'drm' ? cur : next('skipped', 'noGpu');
+      case 'black':
+        return live ? next('skipped', 'blackFrame') : cur;
+      case 'hdr':
+        return live ? next('skipped', 'hdrSource') : cur;
+      case 'pipEnter':
+        return sticky ? cur : next('skipped', 'pip');
+      case 'pipLeave':
+        return cur.state === 'skipped' && cur.skip === 'pip' ? next('probing') : cur;
+      case 'disable':
+        return cur.skip === 'drm' ? cur : next('skipped', 'disabled');
+      case 'enable':
+        return cur.skip === 'disabled' ? next('idle') : cur;
+      case 'videoGone':
+        return next('idle');
+      default:
+        return cur;
+    }
+  }
+
   globalThis.__sdrhdr.detect = {
     SELECTORS,
+    MODE_SELECTORS,
+    NAV_EVENT,
+    PIP_EVENTS,
+    AD_CLASS,
+    isHdrSource,
+    playerMode,
+    isPipActive,
+    isAdShowing,
+    readPlayerFlags,
     BLACK_STREAK_LIMIT,
     NONE_STREAK_LIMIT,
     isDrm,
@@ -124,5 +266,7 @@
     contentRect,
     canvasResolution,
     findMainVideo,
+    findPlayer,
+    nextLifecycle,
   };
 })();

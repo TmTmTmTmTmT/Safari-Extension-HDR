@@ -178,6 +178,7 @@ function setup({
       constructor() {
         if (state.vfNewErr) throw state.vfNewErr;
         this.isFrame = true;
+        if (state.vfColorSpace !== undefined) this.colorSpace = state.vfColorSpace;
         if (state.vfTs !== undefined) this.timestamp = state.vfTs;
         this.closed = 0;
         state.calls.push('new VideoFrame');
@@ -913,4 +914,54 @@ test('S2: vf 경로는 frame.timestamp(us)->초, ext 경로는 video.currentTime
   e.flush();
   assert.strictEqual(e.renderer.getStats().srcTimes.slice(-1)[0], 2.5);
   e.renderer.destroy();
+});
+
+test('M3: vf frameProbe가 VideoFrame.colorSpace를 frameProbe·getStats에 기록, 없으면 null', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  s.vfColorSpace = {
+    primaries: 'bt2020',
+    transfer: 'pq',
+    matrix: 'bt2020-ncl',
+    fullRange: false,
+    extra: 1,
+  };
+  await s.renderer.start();
+  await s.settle();
+  const want = { primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl', fullRange: false };
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.probes[0].colorSpace)), want);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.renderer.getStats().colorSpace)), want);
+  s.renderer.destroy();
+  const n = setup({ readyState: 4, paused: false });
+  await n.renderer.start();
+  await n.settle();
+  assert.strictEqual(n.probes[0].colorSpace, null);
+  n.renderer.destroy();
+});
+
+test('M3: restartSource는 경로·frameProbe·colorSpace·측정을 비우고 GPU device는 재사용해 다시 결정한다', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  s.vfColorSpace = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false };
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  assert.ok(s.renderer.getStats().colorSpace);
+  s.video.currentTime = 1;
+  s.flush();
+  assert.strictEqual(s.renders, 1);
+  const pipelines = s.calls.filter((c) => c === 'mapAsync').length;
+  s.renderer.restartSource();
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.path, null);
+  assert.strictEqual(st.frameProbe, null);
+  assert.strictEqual(st.colorSpace, null);
+  assert.strictEqual(st.frames, 0);
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  assert.ok(st.api.device, 'device 재사용');
+  s.now = 1;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  assert.strictEqual(s.canvas.style.visibility, '');
+  assert.ok(s.calls.filter((c) => c === 'mapAsync').length > pipelines);
+  s.renderer.destroy();
 });

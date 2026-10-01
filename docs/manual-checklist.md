@@ -122,6 +122,30 @@ JSON의 `render.path`, `render.displayMissRate`, `render.displayHz`, `render.cop
 - 2회차: 시스템 설정 → 디스플레이에서 주사율을 60Hz로 바꾼 뒤 새로고침하고, P0-5에서 주사율=60Hz를 선택해 같은 절차(일괄 측정 1회 → 끊김 질문 → export)를 한다. 끝나면 주사율을 ProMotion으로 되돌린다.
 - 각 회차 파일을 `results/`에 두고 push한다. `python3 scripts/parse-result.py`가 해상도 x R0/R2/R3/V3 모드별 표(missRate, loopFps, videoPresentedFps, gpuMs, jsP95)와 G3 요약 표(baselineMiss, itmMiss, delta, rvfcMiss, loopFps, videoPresentedFps, jsP95Max, gpuMsMax)를 출력한다.
 
+## M3 감지·수명주기 확인 절차 (PLAN D-M3 M3-7 (3), M3-8)
+
+전제: 전원 연결, SDR 밝기 중간. `git pull` → `scripts/make-xcode.sh` → Xcode Run → Safari 재시작, 확장 켬(popup 모드 `itm`). 확장 팝업의 진단 JSON(schemaVersion 6)은 항목마다 "복사"로 복사해 `results/result-M3-<YYYYMMDD>-<항목번호>.json`으로 저장한다(예: `result-M3-20261002-1.json`). 확인하지 못한 항목은 비우지 말고 [미확인]으로 적는다. `python3 scripts/parse-result.py`가 `lifecycle` 표(state, skipReason, navCount, srcChanges, videoSwaps, playerMode, adShowing, pip, hdrSource, colorSpace, 이벤트 로그)를 값만 출력한다.
+
+각 항목의 "예/아니오"와 진단 JSON 값을 체크리스트 사본에 적는다.
+
+1. SPA 이동: 홈 → 영상 A 재생 → 추천 영상 B 클릭. B에도 오버레이가 있는가(예/아니오). 진단 `navCount`·`srcChanges` 증가, `lifecycle.state` active.
+2. 화면 모드 전환: 기본 ↔ 극장 ↔ 전체화면 ↔ 미니플레이어를 각각 전환해 오버레이가 영상 영역에 정확히 겹치는가, 컨트롤(재생·설정·전체화면)이 클릭되는가. 미니플레이어 전환 후 캔버스가 플레이어와 함께 움직이는가(어긋난 방향을 적는다). 진단 `playerMode`.
+3. 창 크기 조절: 조절 중과 후 오버레이 위치가 맞는가.
+4. 광고: 광고가 있는 영상에서 광고 → 본편 전환 시 오버레이가 유지되는가(검은 화면 없음). 진단 `adShowing`(광고 중), `srcChanges`.
+5. HDR 영상: YouTube에서 HDR 표시가 있는 영상. 오버레이가 없는가(원본 그대로). 진단 `lifecycle.skipReason: hdrSource`, `video.colorSpace.transfer`(pq 또는 hlg 기대). **DOM 배지는 판정에 쓰지 않는다(PLAN M3-8 D1).**
+6. PiP: PiP 진입 시 원본 PiP가 정상 재생되는가, 복귀 시 오버레이가 재개되는가. 진단 `lifecycle.pip`, 이벤트 로그.
+7. DRM: EME를 쓰는 페이지(YouTube 영화·TV 무료 영화 등)에서 오버레이가 없는가, `skipReason: drm`. 이후 같은 탭에서 일반 영상으로 이동해도 skipped(drm)이 유지되는가(새로고침하면 해제되는 것이 정상).
+
+판정: 1~6 모두 예, 7은 오버레이 없음이면 M3 완료. 실패 항목은 FIX_GUIDE로 처리한다.
+
+### M3 DOM 스냅샷 재수집 (극장·미니플레이어·광고·전체화면 셀렉터 확정용)
+
+2026-10-01 1차 스냅샷에는 조상에 `ytd-watch-flexy`가 없어 극장 판정 근거를 확인하지 못했다. 개선된 `scripts/dom-skeleton.js`로 다시 수집한다(조상은 `ytd-watch-flexy`·`ytd-miniplayer`·`ytd-app`까지, `#movie_player` 하위는 video 컨테이너·오른쪽 컨트롤·설정 메뉴·광고 모듈만). 텍스트·URL·제목·속성 값은 출력되지 않는다.
+
+1. 터미널(Terminal.app)에서 `cd ~/Safari_Extention-HDR && pbcopy < scripts/dom-skeleton.js`로 스크립트를 복사한다. Safari 콘솔이 아니다.
+2. 상태를 만든 뒤 Safari Web Inspector 콘솔에 붙여 넣고 실행한다. 출력이 클립보드에도 복사되므로 채팅이나 에디터에 붙여 넣는다.
+3. 수집할 상태와 파일명(`tests/dom/fixtures/`): `yt-theater-full.html`(극장), `yt-miniplayer.html`(영상 재생 중 홈으로 이동해 미니플레이어가 뜬 상태), `yt-ad.html`(광고 재생 중), `yt-fullscreen.html`(전체화면, Web Inspector를 별도 창으로 분리해야 콘솔 사용 가능). 채팅에 상태 이름과 함께 붙여 주면 파일로 저장해 커밋한다.
+
 ## 회신 방법
 
 1. export한 JSON을 저장소 `results/result-<M>-<YYYYMMDD>[-조건].json`으로 두고 브랜치에 push한다. (M1 프로브는 `<M>`이 `M1`)

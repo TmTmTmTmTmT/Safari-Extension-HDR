@@ -220,6 +220,43 @@
     return null;
   };
 
+  const LIFECYCLE_STATES = ['idle', 'probing', 'active', 'skipped'];
+  const MAX_EVENTS = 30;
+  const intOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null);
+
+  // 순수: video.colorSpace 진단 객체. 없으면 null.
+  function normalizeColorSpace(c) {
+    if (!c || typeof c !== 'object') return null;
+    return {
+      primaries: nameOrNull(c.primaries),
+      transfer: nameOrNull(c.transfer),
+      matrix: nameOrNull(c.matrix),
+      fullRange: typeof c.fullRange === 'boolean' ? c.fullRange : null,
+    };
+  }
+
+  // 순수: M3-4 lifecycle 진단. 이벤트 로그는 최근 MAX_EVENTS개, 문자열은 짧게 자른다 (URL 등 미포함).
+  function normalizeLifecycle(l) {
+    const x = l && typeof l === 'object' ? l : {};
+    const events = (Array.isArray(x.events) ? x.events : []).slice(-MAX_EVENTS).map((e) => ({
+      t: round2(numOrNull(e && e.t)),
+      ev: typeof (e && e.ev) === 'string' ? e.ev.slice(0, 40) : null,
+    }));
+    return {
+      state: LIFECYCLE_STATES.includes(x.state) ? x.state : null,
+      skipReason: nameOrNull(x.skipReason),
+      navCount: intOrNull(x.navCount),
+      srcChanges: intOrNull(x.srcChanges),
+      videoSwaps: intOrNull(x.videoSwaps),
+      playerMode: nameOrNull(x.playerMode),
+      adShowing: typeof x.adShowing === 'boolean' ? x.adShowing : null,
+      pip: typeof x.pip === 'boolean' ? x.pip : null,
+      lastEvent: nameOrNull(x.lastEvent),
+      lastEventAt: round2(numOrNull(x.lastEventAt)),
+      events,
+    };
+  }
+
   // 순수: M2-4 스키마 진단 객체. state의 누락 값은 null.
   function buildDiag(state) {
     const s = state || {};
@@ -243,7 +280,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 5,
+      schemaVersion: 6,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -273,6 +310,7 @@
         videoHeight: orNull(video.videoHeight),
         srcIsBlob: orNull(video.srcIsBlob),
         paused: orNull(video.paused),
+        colorSpace: normalizeColorSpace(video.colorSpace),
       },
       canvas: {
         width: orNull(canvas.width),
@@ -312,7 +350,9 @@
         attached: !!flags.attached,
         fullscreen: !!flags.fullscreen,
         blackFrame: !!flags.blackFrame,
+        hdrSource: !!flags.hdrSource,
       },
+      lifecycle: normalizeLifecycle(s.lifecycle),
       errors: (Array.isArray(s.errors) ? s.errors : []).slice(0, MAX_ERRORS).map((e) => ({
         at: orNull(e && e.at),
         name: orNull(e && e.name),
@@ -330,6 +370,8 @@
     displayMissRate,
     cadenceStats,
     normalizeFrameProbe,
+    normalizeColorSpace,
+    normalizeLifecycle,
     buildDiag,
   };
 })();

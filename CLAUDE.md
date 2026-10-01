@@ -61,12 +61,14 @@
 - 네이티브 헬퍼(ScreenCaptureKit + Metal, PLAN.md F-A)는 Opus가 게이트 판정 기록에 착수를 지시한 뒤에만 구현한다.
 
 ## 환경 한계
-- 클라우드 VM에는 Safari, Xcode, HDR 디스플레이가 없다. WebGPU, EDR 출력, Safari 확장 동작을 "검증했다"고 쓰지 않는다.
-- 클라우드 검증 범위: 단위 테스트, numpy 시뮬레이션, Playwright WebKit DOM 테스트(Safari 확장 환경 아님). GitHub Actions macOS: 무서명 xcodebuild.
-- 실제 동작 검증은 사용자 Mac(M1 Pro, 내장 XDR, macOS 27.2, Safari 27.2)에서 `docs/manual-checklist.md`로 한다.
+- 2026-10-01부터 작업은 **사용자 Mac의 로컬 Claude Code 세션**에서 한다(설정: `docs/local-session.md`). 이전 클라우드 세션 기록은 git 이력과 STATUS.md에 있다.
+- 로컬 세션에서 가능: 단위 테스트, numpy 시뮬레이션, Playwright WebKit DOM 테스트(Safari 확장 환경 아님), `xcodebuild`(무서명 빌드), `scripts/*.sh` 실행, git push.
+- 로컬 세션에서도 하지 않는 것: WebGPU 출력·EDR 밝기·끊김·Safari 확장 동작을 Claude가 "검증했다"고 쓰지 않는다. 화면을 보는 판정은 사용자가 `docs/manual-checklist.md`로 하고 결과 JSON·관찰을 회신한다. Safari 설정 변경, 확장 허용, Xcode 서명 팀 지정은 사용자가 한다.
+- Xcode 프로젝트(`xcode/`) 재생성·pbxproj 편집은 사용자 지시가 있을 때 `scripts/make-xcode.sh`로만 한다(수기 편집 금지, GUIDELINES 7-5). `DEVELOPMENT_TEAM` 변경은 커밋하지 않는다.
+- 대상 환경: M1 Pro, 내장 XDR, macOS 27.2, Safari 27.2.
 
 ## 명령 (M0 이후 유효)
-- `npm run lint` / `npm test` / `npm run test:dom` / `pytest sim`
+- `npm run lint` / `npm test` / `npm run test:dom` / `python3 -m pytest sim`
 
 ## 문서 세트 (저장소 루트)
 - `PLAN.md` 계획 · `GUIDELINES.md` 코딩 규칙 · `FIX_GUIDE.md` 오류 수정 지침(오류 시) · `STATUS.md` 진행 기록
