@@ -280,7 +280,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 6,
+      schemaVersion: 7,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -320,6 +320,7 @@
       },
       render: {
         mode: orNull(render.mode),
+        strength: round2(numOrNull(render.strength)),
         frames: typeof render.frames === 'number' ? render.frames : sum.frames,
         loopFps: sum.loopFps,
         jsP50: sum.jsP50,

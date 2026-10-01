@@ -15,23 +15,39 @@
 
   // baseline은 진단용: 캔버스를 숨기고 rAF 루프만 돈다 (FIX_GUIDE S1, GUIDELINES 2.6-3).
   const MODES = ['itm', 'identity', 'stripes', 'baseline'];
-  const KEYS = { enabled: 'sdrhdr.enabled', mode: 'sdrhdr.mode', diag: 'sdrhdr.diag' };
-  const DEFAULTS = { enabled: true, mode: 'itm' };
+  const KEYS = {
+    enabled: 'sdrhdr.enabled',
+    mode: 'sdrhdr.mode',
+    strength: 'sdrhdr.strength',
+    diag: 'sdrhdr.diag',
+  };
+  // HDR 강도 (PLAN D-M4a): 0 = 색 변환만(identity), 1 = ITM 전체. 기본 0.5는 M4에서 사용자 회신으로 확정한다.
+  const STRENGTH = { min: 0, max: 1, step: 0.01, default: 0.5 };
+  const DEFAULTS = { enabled: true, mode: 'itm', strength: STRENGTH.default };
+
+  // 순수: 숫자가 아니면 기본값, 범위 밖은 클램프, step(0.01) 단위로 반올림.
+  function normalizeStrength(v) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return STRENGTH.default;
+    const c = Math.min(STRENGTH.max, Math.max(STRENGTH.min, v));
+    return Math.round(c / STRENGTH.step) / Math.round(1 / STRENGTH.step);
+  }
 
   // 순수: storage 원본 객체(저장 키 기준) -> 유효한 설정. 잘못된 값은 기본값.
   function normalizeSettings(raw) {
     const r = raw && typeof raw === 'object' ? raw : {};
     const enabled = r[KEYS.enabled];
     const mode = r[KEYS.mode];
+    const strength = r[KEYS.strength];
     return {
       enabled: typeof enabled === 'boolean' ? enabled : DEFAULTS.enabled,
       mode: MODES.includes(mode) ? mode : DEFAULTS.mode,
+      strength: normalizeStrength(strength),
     };
   }
 
   // 아래 함수는 호출 시점에만 browser.storage에 접근한다.
   async function readSettings() {
-    const raw = await browser.storage.local.get([KEYS.enabled, KEYS.mode]);
+    const raw = await browser.storage.local.get([KEYS.enabled, KEYS.mode, KEYS.strength]);
     return normalizeSettings(raw);
   }
 
@@ -39,7 +55,8 @@
   function subscribe(cb) {
     const listener = (changes, area) => {
       if (area !== 'local') return;
-      if (!(KEYS.enabled in changes) && !(KEYS.mode in changes)) return;
+      if (!(KEYS.enabled in changes) && !(KEYS.mode in changes) && !(KEYS.strength in changes))
+        return;
       readSettings().then(cb, () => {});
     };
     browser.storage.onChanged.addListener(listener);
@@ -57,6 +74,8 @@
     MODES,
     KEYS,
     DEFAULTS,
+    STRENGTH,
+    normalizeStrength,
     normalizeSettings,
     readSettings,
     subscribe,

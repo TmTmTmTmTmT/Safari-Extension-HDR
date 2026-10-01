@@ -48,6 +48,35 @@ def table_rows():
     return rows
 
 
+STRENGTHS = (0.25, 0.5, 0.75, 1.0)
+
+
+def output_luminance_strength(preset, t, codes=CODES):
+    """강도 혼합 후 8bit 회색 코드의 출력 휘도: id + t * (itm - id), id 는 게인 없는 선형 휘도 (PLAN D-M4a)."""
+    lin = tc.srgb_eotf(np.asarray(codes, dtype=np.float64) / 255.0)
+    itm = tc.curve_f(lin * preset.g, preset.P, preset.k, preset.n)
+    return lin + t * (itm - lin)
+
+
+def clip_stats_strength(preset, H, t):
+    """반환: (넘는 코드 수, 최소 코드 또는 None, 최대 코드 또는 None, 비율)."""
+    over = np.nonzero(output_luminance_strength(preset, t) > H + EPS)[0]
+    if over.size == 0:
+        return 0, None, None, 0.0
+    return int(over.size), int(over.min()), int(over.max()), over.size / len(CODES)
+
+
+def table_rows_strength():
+    rows = []
+    for nm, p in PRESETS.items():
+        for t in STRENGTHS:
+            for H in HEADROOMS:
+                cnt, lo, hi, frac = clip_stats_strength(p, H, t)
+                rng = "-" if cnt == 0 else f"{lo}~{hi}"
+                rows.append([nm, p.P, t, H, cnt, rng, f"{frac:.1%}"])
+    return rows
+
+
 def report():
     lines = [
         "### S10 헤드룸 클리핑 (8bit 회색 코드 0~255, 값만 출력)",
@@ -55,6 +84,13 @@ def report():
         "출력 휘도 = SDR white 1.0 기준 선형 휘도(tonecurve.curve_f, 프리셋 g 적용). H 를 넘는 코드는 시스템이 잘라낸다.",
         "",
         md_table(["프리셋", "P", "H", "넘는 코드 수", "넘는 코드 범위", "넘는 비율"], table_rows()),
+        "",
+        "### S10b 강도 t 혼합 후 헤드룸 클리핑 (PLAN D-M4a, 값만 출력)",
+        "",
+        md_table(
+            ["프리셋", "P", "t", "H", "넘는 코드 수", "넘는 코드 범위", "넘는 비율"],
+            table_rows_strength(),
+        ),
     ]
     return "\n".join(lines)
 

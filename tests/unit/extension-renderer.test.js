@@ -34,6 +34,7 @@ function setup({
     calls: [],
     textures: [],
     buffers: [],
+    uniforms: [],
     intervals: [],
     probes: [],
     frames: [],
@@ -71,6 +72,12 @@ function setup({
       return t;
     },
     createBuffer: (d) => {
+      if (d.usage & 0x40) {
+        // 강도 유니폼 버퍼(PLAN D-M4a): 되읽기용 probe 버퍼와 구분한다.
+        const u = { size: d.size, usage: d.usage, writes: [] };
+        state.uniforms.push(u);
+        return u;
+      }
       state.calls.push('createBuffer:' + d.size);
       const b = {
         unmaps: 0,
@@ -104,6 +111,9 @@ function setup({
     queue: {
       submit() {
         state.submits += 1;
+      },
+      writeBuffer: (buf, offset, data) => {
+        buf.writes.push(Array.from(data));
       },
       copyExternalImageToTexture: (src, dst, size) => {
         const at = src.origin ? src.origin.x + ',' + src.origin.y : 'full';
@@ -963,5 +973,36 @@ test('M3: restartSource는 경로·frameProbe·colorSpace·측정을 비우고 G
   assert.strictEqual(s.renderer.getStats().path, 'ext');
   assert.strictEqual(s.canvas.style.visibility, '');
   assert.ok(s.calls.filter((c) => c === 'mapAsync').length > pipelines);
+  s.renderer.destroy();
+});
+
+test('M4a: 강도 유니폼은 init에서 1개 생성·초기값 기록, setStrength는 writeBuffer만(파이프라인·버퍼 재생성 없음)', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.uniforms.length, 1);
+  assert.strictEqual(s.uniforms[0].size, 16);
+  assert.deepStrictEqual(s.uniforms[0].writes, [[0.5, 0, 0, 0]]);
+  const created = s.calls.filter((c) => c.startsWith('createTexture')).length;
+  s.renderer.setStrength(0.25);
+  s.renderer.setStrength(NaN); // 무시
+  s.renderer.setStrength('x'); // 무시
+  assert.strictEqual(s.uniforms.length, 1);
+  assert.deepStrictEqual(s.uniforms[0].writes.at(-1), [0.25, 0, 0, 0]);
+  assert.strictEqual(s.uniforms[0].writes.length, 2);
+  assert.strictEqual(s.calls.filter((c) => c.startsWith('createTexture')).length, created);
+  assert.strictEqual(s.renderer.getStats().strength, 0.25);
+  s.renderer.destroy();
+});
+
+test('M4a: 일시정지 상태에서 setStrength는 1회 렌더를 요청한다', async () => {
+  const s = setup({ readyState: 4, paused: true });
+  await s.renderer.start();
+  await s.settle();
+  s.flush();
+  const before = s.renders;
+  s.renderer.setStrength(0.8);
+  s.flush();
+  assert.strictEqual(s.renders, before + 1);
   s.renderer.destroy();
 });

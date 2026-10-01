@@ -68,6 +68,14 @@ def curve_scale(Y, P, k, n):
     return np.where(Y > k, curve_f(Y, P, k, n) / safe, 1.0)
 
 
+def itm_linear_strength(rgb_enc, t, P, k, n, g, s, hs):
+    """PLAN D-M4a: 선형 P3에서 identity(sRGB EOTF -> 709->P3, 곡선·게인·채도 없음)와 ITM 결과를 t로 섞는다.
+    t=0 은 색 변환만 한 SDR, t=1 은 itm_linear 와 같다. 혼합 후 OETF 는 호출자가 적용한다."""
+    id_lin = srgb_eotf(rgb_enc) @ M709_TO_P3.T
+    itm_lin = itm_linear(rgb_enc, P, k, n, g, s, hs)
+    return id_lin + t * (itm_lin - id_lin)
+
+
 def itm_linear(rgb_enc, P, k, n, g, s, hs):
     """1~5단계 중 OETF 직전까지. 반환: 선형 Display P3 (음수/초과 가능)."""
     rgb = srgb_eotf(rgb_enc) * g  # 1, 2

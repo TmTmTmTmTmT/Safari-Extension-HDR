@@ -33,11 +33,39 @@ def test_zero_code_is_zero_and_monotonic():
         assert (y[1:] > y[:-1]).all()
 
 
+def _tables():
+    tables, cur = [], []
+    for l in headroom.report().splitlines():
+        if l.startswith("|"):
+            cur.append(l)
+        elif cur:
+            tables.append(cur)
+            cur = []
+    if cur:
+        tables.append(cur)
+    return tables
+
+
 def test_report_table_format():
     lines = headroom.report().splitlines()
     assert lines[0].startswith("### S10 ")
-    tbl = [l for l in lines if l.startswith("|")]
+    tbl = _tables()[0]
     assert tbl[0] == "| 프리셋 | P | H | 넘는 코드 수 | 넘는 코드 범위 | 넘는 비율 |"
     assert tbl[1] == "| " + " | ".join(["---"] * 6) + " |"
     assert len(tbl) == 2 + 3 * 3
     assert all(l.count("|") == 7 for l in tbl)
+
+
+def test_strength_table_format_and_t1_matches_s10():
+    tbl = _tables()[1]
+    assert tbl[0] == "| 프리셋 | P | t | H | 넘는 코드 수 | 넘는 코드 범위 | 넘는 비율 |"
+    assert len(tbl) == 2 + 3 * len(headroom.STRENGTHS) * len(headroom.HEADROOMS)
+    for p in PRESETS.values():
+        for H in headroom.HEADROOMS:
+            # t=1 은 게인 포함 ITM 곡선이므로 S10 과 같다.
+            assert headroom.clip_stats_strength(p, H, 1.0) == headroom.clip_stats(p, H)
+
+
+def test_balanced_half_strength_has_no_clipping_at_headroom_two():
+    # PLAN D-M4a 근거: 균형 P=3, t=0.5 -> 피크 2.0 이므로 H=2 에서 잘리는 코드 없음.
+    assert headroom.clip_stats_strength(PRESETS["균형"], 2, 0.5)[0] == 0

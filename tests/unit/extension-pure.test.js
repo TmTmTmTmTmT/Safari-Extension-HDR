@@ -78,18 +78,18 @@ test('canvasResolution: min(원본, 표시 x DPR) (probe와 같은 사례)', () 
 test('normalizeSettings: 잘못된 값은 기본값', () => {
   const { normalizeSettings, KEYS, MODES } = ns.params;
   assert.deepStrictEqual(plain(MODES), ['itm', 'identity', 'stripes', 'baseline']);
-  const def = { enabled: true, mode: 'itm' };
+  const def = { enabled: true, mode: 'itm', strength: 0.5 };
   assert.deepStrictEqual(plain(normalizeSettings(undefined)), def);
   assert.deepStrictEqual(plain(normalizeSettings(null)), def);
   assert.deepStrictEqual(plain(normalizeSettings('x')), def);
   assert.deepStrictEqual(plain(normalizeSettings({})), def);
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: false, [KEYS.mode]: 'stripes' })),
-    { enabled: false, mode: 'stripes' },
+    { enabled: false, mode: 'stripes', strength: 0.5 },
   );
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: true, [KEYS.mode]: 'baseline' })),
-    { enabled: true, mode: 'baseline' },
+    { enabled: true, mode: 'baseline', strength: 0.5 },
   );
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: 'yes', [KEYS.mode]: 'bogus' })),
@@ -98,6 +98,7 @@ test('normalizeSettings: 잘못된 값은 기본값', () => {
   assert.deepStrictEqual(plain(normalizeSettings({ [KEYS.enabled]: 0, [KEYS.mode]: 3 })), def);
   assert.strictEqual(KEYS.enabled, 'sdrhdr.enabled');
   assert.strictEqual(KEYS.mode, 'sdrhdr.mode');
+  assert.strictEqual(KEYS.strength, 'sdrhdr.strength');
   assert.strictEqual(KEYS.diag, 'sdrhdr.diag');
 });
 
@@ -196,7 +197,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 6);
+  assert.strictEqual(d.schemaVersion, 7);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -572,7 +573,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 6);
+  assert.strictEqual(d.schemaVersion, 7);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -792,4 +793,27 @@ test('buildDiag: lifecycle·colorSpace 정규화 (M3-4)', () => {
     plain(ns.hud.buildDiag({ lifecycle: { state: 'bogus' } })).lifecycle.state,
     null,
   );
+});
+
+test('normalizeStrength: 범위·타입·step 처리, 설정에 반영 (M4a)', () => {
+  const { normalizeStrength, normalizeSettings, KEYS, STRENGTH } = ns.params;
+  assert.deepStrictEqual(plain(STRENGTH), { min: 0, max: 1, step: 0.01, default: 0.5 });
+  assert.strictEqual(normalizeStrength(0), 0);
+  assert.strictEqual(normalizeStrength(1), 1);
+  assert.strictEqual(normalizeStrength(0.337), 0.34);
+  assert.strictEqual(normalizeStrength(-1), 0);
+  assert.strictEqual(normalizeStrength(7), 1);
+  for (const bad of [undefined, null, NaN, Infinity, '0.3', {}]) {
+    assert.strictEqual(normalizeStrength(bad), 0.5, String(bad));
+  }
+  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 0.8 }).strength, 0.8);
+  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 'x' }).strength, 0.5);
+});
+
+test('buildDiag: render.strength는 소수 둘째 자리, 없으면 null (M4a)', () => {
+  assert.strictEqual(
+    plain(ns.hud.buildDiag({ render: { strength: 0.456 } })).render.strength,
+    0.46,
+  );
+  assert.strictEqual(plain(ns.hud.buildDiag({})).render.strength, null);
 });

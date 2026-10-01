@@ -15,6 +15,8 @@
   const PROBE_PENDING_MS = 1000; // 경로 보류 중 재시도 주기 (FIX_GUIDE Q1)
   const PENDING_MAX = 60; // 보류 결과가 이 횟수에 이르면 더 시도하지 않는다
   const VF_FAIL_LIMIT = 3; // VideoFrame 생성 실패가 연속 이 횟수에 이르면 errors에 기록하고 다음 경로로 전환 (FIX_GUIDE R3)
+  const BUF_UNIFORM = 0x40;
+  const STRENGTH_BYTES = 16; // StrengthParams: f32 + 패딩 3개 (uniform 16바이트 정렬)
   const TEX_COPY_SRC = 0x01;
   const TEX_COPY_DST = 0x02;
   const TEX_TEXTURE_BINDING = 0x04;
@@ -46,6 +48,9 @@
     let device = null;
     let ctx = null;
     let sampler = null;
+    let strengthBuf = null;
+    // HDR 강도 (PLAN D-M4a). hooks.strength는 attach 시 초기값, 이후 setStrength로 유니폼만 갱신한다.
+    let strength = hooks && typeof hooks.strength === 'number' ? hooks.strength : 0.5;
     let pipelines = null;
     let rafId = null;
     let frames = 0;
@@ -184,6 +189,16 @@
         itm: makePipeline(device.createShaderModule({ code: shaders.VIDEO_ITM })),
       };
       sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+      strengthBuf = device.createBuffer({
+        size: STRENGTH_BYTES,
+        usage: BUF_UNIFORM | BUF_COPY_DST,
+      });
+      writeStrength();
+    }
+
+    function writeStrength() {
+      if (!device || !strengthBuf) return;
+      device.queue.writeBuffer(strengthBuf, 0, new Float32Array([strength, 0, 0, 0]));
     }
 
     function copyPipeline() {
@@ -323,12 +338,15 @@
             resource = device.importExternalTexture({ source: frame });
             push(vfTimes, performance.now() - vf0);
           } else resource = device.importExternalTexture({ source: video });
+          // 강도 유니폼은 itm 파이프라인에만 있다(auto 레이아웃은 쓰는 바인딩만 갖는다).
+          const entries = [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource },
+          ];
+          if (mode === 'itm') entries.push({ binding: 2, resource: { buffer: strengthBuf } });
           const bind = device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
-            entries: [
-              { binding: 0, resource: sampler },
-              { binding: 1, resource },
-            ],
+            entries,
           });
           pass.setBindGroup(0, bind);
         }
@@ -681,6 +699,7 @@
       device = null;
       ctx = null;
       sampler = null;
+      strengthBuf = null;
       pipelines = null;
       probePipeline = null;
       for (const k of Object.keys(copyPipelines)) delete copyPipelines[k];
@@ -764,6 +783,14 @@
       if (device || next === 'baseline') kick();
     }
 
+    // 유니폼 값만 갱신한다(파이프라인 재생성 금지). 정지 상태에서도 반영되도록 1회 렌더를 요청한다.
+    function setStrength(next) {
+      if (typeof next !== 'number' || !Number.isFinite(next)) return;
+      strength = next;
+      writeStrength();
+      if (device && mode === 'itm') kick();
+    }
+
     function destroy() {
       if (destroyed) return;
       stop();
@@ -787,6 +814,7 @@
       }
       return {
         mode,
+        strength,
         path,
         frames,
         copyTimesMs: copyTimes.slice(),
@@ -805,7 +833,7 @@
       };
     }
 
-    return { start, stop, setMode, restartSource, destroy, getStats };
+    return { start, stop, setMode, setStrength, restartSource, destroy, getStats };
   }
 
   globalThis.__sdrhdr.renderer = { createRenderer };
