@@ -72,6 +72,9 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 해석(계획 문구 보강, Opus 확인 요청): ① 계획은 "t=0이면 identity 출력과 같다"고 했으나 식(`idP3 = 709→P3(sRGB EOTF)`)대로 구현해 t=0은 **색역 변환을 한 SDR**이며 identity 모드(변환 없이 그대로 기록)와 약간 다르다. 식과 문구 중 식을 따랐다. ② `idLin`에는 밝기 게인 g를 적용하지 않는다(균형 g=1이라 현재 영향 없음)
 - → verify: lint 통과, npm test 167/167, test:dom 14/14, pytest sim 140/140, parse-result 과거 results rc=0 / (1) 로컬 Mac. **WGSL 컴파일·슬라이더 반영 속도·체감은 미검증(사용자 Mac 필요)**. naga/tint 없고 Playwright WebKit에 WebGPU 없음
 
+- M4a 판정 통과(PLAN 게이트 기록, 2026-10-01): 슬라이더 1초 내 반영, WGSL 컴파일·동작 확인. 선호 강도 중간 40~60%/최대 40~50%, 뭉개짐 시작 중간 70~80%/최대 약 70%. 진단 JSON `results/result-M4a-20261001-strength68.json`(밝기 미기재). M4 입력(기본 강도 후보 0.45, 곡선 상단 압축·hs가 뭉개짐 주원인일 가능성 [추정])은 PLAN D-M4a M4a-6. 하이라이트(화이트포인트) 휘도 슬라이더는 M5로 이월
+- 다음 마일스톤 M4(알고리즘·프리셋 확정)는 Opus 계획부터. 이 브랜치(claude/m4-inputs)는 PLAN v1.12·v1.13 문서와 결과 JSON만 담는다
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
