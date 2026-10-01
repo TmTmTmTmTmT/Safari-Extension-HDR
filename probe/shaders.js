@@ -117,5 +117,24 @@ fn itm(rgb: vec3f) -> vec3f {
 }
 `;
 
-  globalThis.__probeShaders = { STEPS, STRIPES, PATCH, VIDEO_IDENTITY, VIDEO_ITM };
+  // P0-6(FIX_GUIDE Q3): copyExternalImageToTexture로 채운 일반 2D 텍스처 샘플용 identity. 입력 방식 비용 실험 전용.
+  const VIDEO_IDENTITY_2D =
+    VERTEX +
+    `
+@group(0) @binding(0) var samp: sampler;
+@group(0) @binding(1) var tex: texture_2d<f32>;
+@fragment fn fs(in: VSOut) -> @location(0) vec4f {
+  let c = textureSample(tex, samp, in.uv);
+  return vec4f(c.rgb, 1.0);
+}
+`;
+
+  globalThis.__probeShaders = {
+    STEPS,
+    STRIPES,
+    PATCH,
+    VIDEO_IDENTITY,
+    VIDEO_ITM,
+    VIDEO_IDENTITY_2D,
+  };
 })();

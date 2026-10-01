@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.1 (2026-09-30, 2.5-1 렌더 루프 개정). 개정은 Opus만 한다.
+> 버전: v1.2 (2026-09-30, M2: 2.1-5 popup 진단 읽기, 3.1 M2 예외, 2.6 추가). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -22,7 +22,7 @@
 2. **[필수]** 전역 이름은 `globalThis.__sdrhdr` 하나만 쓴다. `ns.js`가 첫 번째로 로드되어 객체를 만들고, 이후 파일은 자기 하위 키(`__sdrhdr.detect`, `__sdrhdr.params` 등)에만 할당한다.
 3. **[필수]** 각 파일은 IIFE로 감싸 지역 스코프를 유지한다. 파일 최상위에서 DOM 조회, `navigator.gpu` 접근, 이벤트 등록 같은 부작용을 실행하지 않는다. 부작용 시작점은 `main.js` 하나다.
 4. **[필수]** 파일 간 의존은 manifest 순서로만 해결한다. 뒤에 로드되는 파일의 심볼을 앞 파일이 로드 시점에 참조하지 않는다(호출 시점 참조는 허용).
-5. **[필수]** `browser.*` API 접근은 `params.js`(storage)와 `main.js`(수명주기)에만 둔다. popup은 `storage.local` 쓰기만 한다.
+5. **[필수]** `browser.*` API 접근은 `params.js`(storage)와 `main.js`(수명주기)에만 둔다. popup은 `storage.local`에 설정을 쓰고, 읽기는 진단 키(`sdrhdr.diag`)와 현재 설정 표시에만 한다. content script와 popup 간 메시징(`runtime`/`tabs` 메시지)은 쓰지 않는다.
 
 ### 2.2 순수 함수 / 부작용 분리
 1. **[필수]** 다음은 순수 함수로 작성한다. 입력은 인자로만 받고, DOM·GPU·`browser.*`·시간에 의존하지 않는다.
@@ -51,9 +51,15 @@
 4. **[필수]** GPU 초기화 실패, device lost, SecurityError는 잡아서 detach하고 HUD에 기록한다. 페이지 재생을 방해하지 않는다.
 5. **[권장]** 파이프라인·샘플러·유니폼 버퍼는 attach 시 1회 생성하고 파라미터 변경 시 유니폼만 갱신한다.
 
+### 2.6 진단·개인정보 (M2 추가)
+1. **[필수]** 진단 JSON(`sdrhdr.diag`, 결과 파일)에는 영상 제목, 채널, 쿠키, 계정 정보, 전체 URL을 넣지 않는다. 페이지는 경로와 `v` 쿼리만 기록한다.
+2. **[필수]** 진단 기록은 `storage.local`에 최신 1개만 유지하고 외부로 전송하지 않는다.
+3. **[필수]** `stripes`·`identity` 모드는 진단용이며 M5 이후에도 popup 상세 영역 밖으로 노출하지 않는다(요청 없는 기능 금지).
+
 ## 3. 셰이더·수치 일관성
 
 1. **[필수]** ITM 수식은 세 곳에 존재한다: WGSL(`itm.wgsl.js`), JS 미러, numpy(`sim/`). 하나를 바꾸면 **같은 커밋에서** 셋 다 갱신한다.
+   - M2 예외: JS 미러는 M4에서 만든다. M2는 WGSL 본문이 `probe/shaders.js`와 같고 상수가 `params.js`·`sim/presets.py` 균형 값과 같음을 테스트한다(PLAN D-M2 M2-5).
 2. **[필수]** JS 미러 vs numpy 오차 < 1e-4 테스트를 유지한다. 테스트 입력은 램프, 컬러바, 프리셋 3종 + 범위 경계값을 포함한다.
 3. **[필수]** 곡선·프리셋 수치는 PLAN.md C절 초안을 쓰고, 변경은 M4에서 Opus가 GUIDELINES/PLAN 개정으로만 한다. Sonnet은 S2/S4/S5 결과를 STATUS.md에 보고만 한다.
 4. **[필수]** 셰이더 출력에 NaN/Inf가 나오지 않게 `Y=0` 분기를 명시한다(`f(Y)/Y` 계산).

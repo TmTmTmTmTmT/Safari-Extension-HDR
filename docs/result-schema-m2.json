@@ -1,0 +1,224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "M2 extension diagnostic (PLAN.md D-M2 M2-4)",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "milestone",
+    "extVersion",
+    "createdAt",
+    "page",
+    "env",
+    "api",
+    "video",
+    "canvas",
+    "render",
+    "flags",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "milestone": { "type": "string", "enum": ["M2"] },
+    "extVersion": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "page": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "type": ["string", "null"], "description": "경로와 v 쿼리만. title 없음." }
+      }
+    },
+    "env": {
+      "type": "object",
+      "required": ["ua", "dpr", "screen", "dynamicRangeHigh", "colorGamutP3"],
+      "properties": {
+        "ua": { "type": ["string", "null"] },
+        "dpr": { "type": ["number", "null"] },
+        "screen": {
+          "type": ["object", "null"],
+          "properties": {
+            "w": { "type": ["number", "null"] },
+            "h": { "type": ["number", "null"] }
+          }
+        },
+        "dynamicRangeHigh": { "type": ["boolean", "null"] },
+        "colorGamutP3": { "type": ["boolean", "null"] }
+      }
+    },
+    "api": {
+      "type": "object",
+      "required": ["gpu", "adapter", "device", "configure", "configRead"],
+      "properties": {
+        "gpu": { "type": ["boolean", "null"] },
+        "adapter": { "type": ["boolean", "null"] },
+        "device": { "type": ["boolean", "null"] },
+        "configure": { "type": ["boolean", "null"] },
+        "configRead": {
+          "type": ["object", "null"],
+          "properties": {
+            "format": { "type": ["string", "null"] },
+            "colorSpace": { "type": ["string", "null"] },
+            "toneMapping": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "video": {
+      "type": ["object", "null"],
+      "properties": {
+        "videoWidth": { "type": ["number", "null"] },
+        "videoHeight": { "type": ["number", "null"] },
+        "srcIsBlob": { "type": ["boolean", "null"] },
+        "paused": { "type": ["boolean", "null"] }
+      }
+    },
+    "canvas": {
+      "type": ["object", "null"],
+      "properties": {
+        "width": { "type": ["number", "null"] },
+        "height": { "type": ["number", "null"] },
+        "cssWidth": { "type": ["number", "null"] },
+        "cssHeight": { "type": ["number", "null"] }
+      }
+    },
+    "render": {
+      "type": "object",
+      "required": ["mode", "frames", "loopFps", "jsP50", "jsP95"],
+      "properties": {
+        "mode": {
+          "type": ["string", "null"],
+          "enum": ["itm", "identity", "stripes", "baseline", null],
+          "description": "baseline은 schemaVersion 5 이상의 진단용: 캔버스를 숨기고 rAF 루프만 돈다(렌더 없음, frames 0, path null)."
+        },
+        "frames": { "type": ["number", "null"] },
+        "loopFps": { "type": ["number", "null"] },
+        "jsP50": { "type": ["number", "null"] },
+        "jsP95": { "type": ["number", "null"] },
+        "path": {
+          "type": ["string", "null"],
+          "enum": ["ext", "vf", "copy", "pending", null],
+          "description": "schemaVersion 3 이상. 입력 경로: ext(video 외부 텍스처) | vf(VideoFrame 외부 텍스처, schemaVersion 4 이상) | copy(복사) | pending(판단 불가, 캔버스 숨김). 첫 frameProbe 전은 null."
+        },
+        "displayHz": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 콜백 간격 중앙값으로 추정한 60|120."
+        },
+        "displayMissRate": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 콜백 간격 > 1.5/displayHz를 놓친 갱신으로 센 비율."
+        },
+        "cadence": {
+          "type": ["object", "null"],
+          "description": "schemaVersion 5 이상. 샘플링 cadence(렌더한 rAF마다 그린 소스 프레임 시각 기준). 렌더 기록이 없으면(baseline 포함) null.",
+          "properties": {
+            "srcFps": {
+              "type": ["number", "null"],
+              "description": "서로 다른 소스 시각 간격 중앙값의 역수(원값)."
+            },
+            "srcFpsNominal": {
+              "type": ["number", "null"],
+              "description": "23.976/24/25/29.97/30/50/59.94/60 중 srcFps에 가장 가까운 값."
+            },
+            "holdHist": {
+              "type": ["object", "null"],
+              "description": "같은 소스 프레임을 연속으로 그린 갱신 수의 횟수 분포. 500 ms 초과 공백과 구간 경계의 잘린 유지는 제외.",
+              "properties": {
+                "1": { "type": "integer" },
+                "2": { "type": "integer" },
+                "3": { "type": "integer" },
+                "4": { "type": "integer" },
+                "5+": { "type": "integer" }
+              }
+            },
+            "irregular": {
+              "type": ["number", "null"],
+              "description": "이상 유지 길이(floor/ceil(displayHz/srcFpsNominal))에 들지 않는 유지 구간의 비율."
+            },
+            "skipped": {
+              "type": ["integer", "null"],
+              "description": "소스 시각 간격이 1/srcFps의 1.5배를 넘은 횟수."
+            }
+          }
+        },
+        "copyMsP50": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. copyExternalImageToTexture 호출의 JS 동기 시간(ms)."
+        },
+        "copyMsP95": { "type": ["number", "null"] },
+        "vfMsP50": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 4 이상. vf 경로의 VideoFrame 생성+importExternalTexture 동기 시간(ms)."
+        },
+        "vfMsP95": { "type": ["number", "null"] },
+        "copySkipped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 같은 프레임 재복사 생략 횟수."
+        },
+        "videoDropped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. getVideoPlaybackQuality().droppedVideoFrames"
+        },
+        "videoTotal": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. getVideoPlaybackQuality().totalVideoFrames"
+        }
+      }
+    },
+    "frameProbe": {
+      "type": ["object", "null"],
+      "description": "schemaVersion 2 이상. 최신 1회. ext/copy/c2d는 64x36 평균 밝기(RGB, 0~255), *Err는 예외 name만.",
+      "properties": {
+        "at": { "type": ["number", "null"] },
+        "n": { "type": ["number", "null"] },
+        "ext": { "type": ["number", "null"] },
+        "copy": { "type": ["number", "null"] },
+        "vf": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 4 이상. new VideoFrame(video) 외부 텍스처 경로의 64x36 평균 밝기."
+        },
+        "c2d": { "type": ["number", "null"] },
+        "extErr": { "type": ["string", "null"] },
+        "vfErr": {
+          "type": ["string", "null"],
+          "description": "schemaVersion 4 이상. VideoFrame 미정의면 ReferenceError."
+        },
+        "copyErr": { "type": ["string", "null"] },
+        "c2dErr": { "type": ["string", "null"] },
+        "ms": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. frameProbe 1회 전체 소요(ms)."
+        },
+        "extSyncMs": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 3 이상. 경로별 첫 await까지 동기 시간(ms)."
+        },
+        "vfSyncMs": { "type": ["number", "null"], "description": "schemaVersion 4 이상." },
+        "copySyncMs": { "type": ["number", "null"] },
+        "c2dSyncMs": { "type": ["number", "null"] }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "required": ["drm", "attached", "fullscreen"],
+      "properties": {
+        "drm": { "type": ["boolean", "null"] },
+        "attached": { "type": ["boolean", "null"] },
+        "fullscreen": { "type": ["boolean", "null"] },
+        "blackFrame": { "type": ["boolean", "null"], "description": "schemaVersion 2 이상" }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["at", "name", "message"],
+        "properties": {
+          "at": {},
+          "name": { "type": ["string", "null"] },
+          "message": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

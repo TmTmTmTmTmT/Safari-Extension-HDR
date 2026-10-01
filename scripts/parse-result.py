@@ -10,6 +10,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_PATH = os.path.join(ROOT, "docs", "result-schema.json")
+SCHEMA_M2_PATH = os.path.join(ROOT, "docs", "result-schema-m2.json")
 
 _TYPES = {
     "object": dict,
@@ -202,6 +203,17 @@ def table(headers, rows):
     return "\n".join(out)
 
 
+VP9_COLS = ["fixture", "variant", "srcRes", "canvasRes", "fullscreen", "frames", "jsP50", "jsP95", "jsMax", "asyncP50", "asyncP95", "displayMissRate", "displayHz", "loopFps", "meanBrightness", "videoDropped", "videoTotal", "errorName"]
+
+
+def print_vp9_paths(paths):
+    """v5 vp9Paths 표(P0-6 VP9 입력 방식). 없거나 비었으면(v1~v4) 출력하지 않는다. 값만 출력하고 판정하지 않는다."""
+    if not isinstance(paths, list) or not paths:
+        return
+    print("\nP0-6 VP9 입력 방식 (v5, 값만)")
+    print(table(VP9_COLS, [[fmt(p.get(c)) for c in VP9_COLS] for p in paths if isinstance(p, dict)]))
+
+
 def summarize(name, data):
     print("\n## %s" % name)
     env = data.get("env", {})
@@ -275,9 +287,100 @@ def summarize(name, data):
         mx = lambda vs: max([v for v in vs if isinstance(v, (int, float))], default=None)
         print(table(["srcRes", "runs", "dropRate 최대", "jsP95 최대"], [[k, str(w["n"]), fmt(mx(w["drop"])), fmt(mx(w["p95"]))] for k, w in sorted(worst.items())]))
     print_mode_tables(runs, power)
+    print_vp9_paths(data.get("vp9Paths"))
     print("\nflags: %s" % fmt(data.get("flags")))
     errs = data.get("errors") or []
     print("errors (%d)%s" % (len(errs), "".join("\n  - " + e for e in errs)))
+
+
+def summarize_m2(name, data):
+    """milestone 'M2' 진단 JSON의 값만 표로 출력한다. 판정하지 않는다."""
+    print("\n## %s" % name)
+    print("schemaVersion=%s extVersion=%s createdAt=%s" % (fmt(data.get("schemaVersion")), fmt(data.get("extVersion")), fmt(data.get("createdAt"))))
+    print("page: %s" % fmt(g(data, "page", "url")))
+    env = data.get("env") or {}
+    print("\nenv")
+    print(
+        table(
+            ["dpr", "screen.w", "screen.h", "dynamic-range:high", "color-gamut:p3"],
+            [[fmt(env.get("dpr")), fmt(g(env, "screen", "w")), fmt(g(env, "screen", "h")), fmt(env.get("dynamicRangeHigh")), fmt(env.get("colorGamutP3"))]],
+        )
+    )
+    print("ua: %s" % fmt(env.get("ua")))
+    api = data.get("api") or {}
+    print("\napi")
+    print(
+        table(
+            ["gpu", "adapter", "device", "configure", "configRead.format", "configRead.colorSpace", "configRead.toneMapping"],
+            [
+                [
+                    fmt(api.get("gpu")),
+                    fmt(api.get("adapter")),
+                    fmt(api.get("device")),
+                    fmt(api.get("configure")),
+                    fmt(g(api, "configRead", "format")),
+                    fmt(g(api, "configRead", "colorSpace")),
+                    fmt(g(api, "configRead", "toneMapping")),
+                ]
+            ],
+        )
+    )
+    video, canvas, render, flags = (data.get(k) or {} for k in ("video", "canvas", "render", "flags"))
+    print("\nvideo / canvas / render / flags")
+    print(
+        table(
+            ["videoWidth", "videoHeight", "srcIsBlob", "paused", "canvas.width", "canvas.height", "cssWidth", "cssHeight", "mode", "frames", "loopFps", "jsP50", "jsP95", "drm", "attached", "fullscreen"],
+            [
+                [
+                    fmt(video.get("videoWidth")),
+                    fmt(video.get("videoHeight")),
+                    fmt(video.get("srcIsBlob")),
+                    fmt(video.get("paused")),
+                    fmt(canvas.get("width")),
+                    fmt(canvas.get("height")),
+                    fmt(canvas.get("cssWidth")),
+                    fmt(canvas.get("cssHeight")),
+                    fmt(render.get("mode")),
+                    fmt(render.get("frames")),
+                    fmt(render.get("loopFps")),
+                    fmt(render.get("jsP50")),
+                    fmt(render.get("jsP95")),
+                    fmt(flags.get("drm")),
+                    fmt(flags.get("attached")),
+                    fmt(flags.get("fullscreen")),
+                ]
+            ],
+        )
+    )
+    if "frameProbe" in data or "blackFrame" in flags:  # schemaVersion 2 이상. v1 파일은 건너뛴다.
+        fp = data.get("frameProbe") or {}
+        print("\nframeProbe (v2, 밝기 0~255) / flags.blackFrame")
+        cols = ["at", "n", "ext", "copy", "c2d", "extErr", "copyErr", "c2dErr"]
+        if any(k in fp for k in ("vf", "vfErr", "vfSyncMs")):  # v4: vf 경로
+            cols[3:3] = ["vf"]
+            cols += ["vfErr"]
+        if "ms" in fp:  # v3: 프로브 1회 소요와 경로별 동기 시간
+            cols += ["ms", "extSyncMs", "copySyncMs", "c2dSyncMs"]
+            if "vfSyncMs" in fp:
+                cols += ["vfSyncMs"]
+        print(table(cols + ["blackFrame"], [[fmt(fp.get(c)) for c in cols] + [fmt(flags.get("blackFrame"))]]))
+    v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "videoDropped", "videoTotal"]
+    if any(k in render for k in ("vfMsP50", "vfMsP95")):  # schemaVersion 4 이상
+        v3_cols = v3_cols + ["vfMsP50", "vfMsP95"]
+    if any(k in render for k in v3_cols):  # schemaVersion 3 이상. v1/v2 파일은 건너뛴다.
+        print("\nrender 비용 진단 (v3~v5, 값만)")
+        print(table(v3_cols, [[fmt(render.get(c)) for c in v3_cols]]))
+    cad = render.get("cadence")
+    if isinstance(cad, dict):  # schemaVersion 5 이상. 값만 출력하고 판정하지 않는다.
+        hist = cad.get("holdHist") if isinstance(cad.get("holdHist"), dict) else {}
+        cols = ["srcFps", "srcFpsNominal", "irregular", "skipped"] + ["hold" + k for k in ("1", "2", "3", "4", "5+")]
+        row = [fmt(cad.get(c)) for c in cols[:4]] + [fmt(hist.get(k)) for k in ("1", "2", "3", "4", "5+")]
+        print("\nrender cadence (v5, 값만)")
+        print(table(cols, [row]))
+    errs = data.get("errors") or []
+    print("errors (%d)" % len(errs))
+    if errs:
+        print(table(["at", "name", "message"], [[fmt(e.get("at")), fmt(e.get("name")), fmt(e.get("message"))] for e in errs if isinstance(e, dict)]))
 
 
 def collect(args):
@@ -293,6 +396,8 @@ def collect(args):
 def main(argv):
     with open(SCHEMA_PATH, encoding="utf-8") as f:
         schema = json.load(f)
+    with open(SCHEMA_M2_PATH, encoding="utf-8") as f:
+        schema_m2 = json.load(f)
     paths = collect(argv[1:])
     if not paths:
         print("results/*.json 없음")
@@ -306,14 +411,15 @@ def main(argv):
             print("\n## %s\n읽기 실패: %s" % (p, e))
             bad += 1
             continue
-        problems = validate(data, schema)
+        is_m2 = isinstance(data, dict) and data.get("milestone") == "M2"
+        problems = validate(data, schema_m2 if is_m2 else schema)
         if problems:
             bad += 1
             print("\n## %s\n스키마 검증 실패 %d건" % (p, len(problems)))
             for m in problems:
                 print("  - " + m)
             continue
-        summarize(os.path.basename(p), data)
+        (summarize_m2 if is_m2 else summarize)(os.path.basename(p), data)
     return 1 if bad else 0
 
 

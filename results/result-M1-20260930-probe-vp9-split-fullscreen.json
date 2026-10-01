@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 4,
+  "milestone": "M1",
+  "createdAt": "2026-09-30T13:50:24.499Z",
+  "env": {
+    "macOS": "27.2",
+    "safari": "27.2",
+    "chip": "Apple M1 Pro",
+    "display": "Liquid Retina XDR",
+    "power": null,
+    "sdrBrightness": null,
+    "refreshRate": null,
+    "windowMode": "fullscreen",
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+    "screen": {
+      "width": 1800,
+      "height": 1169,
+      "availWidth": 1743,
+      "availHeight": 1129,
+      "dpr": 2,
+      "colorDepth": 24
+    }
+  },
+  "api": {
+    "secureContext": true,
+    "navigatorGpu": true,
+    "adapter": {
+      "features": [
+        "bgra8unorm-storage",
+        "clip-distances",
+        "core-features-and-limits",
+        "depth-clip-control",
+        "depth32float-stencil8",
+        "float16-renderable",
+        "float32-blendable",
+        "float32-filterable",
+        "float32-renderable",
+        "indirect-first-instance",
+        "primitive-index",
+        "rg11b10ufloat-renderable",
+        "shader-f16",
+        "texture-compression-astc",
+        "texture-compression-astc-sliced-3d",
+        "texture-compression-bc",
+        "texture-compression-bc-sliced-3d",
+        "texture-compression-etc2",
+        "texture-formats-tier1",
+        "texture-formats-tier2",
+        "timestamp-query"
+      ],
+      "vendor": "apple",
+      "architecture": "apple",
+      "device": "apple",
+      "description": "apple"
+    },
+    "timestampQuery": true,
+    "preferredFormat": "bgra8unorm",
+    "configure": {
+      "ok": true,
+      "error": null
+    },
+    "getConfiguration": {
+      "supported": true,
+      "format": "rgba16float",
+      "colorSpace": "display-p3",
+      "toneMappingMode": "extended",
+      "error": null
+    },
+    "mediaQueries": {
+      "dynamicRangeHigh": true,
+      "colorGamutP3": true
+    },
+    "canvas2dFloat16": {
+      "supported": false,
+      "colorType": null,
+      "error": null
+    },
+    "webgl": {
+      "webgl2": true,
+      "drawingBufferStorage": false,
+      "error": null
+    },
+    "batteryApi": false
+  },
+  "edr": {
+    "maxDistinctStep": 4,
+    "encodingMatch": null,
+    "refHdrImage": "not_checked",
+    "secondsSinceDraw": 15
+  },
+  "perf": {
+    "srcRes": "1920x1080",
+    "canvasRes": "1800x1013",
+    "fps": 20.69,
+    "dropRate": 0,
+    "jsP50": 0,
+    "jsP95": 1,
+    "g3": null,
+    "visualJudder": null,
+    "runs": [
+      {
+        "fixture": "ramp-1080p60-vp9",
+        "mode": "split",
+        "driver": "rvfc",
+        "layout": "split",
+        "itm": false,
+        "srcRes": "1920x1080",
+        "canvasRes": "1800x1013",
+        "fullscreen": true,
+        "frames": 228,
+        "durationSec": 11.02,
+        "warmupSec": 1,
+        "windowSec": 9.98,
+        "windowFrames": 171,
+        "fps": 20.69,
+        "dropRate": 0,
+        "dropRatePresented": 0.375,
+        "missRate": 0.10112,
+        "loopFps": 17.04,
+        "videoPresentedFps": 27.16,
+        "jsP50": 0,
+        "jsP95": 1,
+        "jsMax": 5,
+        "gpuMs": 0.241,
+        "gpuSamples": 17,
+        "videoQuality": {
+          "dropped": 327,
+          "total": 671
+        }
+      }
+    ],
+    "gpuMs": 0.241
+  },
+  "flags": {
+    "drm": false,
+    "hdrSource": false,
+    "fullscreen": true
+  },
+  "errors": []
+}

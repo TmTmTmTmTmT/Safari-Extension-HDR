@@ -20,3 +20,71 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: pytest sim
+      - run: npx playwright install --with-deps webkit
+      - run: npm run test:dom
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode build (unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+
+          # 1) 커밋된 xcode/ 가 있으면 A16(절대경로) 검사
+          proj="$(find xcode -maxdepth 3 -name '*.xcodeproj' -type d 2>/dev/null | head -n 1 || true)"
+          pbx=""
+          if [ -n "$proj" ]; then
+            for f in project.pbxproj project.xcproj; do
+              [ -f "$proj/$f" ] && pbx="$proj/$f" && break
+            done
+            if [ -z "$pbx" ]; then
+              echo "프로젝트 파일(project.pbxproj/project.xcproj) 없음: $proj"
+              ls -la "$proj"
+              exit 1
+            fi
+            rc=0
+            grep -F -e "$PWD" -e "/Users/" "$pbx" || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "A16 실패: 프로젝트 파일에 절대경로가 있습니다."
+              exit 1
+            elif [ "$rc" -ne 1 ]; then
+              echo "grep 실행 실패(rc=$rc)"
+              exit 1
+            fi
+          else
+            echo "커밋된 xcode/ 프로젝트 없음: A16 검사 생략"
+          fi
+
+          # 2) 러너 converter로 임시 프로젝트 생성 후 빌드 (옵션은 scripts/make-xcode.sh와 동일)
+          tmp="$RUNNER_TEMP/xc"
+          rm -rf "$tmp"
+          help_out="$(xcrun safari-web-extension-converter --help 2>&1 || true)"
+          force=()
+          if grep -q -- '--force' <<<"$help_out"; then
+            force=(--force)
+          fi
+          xcrun safari-web-extension-converter extension \
+            --project-location "$tmp" \
+            --app-name SDRHDR \
+            --bundle-identifier io.github.tmtmtmtmtmt.SDRHDR \
+            --macos-only --swift --no-open --no-prompt \
+            ${force[@]+"${force[@]}"}
+          tproj="$(find "$tmp" -maxdepth 3 -name '*.xcodeproj' -type d | head -n 1 || true)"
+          if [ -z "$tproj" ]; then
+            echo "임시 프로젝트 .xcodeproj 를 찾지 못했습니다: $tmp"
+            ls -laR "$tmp" || true
+            exit 1
+          fi
+          xcodebuild -project "$tproj" -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+          # 3) 커밋된 프로젝트: project.pbxproj 형식이면 빌드, 아니면 생략
+          if [ -n "$proj" ]; then
+            if [ -f "$proj/project.pbxproj" ]; then
+              xcodebuild -project "$proj" -alltargets -configuration Debug CODE_SIGNING_ALLOWED=NO build
+            else
+              echo "커밋 프로젝트는 새 형식이라 러너에서 빌드 생략(사용자 Mac Run으로 확인)"
+            fi
+          fi

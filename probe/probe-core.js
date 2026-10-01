@@ -4,7 +4,8 @@
   // v2: run에 warmupSec/windowSec/windowFrames, perf.g3 추가, env.windowMode를 run에서 파생. v1 파일도 요약 가능.
   // v3: run에 mode/layout, env.refreshRate, edr.secondsSinceDraw, perf.g3를 해상도별 {baselineDrop,itmDrop,delta,jsP95Max}로 개정. v1/v2 파일도 유효.
   // v4: run에 driver/missRate/loopFps/videoPresentedFps, mode R0/R2/R3/V3, perf.visualJudder, perf.g3를 {baselineMiss,itmMiss,delta,rvfcMiss,loopFps,videoPresentedFps,jsP95Max,gpuMsMax}로 개정. v1~v3 파일도 유효.
-  const SCHEMA_VERSION = 4;
+  // v5: 최상위 vp9Paths[] 추가(FIX_GUIDE Q3, P0-6 VP9 입력 방식 실험). 기존 필드 변경 없음. v1~v4 파일도 유효.
+  const SCHEMA_VERSION = 5;
   // FIX_GUIDE H1: requestAdapter/requestDevice 각각의 타임아웃과 사용자 안내.
   const GPU_TIMEOUT_MS = 5000;
   const GPU_HINT = 'GPU 응답 없음, Safari를 종료 후 재시작';
@@ -498,7 +499,182 @@
         hdrSource: !!flags.hdrSource,
         fullscreen: !!flags.fullscreen,
       },
+      vp9Paths: Array.isArray(i.vp9Paths) ? i.vp9Paths.slice() : [],
       errors: (i.errors || []).slice(),
+    };
+  }
+
+  // ---------- P0-6 VP9 입력 방식 (FIX_GUIDE Q3) ----------
+  const VP9_VARIANTS = ['V-ext', 'V-copy8', 'V-copyB', 'V-bmp', 'V-bmpR', 'V-vf'];
+  // 실행 대상: VP9 2종은 전 변형, H.264 대조(mp4)는 V-ext와 V-copy8만. G3 일괄 측정(MATRIX_FIXTURES)과 무관하다.
+  const VP9_TARGETS = [
+    { file: 'ramp-2160p60.webm', variants: VP9_VARIANTS },
+    { file: 'ramp-1080p60.webm', variants: VP9_VARIANTS },
+    { file: 'ramp-2160p60.mp4', variants: ['V-ext', 'V-copy8'] },
+  ];
+  const VP9_WARMUP_SEC = 1; // 앞 1초 제외
+  const VP9_WINDOW_SEC = 8; // 이후 8초 측정
+  // 연속 콜백 간격이 이 값을 넘으면 측정 창의 끊김으로 보고 누락 수와 창 길이에서 제외한다(FIX_GUIDE Q2, extension/hud.js와 같은 값).
+  const LOOP_BREAK_MS = 500;
+  const READBACK_W = 64;
+  const READBACK_H = 36;
+
+  function vp9Plan(targets) {
+    const out = [];
+    for (const t of targets || VP9_TARGETS) {
+      for (const variant of t.variants) out.push({ fixture: t.file, variant });
+    }
+    return out;
+  }
+
+  function vp9ProgressText(index, total, step) {
+    return (
+      'P0-6 ' + index + ' / ' + total + (step ? ' (' + step.fixture + ' ' + step.variant + ')' : '')
+    );
+  }
+
+  // 렌더 루프 콜백 간격 중앙값으로 디스플레이 주사율을 60 또는 120으로 추정한다. extension/content/hud.js와 같은 정의.
+  function estimateDisplayHz(loopTimes) {
+    const ts = finiteOnly(Array.isArray(loopTimes) ? loopTimes : []);
+    const gaps = [];
+    for (let i = 1; i < ts.length; i++) if (ts[i] > ts[i - 1]) gaps.push(ts[i] - ts[i - 1]);
+    const med = percentile(gaps, 50);
+    if (med === null || med <= 0) return null;
+    const hz = 1000 / med;
+    return Math.abs(hz - 60) <= Math.abs(hz - 120) ? 60 : 120;
+  }
+
+  // 측정 창(ms)에서 콜백 간격이 1.5/displayHz를 넘으면 round(간격 x hz) - 1개 갱신을 놓친 것으로 센다.
+  // 결과 = 놓친 갱신 수 / (창 초 x displayHz). 간격이 500 ms를 넘으면 끊김으로 보고 누락 수와 창 길이 모두에서 제외한다.
+  // extension/content/hud.js와 같은 정의이며 같은 테스트 사례를 통과한다(FIX_GUIDE P 회차 (e)). 계산 불가면 null.
+  function displayMissRate(loopTimes, windowStart, windowEnd, displayHz) {
+    if (!Array.isArray(loopTimes)) return null;
+    if (!(displayHz > 0) || !(windowEnd > windowStart)) return null;
+    const ts = loopTimes.filter(
+      (v) => typeof v === 'number' && Number.isFinite(v) && v >= windowStart && v <= windowEnd,
+    );
+    if (ts.length < 2) return null;
+    const limitMs = 1500 / displayHz;
+    let missed = 0;
+    let excludedMs = 0;
+    for (let i = 1; i < ts.length; i++) {
+      const gap = ts[i] - ts[i - 1];
+      if (gap > LOOP_BREAK_MS) {
+        excludedMs += gap;
+        continue;
+      }
+      if (gap > limitMs) missed += Math.max(0, Math.round((gap * displayHz) / 1000) - 1);
+    }
+    const measuredMs = windowEnd - windowStart - excludedMs;
+    if (!(measuredMs > 0)) return null;
+    return missed / ((measuredMs / 1000) * displayHz);
+  }
+
+  // 구동 콜백 회/s. 500 ms 초과 간격은 개수와 시간 모두에서 뺀다(hud.js summarize와 같은 규칙). 계산 불가면 null.
+  function loopFpsExcludingBreaks(loopTimes) {
+    const ts = finiteOnly(Array.isArray(loopTimes) ? loopTimes : []);
+    let spanMs = 0;
+    let n = 0;
+    for (let i = 1; i < ts.length; i++) {
+      const gap = ts[i] - ts[i - 1];
+      if (gap > LOOP_BREAK_MS) continue;
+      spanMs += gap;
+      n++;
+    }
+    return n > 0 && spanMs > 0 ? (n * 1000) / spanMs : null;
+  }
+
+  // WebGPU copyTextureToBuffer의 bytesPerRow는 256의 배수여야 한다.
+  function alignBytesPerRow(rowBytes) {
+    return Math.ceil(rowBytes / 256) * 256;
+  }
+
+  // RGBA 8bit 버퍼(행 패딩 포함)의 RGB 평균 밝기 0~255. 알파와 패딩 제외. 입력이 잘못되면 null.
+  function meanBrightness(data, width, height, bytesPerRow) {
+    const ok = [width, height, bytesPerRow].every((v) => Number.isInteger(v) && v > 0);
+    if (!ok || !data || bytesPerRow < width * 4) return null;
+    if (data.length < bytesPerRow * (height - 1) + width * 4) return null;
+    let sum = 0;
+    for (let y = 0; y < height; y++) {
+      const row = y * bytesPerRow;
+      for (let x = 0; x < width; x++) {
+        const i = row + x * 4;
+        sum += data[i] + data[i + 1] + data[i + 2];
+      }
+    }
+    return sum / (width * height * 3);
+  }
+
+  // 변형 1회의 집계. loop: 구동 콜백마다 {t(ms), js(ms)}. asyncSamples: 비동기 준비 {t(ms), ms}.
+  // 창 = 첫 콜백 + warmupSec 이후 windowSec 이내. 판정은 하지 않는다.
+  function vp9Stats(loop, asyncSamples, o) {
+    const warmupSec = o && typeof o.warmupSec === 'number' ? o.warmupSec : VP9_WARMUP_SEC;
+    const windowSec = o && typeof o.windowSec === 'number' ? o.windowSec : VP9_WINDOW_SEC;
+    const isT = (x) => x && typeof x.t === 'number' && Number.isFinite(x.t);
+    const L = (loop || []).filter(isT);
+    const out = {
+      frames: 0,
+      windowSec: null,
+      js: summarize([]),
+      asyncMs: summarize([]),
+      displayHz: null,
+      displayMissRate: null,
+      loopFps: null,
+      windowStartT: null,
+    };
+    if (L.length === 0) return out;
+    const start = L[0].t + warmupSec * 1000;
+    const end = start + windowSec * 1000;
+    const w = L.filter((x) => x.t >= start && x.t <= end);
+    out.windowStartT = start;
+    out.frames = w.length;
+    if (w.length === 0) return out;
+    const ts = w.map((x) => x.t);
+    out.windowSec = w.length >= 2 ? (ts[ts.length - 1] - ts[0]) / 1000 : null;
+    out.js = summarize(w.map((x) => x.js));
+    out.asyncMs = summarize(
+      (asyncSamples || [])
+        .filter(isT)
+        .filter((x) => x.t >= start && x.t <= end)
+        .map((x) => x.ms),
+    );
+    out.displayHz = estimateDisplayHz(ts);
+    out.displayMissRate = displayMissRate(
+      ts,
+      start,
+      Math.min(end, ts[ts.length - 1]),
+      out.displayHz,
+    );
+    out.loopFps = loopFpsExcludingBreaks(ts);
+    return out;
+  }
+
+  // vp9Paths[] 항목. 측정되지 않은 값은 null. errorName이 있으면 변형이 건너뛰어진 것이다.
+  function buildVp9Path(o) {
+    const st = vp9Stats(o.loop || [], o.asyncSamples || [], o);
+    const skipped = !!o.errorName;
+    const val = (v, d) => (skipped ? null : round(v, d));
+    const isAsync = o.variant === 'V-bmp' || o.variant === 'V-bmpR';
+    return {
+      fixture: o.fixture,
+      variant: o.variant,
+      srcRes: resStr(o.srcW, o.srcH),
+      canvasRes: resStr(o.canvasW, o.canvasH),
+      fullscreen: !!o.fullscreen,
+      frames: skipped ? 0 : st.frames,
+      windowSec: val(st.windowSec, 2),
+      jsP50: val(st.js.p50, 3),
+      jsP95: val(st.js.p95, 3),
+      jsMax: val(st.js.max, 3),
+      asyncP50: isAsync ? val(st.asyncMs.p50, 3) : null,
+      asyncP95: isAsync ? val(st.asyncMs.p95, 3) : null,
+      displayHz: skipped ? null : st.displayHz,
+      displayMissRate: val(st.displayMissRate, 5),
+      loopFps: val(st.loopFps, 2),
+      meanBrightness: skipped ? null : round(o.meanBrightness, 2),
+      videoDropped: typeof o.videoDropped === 'number' ? o.videoDropped : null,
+      videoTotal: typeof o.videoTotal === 'number' ? o.videoTotal : null,
+      errorName: o.errorName || null,
     };
   }
 
@@ -549,5 +725,21 @@
     buildRun,
     buildResult,
     resultFileName,
+    VP9_VARIANTS,
+    VP9_TARGETS,
+    VP9_WARMUP_SEC,
+    VP9_WINDOW_SEC,
+    LOOP_BREAK_MS,
+    READBACK_W,
+    READBACK_H,
+    vp9Plan,
+    vp9ProgressText,
+    estimateDisplayHz,
+    displayMissRate,
+    loopFpsExcludingBreaks,
+    alignBytesPerRow,
+    meanBrightness,
+    vp9Stats,
+    buildVp9Path,
   };
 })();

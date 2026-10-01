@@ -348,6 +348,22 @@
     </section>
 
     <section>
+      <h2>P0-6 VP9 입력 방식</h2>
+      <p>
+        VP9 video를 WebGPU로 넘기는 방식별 비용 실험이다(V-ext, V-copy8, V-copyB, V-bmp, V-bmpR,
+        V-vf). 위 P0-4의 전체화면 영역을 그대로 쓴다. 버튼을 누르면 전체화면에 들어가
+        ramp-2160p60.webm, ramp-1080p60.webm은 전 변형, ramp-2160p60.mp4는 V-ext와 V-copy8을 차례로
+        실행한다(변형당 앞 1초 제외 8초, 총 14 run). 지원되지 않는 변형은 예외 이름을 기록하고
+        건너뛴다. 도중에 전체화면을 나가면 중단된다. 전원 연결 + 밝기 중간에서 실행한다.
+      </p>
+      <p>
+        <button id="btnVp9" disabled>일괄 측정</button>
+        <span id="vp9Status">(대기)</span>
+      </p>
+      <table id="vp9Table"></table>
+    </section>
+
+    <section>
       <h2>결과 JSON</h2>
       <button id="btnExport">JSON export (다운로드)</button>
       <p>다운로드가 막히면 아래 내용을 복사해 result-*.json 파일로 저장한다.</p>
