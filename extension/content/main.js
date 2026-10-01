@@ -4,6 +4,7 @@
   const FIND_INTERVAL_MS = 1000;
   const FIND_MAX_TRIES = 30;
   const DIAG_INTERVAL_MS = 2000;
+  const HUD_INTERVAL_MS = 1000; // 페이지 HUD 갱신 주기 (PLAN M5-3). 렌더 루프와 무관하게 통계만 읽는다.
   const MUTATION_DEBOUNCE_MS = 250;
   const MAX_ERRORS = 20;
   const MAX_EVENTS = 30;
@@ -106,6 +107,54 @@
     a.renderer.restartSource();
     a.renderer.start();
     if (NO_PROBE_MODES.includes(settings.mode)) dispatch('decided', true);
+  }
+
+  // 페이지 HUD (PLAN M5-3). 켜져 있고 attach 중일 때만 만든다. detach 때 함께 제거된다.
+  function showHud(a) {
+    if (a.hud) return;
+    a.hud = ns.hud.createHud(a.container);
+    a.cleanup.push(() => {
+      if (a.hud) a.hud.destroy();
+      a.hud = null;
+    });
+    tickHud();
+  }
+
+  function hideHud(a) {
+    if (!a.hud) return;
+    a.hud.destroy();
+    a.hud = null;
+  }
+
+  function hudInfo(a) {
+    const st = a.renderer.getStats();
+    const sum = ns.hud.summarize(st.frameTimesMs, st.loopTimestamps);
+    const loopTs = Array.isArray(st.loopTimestamps) ? st.loopTimestamps : [];
+    const hz = ns.hud.estimateDisplayHz(loopTs);
+    const miss =
+      hz === null
+        ? null
+        : ns.hud.displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], hz) * 100;
+    return {
+      state: lc.state,
+      skipReason: lc.skip,
+      path: st.path,
+      preset: st.preset,
+      strength: st.strength,
+      sharpness: st.sharpness,
+      saturation: st.saturation,
+      effectivePeak: st.effectivePeak,
+      loopFps: sum.loopFps,
+      jsP95: sum.jsP95,
+      missPct: miss,
+      videoW: a.video.videoWidth,
+      videoH: a.video.videoHeight,
+    };
+  }
+
+  function tickHud() {
+    if (!cur || !cur.hud) return;
+    cur.hud.update(ns.hud.hudLines(hudInfo(cur)));
   }
 
   function markDrm(video) {
@@ -254,6 +303,7 @@
       },
     );
     cur = a;
+    if (settings.hud) showHud(a);
     a.renderer.setMode(settings.mode);
     if (NO_PROBE_MODES.includes(settings.mode)) dispatch('decided', true);
     if (a.pip) {
@@ -393,6 +443,8 @@
       return;
     }
     if (cur) {
+      if (next.hud && !cur.hud) showHud(cur);
+      else if (!next.hud && cur.hud) hideHud(cur);
       // 셰이더 값(프리셋·강도·선명도·채도)은 바뀐 것만 유니폼으로 보낸다. 재attach 금지.
       const changed = {};
       for (const key of ['preset', 'strength', 'sharpness', 'saturation']) {
@@ -520,6 +572,13 @@
           // 진단 실패는 무시한다.
         }
       }, DIAG_INTERVAL_MS);
+      setInterval(() => {
+        try {
+          tickHud();
+        } catch (e) {
+          // HUD 갱신 실패는 무시한다.
+        }
+      }, HUD_INTERVAL_MS);
     } catch (e) {
       // 페이지 재생은 방해하지 않되 원인은 diag errors에 남긴다.
       addError('main.start', e);

@@ -378,6 +378,84 @@
     };
   }
 
+  const PRESET_LABELS = {
+    accurate: '정확',
+    balanced: '균형',
+    vivid: '선명',
+    custom: '사용자 지정',
+  };
+
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  const fixed = (v, d) => (isNum(v) ? v.toFixed(d) : '-');
+  const pct = (v) => (isNum(v) ? String(Math.round(v * 100)) : '-');
+  const text = (v) => (typeof v === 'string' && v !== '' ? v : '-');
+
+  // 순수: 페이지 HUD 5줄. URL·제목 같은 개인정보 필드는 입력에 없다 (GUIDELINES 2.6).
+  function hudLines(info) {
+    const i = info && typeof info === 'object' ? info : {};
+    const state = text(i.state);
+    const skip =
+      typeof i.skipReason === 'string' && i.skipReason !== '' ? '(' + i.skipReason + ')' : '';
+    const label = Object.prototype.hasOwnProperty.call(PRESET_LABELS, i.preset)
+      ? PRESET_LABELS[i.preset]
+      : '-';
+    return [
+      state + skip + '  경로 ' + text(i.path),
+      label +
+        ' 강도 ' +
+        pct(i.strength) +
+        '%  선명 ' +
+        pct(i.sharpness) +
+        '%  채도 ' +
+        pct(i.saturation) +
+        '%',
+      '유효 피크 ×' + fixed(i.effectivePeak, 2),
+      'fps ' +
+        fixed(i.loopFps, 1) +
+        '  JS p95 ' +
+        fixed(i.jsP95, 1) +
+        'ms  누락 ' +
+        fixed(i.missPct, 1) +
+        '%',
+      'video ' + (isNum(i.videoW) ? i.videoW : '-') + 'x' + (isNum(i.videoH) ? i.videoH : '-'),
+    ];
+  }
+
+  const HUD_STYLE = [
+    'position:absolute',
+    'left:8px',
+    'top:8px',
+    'pointer-events:none',
+    'font:11px ui-monospace,monospace',
+    'color:#fff',
+    'background:rgba(0,0,0,0.55)',
+    'padding:4px 6px',
+    'border-radius:4px',
+    'white-space:pre',
+    'line-height:1.35',
+  ].join(';');
+
+  // DOM: container 바로 뒤에 넣어 DOM 순서로 캔버스 뒤·컨트롤 앞이 되게 한다(z-index 미지정).
+  function createHud(container) {
+    const parent = container && container.parentNode;
+    if (!parent) return { update() {}, destroy() {} };
+    const el = container.ownerDocument.createElement('div');
+    el.style.cssText = HUD_STYLE;
+    parent.insertBefore(el, container.nextSibling);
+    let last = null;
+    return {
+      update(lines) {
+        const t = Array.isArray(lines) ? lines.join('\n') : '';
+        if (t === last) return;
+        last = t;
+        el.textContent = t;
+      },
+      destroy() {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      },
+    };
+  }
+
   globalThis.__sdrhdr.hud = {
     summarize,
     sanitizePageUrl,
@@ -390,5 +468,7 @@
     normalizeColorSpace,
     normalizeLifecycle,
     buildDiag,
+    hudLines,
+    createHud,
   };
 })();
