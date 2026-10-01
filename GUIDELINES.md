@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.3 (2026-10-01, M3: 2.4-4·2.5-6·2.7 추가). 개정은 Opus만 한다.
+> 버전: v1.4 (2026-10-01, M4a: 3-1 예외 추가). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -68,6 +68,7 @@
 
 1. **[필수]** ITM 수식은 세 곳에 존재한다: WGSL(`itm.wgsl.js`), JS 미러, numpy(`sim/`). 하나를 바꾸면 **같은 커밋에서** 셋 다 갱신한다.
    - M2 예외: JS 미러는 M4에서 만든다. M2는 WGSL 본문이 `probe/shaders.js`와 같고 상수가 `params.js`·`sim/presets.py` 균형 값과 같음을 테스트한다(PLAN D-M2 M2-5).
+   - M4a 예외: 강도 혼합(PLAN D-M4a)은 WGSL과 numpy 두 곳에 같은 커밋으로 넣는다. JS 미러는 M4에서 만들 때 혼합을 포함한다. WGSL 테스트는 곡선 본문(`ITM_FN`)이 probe와 같음을 계속 검사한다.
 2. **[필수]** JS 미러 vs numpy 오차 < 1e-4 테스트를 유지한다. 테스트 입력은 램프, 컬러바, 프리셋 3종 + 범위 경계값을 포함한다.
 3. **[필수]** 곡선·프리셋 수치는 PLAN.md C절 초안을 쓰고, 변경은 M4에서 Opus가 GUIDELINES/PLAN 개정으로만 한다. Sonnet은 S2/S4/S5 결과를 STATUS.md에 보고만 한다.
 4. **[필수]** 셰이더 출력에 NaN/Inf가 나오지 않게 `Y=0` 분기를 명시한다(`f(Y)/Y` 계산).
