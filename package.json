@@ -1,0 +1,16 @@
+{
+  "name": "safari-sdr-hdr",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Safari SDR to HDR(EDR) web extension - dev tooling only, no runtime dependencies",
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "test": "node --test \"tests/unit/**/*.test.js\"",
+    "test:dom": "playwright test --pass-with-no-tests"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0"
+  }
+}

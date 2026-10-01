@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>SDR HDR</title>
+    <style>
+      body {
+        font:
+          13px -apple-system,
+          sans-serif;
+        width: 320px;
+        margin: 8px;
+      }
+      label {
+        display: block;
+        margin: 6px 0;
+      }
+      textarea {
+        width: 100%;
+        height: 160px;
+        font:
+          11px ui-monospace,
+          monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <label><input type="checkbox" id="enabled" /> 켜기</label>
+    <label
+      >프리셋
+      <select id="preset">
+        <option value="accurate">정확</option>
+        <option value="balanced">균형</option>
+        <option value="vivid">선명 (밝기 중간 이상 권장)</option>
+        <option value="custom">사용자 지정</option>
+      </select>
+    </label>
+    <label
+      >HDR 강도 <span id="strength-value">43%</span>
+      <input type="range" id="strength" min="0" max="100" step="1" value="43" />
+    </label>
+    <label
+      >선명도 <span id="sharpness-value">0%</span>
+      <input type="range" id="sharpness" min="0" max="100" step="1" value="0" />
+    </label>
+    <label
+      >채도 <span id="saturation-value">105%</span>
+      <input type="range" id="saturation" min="50" max="150" step="1" value="105" />
+    </label>
+    <div id="effective-peak"></div>
+    <details id="detail">
+      <summary>상세 설정</summary>
+      <label
+        >하이라이트 밝기 <span id="d-P-value"></span>
+        <input type="range" id="d-P" min="0" max="1" step="0.01" value="0" />
+      </label>
+      <label
+        >확장 시작 <span id="d-k-value"></span>
+        <input type="range" id="d-k" min="0" max="1" step="0.01" value="0" />
+      </label>
+      <label
+        >곡선 지수 <span id="d-n-value"></span>
+        <input type="range" id="d-n" min="0" max="1" step="0.01" value="0" />
+      </label>
+      <label
+        >밝기 <span id="d-g-value"></span>
+        <input type="range" id="d-g" min="0" max="1" step="0.01" value="0" />
+      </label>
+      <label
+        >곡선 채도 <span id="d-s-value"></span>
+        <input type="range" id="d-s" min="0" max="1" step="0.01" value="0" />
+      </label>
+      <label
+        >하이라이트 채도 <span id="d-hs-value"></span>
+        <input type="range" id="d-hs" min="0" max="1" step="0.01" value="0" />
+      </label>
+    </details>
+    <label><input type="checkbox" id="hud" /> 페이지 HUD 표시</label>
+    <details id="diag-section">
+      <summary>진단</summary>
+      <label
+        >모드
+        <select id="mode">
+          <option value="itm">itm</option>
+          <option value="identity">identity</option>
+          <option value="stripes">stripes</option>
+          <option value="baseline">baseline</option>
+        </select>
+      </label>
+      <p>보이는 YouTube 탭에서만 갱신됩니다</p>
+      <label
+        >진단 JSON
+        <textarea id="diag" readonly></textarea>
+      </label>
+      <button id="copy" type="button">복사</button>
+      <a id="save" download="sdrhdr-diag.json">JSON 저장</a>
+    </details>
+    <script src="../content/ns.js"></script>
+    <script src="../content/params.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 3,
+  "extVersion": "0.1.0",
+  "canvas": {
+    "cssWidth": 1214,
+    "cssHeight": 682.875,
+    "width": 2428,
+    "height": 1366
+  },
+  "render": {
+    "displayMissRate": 0.66102,
+    "copyMsP50": 8,
+    "videoDropped": 0,
+    "videoTotal": 1014,
+    "loopFps": 20.287891617273498,
+    "path": "copy",
+    "copyMsP95": 12.75,
+    "mode": "identity",
+    "jsP50": 1,
+    "copySkipped": 4,
+    "frames": 963,
+    "jsP95": 9,
+    "displayHz": 60
+  },
+  "frameProbe": {
+    "copySyncMs": 26,
+    "copyErr": null,
+    "c2d": 154.19,
+    "c2dSyncMs": 18,
+    "c2dErr": null,
+    "extSyncMs": 2,
+    "at": 31557,
+    "extErr": null,
+    "ext": 0,
+    "ms": 65,
+    "copy": 210.2,
+    "n": 2
+  },
+  "flags": {
+    "fullscreen": false,
+    "drm": false,
+    "attached": true,
+    "blackFrame": false
+  },
+  "errors": [],
+  "milestone": "M2",
+  "page": {
+    "url": "/watch?v=vF5oXa1cVEg"
+  },
+  "env": {
+    "dpr": 2,
+    "screen": {
+      "w": 1800,
+      "h": 1169
+    },
+    "dynamicRangeHigh": true,
+    "colorGamutP3": true,
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15"
+  },
+  "createdAt": "2026-09-30T14:05:34.038Z",
+  "api": {
+    "configRead": {
+      "toneMapping": "extended",
+      "format": "rgba16float",
+      "colorSpace": "display-p3"
+    },
+    "gpu": true,
+    "adapter": true,
+    "device": true,
+    "configure": true
+  },
+  "video": {
+    "srcIsBlob": true,
+    "videoHeight": 1440,
+    "paused": true,
+    "videoWidth": 2560
+  }
+}
