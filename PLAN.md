@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.11 (2026-10-01, M3 판정, D-M4a 강도 슬라이더 계획)
+> 버전: v1.13 (2026-10-01, M4a 판정, M4 입력 자료)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -175,7 +175,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M3 | 감지·수명주기 (상세: D-M3) | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
 | M4a | HDR 강도 슬라이더 (상세: D-M4a) | ITM 출력과 원본 사이 선형 혼합 강도 1개, popup 슬라이더, 진단 v7 | Sonnet 본 세션(파일 간 결합이 커서 분할하지 않음) | → verify: 단위·pytest(혼합 성질) 통과 + 사용자 Mac 선호 강도 회신 |
 | M4 | 알고리즘·프리셋 확정 | 셰이더 최종, JS 미러, 프리셋 수치 | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
-| M5 | popup + HUD | 프리셋/상세 UI, HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
+| M5 | popup + HUD | 프리셋/상세 UI, **하이라이트(화이트포인트) 휘도 슬라이더**(D-M4a M4a-5), HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 | 해상도 정책 튜닝, install.md(7일 재서명, "서명되지 않은 확장 허용" 재설정) | Sonnet | → verify: 사용자 Mac 2160p60 30분 soak에서 드롭 < 1%, HUD 메모리 추세 평탄 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
@@ -301,6 +301,17 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 판정: (a) 예면 M4a 완료. (b)(c)는 M4 기본 강도·프리셋 결정 자료(Opus).
 
 **M4a-4. 범위 밖**: 프리셋 선택·6개 상세 슬라이더(M5), 헤드룸 자동 추정, 소프트 롤오프(M4), 페이지 위 HUD.
+
+**M4a-5. 구현 후 결정 (2026-10-01, Opus)**
+- 해석 승인 ①: t=0은 **색역 변환(709→P3)을 한 SDR**로 한다(구현 그대로). 문구 "identity 출력과 같다"는 "곡선·게인·채도 없이 색 변환만 한 SDR"로 고쳐 읽는다. identity 모드는 진단용(GUIDELINES 2.6-3)이라 일치시킬 필요가 없다.
+- 해석 승인 ②: `idLin`에 밝기 게인 g를 적용하지 않는다(구현 그대로). g는 ITM 쪽 파라미터다.
+- 하이라이트(화이트포인트) 휘도 슬라이더(사용자 요청)는 **M5로 이월**한다. M5 계획 때 정할 것: (a) 대응 파라미터(피크 배율 P 또는 확장 시작 k, 또는 "피크 nit 대신 헤드룸 배율"로 표시), (b) 강도 t와의 관계(피크 = 1 + t(P−1)이라 곱으로 겹침: 독립 두 슬라이더 / P를 피크 슬라이더로 노출하고 t는 곡선 혼합만 / 하나로 통합 중 택1), (c) 상한(헤드룸 2~4, A18)과 S10b 표, (d) M4a 체크리스트 (b)(c) 회신값. M5 착수 전까지 구현하지 않는다.
+- M4a 판정은 체크리스트 M4a 절 (a) 회신 후 기록한다(WGSL 컴파일 포함 미검증 상태로 PR #6 머지됨, 사용자 지시).
+
+**M4a-6. 사용자 회신과 M4 입력 자료 (2026-10-01, Opus)**
+- 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
+- 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
+- M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
 
 **M3 판정 완료 (2026-10-01)**: 게이트 판정 기록 "M3 수명주기" 행 참조. M4a 착수 가능.
 
@@ -532,6 +543,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | G3c vf 경로(확장) | 2026-10-01 | results/result-M2-20261001-ac-mid-{promotion-2160p-itm-vf-vF5,promotion-2160p-itm-vf-MR5,promotion-1080p-itm-vf-vF5,60hz-1080p-itm-vf-vF5}.json | **보류** | ProMotion 설정 창 모드: JS p95 2 ms(기준 4 ms 충족), video 드롭 0(충족), 디스플레이 갱신 누락 3.1~4.4%(절대 기준 1% 초과), 육안 끊김 조금(1080p 동일). 확장에는 기준선(R0)이 없어 누락이 오버레이 탓인지 YouTube 페이지 탓인지 가를 수 없다 → FIX_GUIDE S1 기준선 모드로 R3−R0 판정으로 되돌린다(G3와 같은 차분 기준). 60Hz는 A24로 판정 보류 |
 | G3c vf 경로(확장) 재판정 | 2026-10-01 | results/result-M2-20261001-ac-max-promotion-2160p60-{itm-vf,baseline}-9qT.json | **통과(ProMotion·창 모드)** | 60fps 소스(9qT9KyyGGhM, 3840×1920, srcFps 59.94): 누락 itm 1.8% − baseline 4.8% = −3.0%p(개정 기준 < 1%p 충족), JS p95 1 ms, vf p95 1 ms, video 드롭 0(Stats for nerds 포함), 끊김 육안 없음. cadence: 유지 1회 570 / 2회 14, irregular 2.4%, skipped 18(기준선 누락 4.8%와 같은 규모 → 페이지 부하 C-a로 봄). 이전 회차 끊김 '조금'은 비60fps 소스(vF5oXa1cVEg)에서 관찰 → C-b/C-c 미분리, M6 항목. 미측정: 전체화면, 60Hz(A24, 사용자 판단으로 생략) → M6에서 확인 |
 | M3 수명주기 | 2026-10-01 | results/result-M3-20261001-1-6.json + 사용자 보고 | **통과(범위 조정)** | 체크리스트 1 SPA(navCount 4·srcChanges 3, 소스 변경 후 약 1.2초에 판정)·2 화면 모드(극장·전체화면·기본)·3 창 크기·5 HDR 원본 스킵(transfer pq, bt2020)·7 DRM 통과. 4 광고(프리미엄 계정), 6 PiP 복귀 후 재개, 미니플레이어, 극장·미니플레이어 셀렉터 확정은 **사용자 결정으로 생략**하고 [미확인]으로 남긴다(진단용 `playerMode`만 영향, 배치·스킵 로직과 무관). PiP 진입 시 Apple 네이티브 PiP로 넘어가 확장이 동작하지 않는 것은 예상 동작. 후속: 회귀 발견 시 FIX_GUIDE. M6 후보 추가: HDR 4K 첫 frameProbe에서 `c2dSyncMs` 608 ms(메인 스레드 점유, 소스 변경·attach마다 반복 가능, 체감 보고 없음). PR #5 머지 가능 |
+| M4a 강도 슬라이더 | 2026-10-01 | 사용자 회신(체크리스트 M4a) + 진단 JSON 1개(`results/result-M4a-20261001-strength68.json`로 저장 예정) | **통과** | (a) 드래그 후 1초 안 반영. WGSL 강도 혼합 셰이더가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, frames 1220, JS p95 1 ms). 선호·뭉개짐 강도는 D-M4a M4a-6에 M4 입력으로 기록. 측정 조건 중 진단 JSON의 밝기는 미기재 |
 
 ---
 
