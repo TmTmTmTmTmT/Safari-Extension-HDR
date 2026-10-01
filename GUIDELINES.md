@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.2 (2026-09-30, M2: 2.1-5 popup 진단 읽기, 3.1 M2 예외, 2.6 추가). 개정은 Opus만 한다.
+> 버전: v1.3 (2026-10-01, M3: 2.4-4·2.5-6·2.7 추가). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -43,6 +43,7 @@
 1. **[필수]** attach 전과 attach 후 모두 검사한다. attach 후에는 `encrypted`/`webkitneedkey` 이벤트와 `mediaKeys`/`webkitKeys` 변화를 감시한다.
 2. **[필수]** 한 번 DRM으로 판정된 video 요소는 영구 no-op이다(같은 요소에 재attach 금지). 판정 해제 로직을 만들지 않는다.
 3. **[필수]** 검은 프레임 연속 감지는 보조 신호로만 쓰며, detach 방향으로만 작동한다.
+4. **[필수]** DRM 영구 no-op은 **요소 단위**다(같은 요소의 이후 소스에도 적용). 검은 프레임·HDR 원본·PiP 스킵은 **소스 또는 상태 단위**이며 소스가 바뀌거나 조건이 사라지면 재판정한다(PLAN D-M3 M3-1).
 
 ### 2.5 렌더러
 1. **[필수]** 프레임 구동은 PLAN.md C절 "렌더 루프"를 따른다(2026-09-30 확정: `requestAnimationFrame` 구동, rVFC는 Safari에서 표시 프레임보다 적게 호출되어 구동에 쓰지 않음). `importExternalTexture`는 렌더할 때마다 다시 호출한다(외부 텍스처 재사용 금지).
@@ -50,11 +51,18 @@
 3. **[필수]** 캔버스 설정은 `format:'rgba16float'`, `colorSpace:'display-p3'`, `toneMapping:{mode:'extended'}`로 고정한다. Phase 0 판정 전에 다른 값을 시도하는 분기를 넣지 않는다(폴백 경로는 Opus 지시 후).
 4. **[필수]** GPU 초기화 실패, device lost, SecurityError는 잡아서 detach하고 HUD에 기록한다. 페이지 재생을 방해하지 않는다.
 5. **[권장]** 파이프라인·샘플러·유니폼 버퍼는 attach 시 1회 생성하고 파라미터 변경 시 유니폼만 갱신한다.
+6. **[필수]** 비디오 입력 경로는 PLAN C절 "비디오 입력 경로"(ext → vf → copy 자동 선택)를 따른다. 소스가 바뀌면 경로 결정부터 다시 한다. `VideoFrame`은 submit 직후 반드시 `close()`한다(예외 경로 포함).
 
 ### 2.6 진단·개인정보 (M2 추가)
 1. **[필수]** 진단 JSON(`sdrhdr.diag`, 결과 파일)에는 영상 제목, 채널, 쿠키, 계정 정보, 전체 URL을 넣지 않는다. 페이지는 경로와 `v` 쿼리만 기록한다.
 2. **[필수]** 진단 기록은 `storage.local`에 최신 1개만 유지하고 외부로 전송하지 않는다.
 3. **[필수]** `stripes`·`identity` 모드는 진단용이며 M5 이후에도 popup 상세 영역 밖으로 노출하지 않는다(요청 없는 기능 금지).
+
+### 2.7 수명주기 (M3 추가)
+1. **[필수]** YouTube 이벤트 이름(`yt-navigate-finish` 등)과 클래스명(`ad-showing` 등)은 detect.js 상수로만 둔다(셀렉터와 같은 취급).
+2. **[필수]** SPA 이동 처리는 이벤트와 DOM 관찰(MutationObserver, video 소스 변경 이벤트)을 이중으로 둔다. 어느 하나가 없어도 다음 영상에서 동작해야 한다.
+3. **[필수]** MutationObserver는 `#movie_player` 범위로 한정하고 디바운스한다. `document` 전체 관찰 금지.
+4. **[필수]** 셀렉터 확정은 실제 DOM 스냅샷(`tests/dom/fixtures/yt-*.html`) 커밋 후에 한다. 추측 셀렉터는 [미확인] 주석과 함께 두고 실패 시 no-op 한다.
 
 ## 3. 셰이더·수치 일관성
 

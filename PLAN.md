@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.8 (2026-10-01, M2 판정 완료·G3c 통과·M4 체감 기록)
+> 버전: v1.9 (2026-10-01, D-M3 상세 계획)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -172,13 +172,75 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M0 | 골격 + 훅 | .claude/hooks/require-plan.sh, settings.json, package.json(devDeps: eslint, prettier, playwright), pytest, ci.yml(ubuntu), STATUS.md 시작 | Sonnet 본 세션(설정·스크립트) | → verify: 부록 M0-A 훅 검증 절차 1~3 통과. `npm test`, `pytest sim` 통과(빈 테스트 포함). CI ubuntu green |
 | M1 | 0a 프로브 + 픽스처 + 시뮬레이션 | probe/, scripts/make-fixtures.sh, fixtures/, sim/ S1~S7 | Sonnet이 스크립트 작성, sim-runner(haiku)가 픽스처 생성·스윕 실행(반복·장출력), impl-worker ×2 병렬(probe/ ↔ sim/, 파일 비중첩) | → verify: 클라우드 단위 테스트·pytest·픽스처 검사 통과 → **사용자 Mac 0a 실행** → results/ JSON → Opus G1~G3 판정 |
 | M2 | 최소 확장 + Xcode | extension 최소판(고정 균형 프리셋), scripts/make-xcode.sh, ci.yml macOS job | Sonnet(코드, 상세는 D-M2) → **사용자 Mac에서 make-xcode.sh 실행 후 push** | → verify: GH Actions macOS `xcodebuild CODE_SIGNING_ALLOWED=NO` 성공(A15/A16) → 사용자 설치 → 0b G4 판정(Opus) |
-| M3 | 감지·수명주기 | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
+| M3 | 감지·수명주기 (상세: D-M3) | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
 | M4 | 알고리즘·프리셋 확정 | 셰이더 최종, JS 미러, 프리셋 수치 | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
 | M5 | popup + HUD | 프리셋/상세 UI, HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 | 해상도 정책 튜닝, install.md(7일 재서명, "서명되지 않은 확장 허용" 재설정) | Sonnet | → verify: 사용자 Mac 2160p60 30분 soak에서 드롭 < 1%, HUD 메모리 추세 평탄 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
+
+### D-M3. M3 상세 계획 (2026-10-01, Opus)
+
+목적: 실제 YouTube 사용 흐름(영상 이동, 화면 모드 전환, 광고, DRM·HDR 콘텐츠)에서 오버레이가 **붙어야 할 때만 붙고, 정확한 위치에 있고, 다음 영상으로 넘어가도 계속 동작**하게 한다. 화질(M4)·UI(M5)·성능 튜닝(M6)은 범위 밖이다.
+
+**M3-0. 범위**
+- 포함: SPA 이동, video 소스 교체 처리(광고 포함), video 요소 교체, DRM no-op 강화, HDR 원본 자동 스킵, 극장/전체화면/미니플레이어/리사이즈 배치, PiP 스킵, 수명주기 진단, 실제 DOM 스냅샷 기반 `tests/dom`.
+- 제외: 프리셋·슬라이더·HDR 수동 토글(M5), 페이지 위 HUD(M5), 프리셋 수치(M4), 비60fps 끊김·60Hz rAF·전체화면 비용(M6), YouTube 외 사이트.
+
+**M3-1. 상태 모델 (main.js)**
+- 상태: `idle`(대상 video 없음) → `probing`(경로 결정 중, 캔버스 숨김) → `active`(렌더) / `skipped(reason)`(붙이지 않음, 원본 표시). reason: `drm`, `hdrSource`, `pip`, `blackFrame`, `noGpu`, `disabled`.
+- **소스 단위 재시작**: 같은 video 요소에서 소스가 바뀌면(`emptied` 또는 `loadstart`, 그리고 `currentSrc` 변경) renderer의 경로 결정·frameProbe·측정 버퍼·cadence를 초기화하고 `probing`부터 다시 한다. GPU device·캔버스·파이프라인은 재사용한다.
+- **요소 교체**: `#movie_player` 아래 `video.html5-main-video`가 다른 요소로 바뀌면(MutationObserver, childList·subtree, 디바운스 250 ms) 이전 요소에서 detach하고 새 요소에 attach한다.
+- **SPA 이동**: `document`의 `yt-navigate-finish` 이벤트에서 `findMainVideo`를 다시 실행해 요소 교체 여부를 확인한다. 이벤트 이름은 detect.js 상수로 둔다(셀렉터와 같은 취급). 이벤트가 오지 않아도 위 소스 변경·MutationObserver로 동작해야 한다(이중화).
+- **스킵 기록의 수명**:
+  - `drm`: GUIDELINES 2.4-2대로 **요소 단위 영구**(같은 요소의 다음 소스에도 적용, 새로고침으로만 해제). 보수적 처리이며 사용자에게 0b 체크리스트로 알린다.
+  - `blackFrame`: **소스 단위**(소스가 바뀌면 해제). 현행 요소 단위 WeakSet을 바꾼다.
+  - `hdrSource`, `pip`: 소스·상태 단위(조건이 사라지면 재판정).
+
+**M3-2. 감지 (detect.js, 순수 함수 + 셀렉터)**
+- DRM: 현행 3신호(`mediaKeys`, `webkitKeys`, `encrypted`/`webkitneedkey` 이벤트) 유지 + 소스 변경 때마다 attach 전 재검사.
+- HDR 원본 판정 `isHdrSource({frameColorSpace, badge})`:
+  1. 1순위: `VideoFrame.colorSpace`(vf 경로·frameProbe에서 얻음)의 `transfer`가 `pq` 또는 `hlg`이면 HDR. `primaries`가 `bt2020`이고 transfer가 SDR이면 HDR로 보지 않는다(값은 diag에 기록).
+  2. 2순위: 플레이어 DOM의 HDR 표시(설정 버튼 품질 배지 등). 셀렉터는 **[미확인]**이며 M3-5 스냅샷으로 확정한다. 확정 전에는 1순위만 쓴다.
+  3. HDR이면 `skipped(hdrSource)`. ext 경로(H.264)에서는 1순위 정보가 없으므로 frameProbe의 vf 측정 1회로 colorSpace를 얻는다(렌더는 ext 유지).
+- 광고: `#movie_player`의 `ad-showing` 클래스를 진단 플래그로만 기록한다(처리는 소스 단위 재시작이 담당, 광고에도 ITM 적용).
+- PiP: `enterpictureinpicture`/`leavepictureinpicture`와 Safari `webkitpresentationmodechanged`(`webkitPresentationMode === 'picture-in-picture'`)로 판정. PiP 중 `skipped(pip)`(렌더 정지, 캔버스 숨김), 해제 시 재판정.
+- 화면 모드 판정 순수 함수: `playerMode({isFullscreen, isTheater, isMiniplayer})` → `default|theater|fullscreen|miniplayer`(진단용, 배치 로직은 공통). 극장·미니플레이어 판정 셀렉터는 M3-5 스냅샷으로 확정.
+
+**M3-3. 배치 (overlay.js)**
+- 캔버스는 계속 `.html5-video-container` 안 video 바로 뒤. 미니플레이어 전환 시 YouTube가 플레이어를 옮겨도 캔버스가 함께 옮겨지는지 확인하고, 아니면 attach 위치를 다시 잡는다(요소 교체와 같은 경로).
+- 갱신 트리거: `ResizeObserver(video)` + `ResizeObserver(container)`, `fullscreenchange`와 **`webkitfullscreenchange`**, video `loadedmetadata`·`resize`. 갱신은 rAF 1회로 모은다(같은 프레임 중복 계산 금지).
+- video 요소의 CSS 배치(`style.left/top/width/height`, `object-fit`)를 그대로 따라 contentRect를 계산한다. YouTube가 video에 직접 `left/top`을 주므로 video의 offset 기준으로 캔버스를 맞춘다.
+- 캔버스 백킹 크기 = `min(원본, 표시×DPR)`(현행 규칙) 유지. 크기 변경 시 캔버스 재configure 없이 width/height만 바꾼다(configure는 크기와 무관함, M2 동작 유지).
+
+**M3-4. 진단 (hud.js, 스키마 m2 → schemaVersion 6)**
+- `lifecycle`: `{state, skipReason, navCount, srcChanges, videoSwaps, playerMode, adShowing, pip, lastEvent, lastEventAt}`.
+- `flags.hdrSource`, `video.colorSpace`(`{primaries, transfer, matrix, fullRange}`, frameProbe에서 얻은 마지막 값).
+- 이벤트 로그 최근 30개(`{t, ev}`: nav, srcChange, swap, mode, pip, skip). 개인정보 규칙(GUIDELINES 2.6) 유지: URL은 경로+`v`만.
+
+**M3-5. DOM 스냅샷과 tests/dom**
+- 사용자 Mac에서 Safari Web Inspector 콘솔에 붙여 넣을 스냅샷 스크립트를 `scripts/dom-skeleton.js`로 둔다. `#movie_player`와 그 조상 3단계까지의 태그·id·class·주요 data-* 속성만 담은 HTML 골격(텍스트·이미지·URL 제거)을 출력한다. 상태: 기본, 극장, 전체화면, 미니플레이어, 광고 재생 중, HDR 영상(설정 메뉴 열린 상태 포함).
+- 결과를 `tests/dom/fixtures/yt-<상태>.html`로 커밋하고 Playwright WebKit 테스트로 `findMainVideo`, `playerMode`, HDR 배지 판정, 광고 플래그를 검사한다. 스냅샷 전에는 현재 최소 픽스처로 로직만 테스트하고 셀렉터 확정은 스냅샷 커밋 후에 한다.
+
+**M3-6. 작업 분할**
+- W-A(impl-worker): `detect.js`(감지 순수 함수·셀렉터 상수·이벤트 이름), `tests/dom/**`, `scripts/dom-skeleton.js`, detect 단위 테스트.
+- W-B(impl-worker): `overlay.js`(배치·트리거), overlay 단위 테스트.
+- 본 세션(Sonnet): `main.js` 상태 모델 통합, `renderer.js` 소스 단위 재시작·colorSpace 수집, `hud.js`·스키마·parse-result, 체크리스트. W-A·W-B 완료 후 통합한다.
+- 순서: 1단계(W-A·W-B 병렬, 최소 픽스처) → 2단계(본 세션 통합) → 사용자 스냅샷 수집 → 3단계(셀렉터 확정·픽스처 교체) → 사용자 M3 체크리스트.
+
+**M3-7. 검증**
+- (1) lint, `npm test`, `npm run test:dom`(로컬 Mac에서는 WebKit 실행 가능), `python3 -m pytest sim`. 상태 전이 표 테스트: 소스 변경 → probing, DRM 소스 → skipped(drm) 후 다음 소스도 skipped(drm), blackFrame 후 다음 소스 → probing, HDR → skipped(hdrSource), PiP 진입/해제.
+- (2) CI ubuntu·macos green.
+- (3) 사용자 Mac 수동 체크리스트(docs/manual-checklist.md M3 절, 회신 JSON 포함):
+  1. 홈 → 영상 A 재생 → 추천 영상 B 클릭(SPA) → B에도 오버레이(진단 `navCount`·`srcChanges` 증가, state active)
+  2. 극장 모드 ↔ 기본 ↔ 전체화면 ↔ 미니플레이어 전환 각각에서 오버레이 위치 일치, 컨트롤 클릭 가능
+  3. 창 크기 조절 중·후 위치 일치
+  4. 광고가 있는 영상에서 광고 → 본편 전환 시 오버레이 유지(검은 화면 없음)
+  5. HDR 영상(YouTube HDR 표시 영상)에서 오버레이 없음, 진단 `skipReason: hdrSource`, `video.colorSpace.transfer`
+  6. PiP 진입 시 원본 PiP 정상, 복귀 시 오버레이 재개
+  7. DRM 콘텐츠(YouTube 영화·TV 무료 영화 등 EME 사용 페이지)에서 오버레이 없음, `skipReason: drm`. 이후 같은 탭에서 일반 영상으로 이동 시 skipped(drm) 유지(새로고침 시 해제)가 정상
+- 판정: 1~6 모두 예, 7은 오버레이 없음이면 M3 완료. 실패 항목은 FIX_GUIDE로 처리.
 
 **M2 판정 완료 (2026-10-01)**: G4 통과, G3c 통과(ProMotion·창 모드, 60fps 소스). M3 착수 가능. 렌더러 입력 경로는 C절 "비디오 입력 경로"(ext → vf → copy)로 확정. M6 이월: 비60fps 소스 끊김(샘플링 위상 C-b 대 원본 cadence C-c 분리), 60Hz rAF 30회/s(A24), 전체화면 비용 측정, K1.
 
