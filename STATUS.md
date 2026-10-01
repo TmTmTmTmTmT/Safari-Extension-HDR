@@ -126,6 +126,8 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - → verify: lint 통과, npm test 206/206, test:dom 15/15, pytest sim 157/157, 과거 results parse-result 통과 / (1) 로컬 Mac. **soak·전체화면·60Hz·비60fps·4K HDR 첫 attach 효과는 미검증(사용자 Mac 필요)**
 - 해석(Opus 확인 요청): ① `SINGLE_OK_MIN = 2`를 renderer 로컬 상수로 둠(detect의 검정 기준과 같은 값, detect가 export하지 않음). ② `restartSource` 직후 첫 회차가 vf를 먼저 재서 `colorSpace`가 즉시 새 값으로 채워짐(이전 테스트의 "null로 비워짐" 기대를 "새 소스 값으로 교체"로 갱신). ③ install.md에서 [확인 필요]로 남긴 것: 안정판 Xcode 호환, "서명되지 않은 확장 허용"의 재시작 시 재설정 필요 여부, 7일 만료 정확한 기간·증상, 재서명 후 설정 유지 여부, 설정 초기화 방법, popup "JSON 저장" 링크 동작, blackFrame 재시도 방법
 
+- M6 사용자 회신(2026-10-01, 수치 JSON 없음, 사용자 보고): 재빌드·실행 후 30분 soak "문제없음", 4K HDR 첫 attach "문제없음, `frameProbe.hdrEarly` true 확인", 전체화면·60Hz·비60fps "문제없음". 드롭률·메모리 수치와 진단 JSON은 제출되지 않아 PLAN D-M6 기준(드롭 < 1%, 메모리 증가 < 15%)의 수치 검증은 [미확인]이며 사용자 판단으로 통과로 본다. M6 판정은 Opus가 게이트 판정 기록에 한다
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
