@@ -330,3 +330,53 @@ def test_v5_empty_vp9_paths_ok_and_bad_types_fail(tmp_path):
     del bad["vp9Paths"][0]["fixture"]
     r = run(write(tmp_path, "result-M1-v5-missing.json", bad))
     assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+
+
+def _m2_v5_sample():
+    d = _v4_sample()
+    d["schemaVersion"] = 5
+    d["render"]["cadence"] = {
+        "srcFps": 23.98,
+        "srcFpsNominal": 23.976,
+        "holdHist": {"1": 2, "2": 120, "3": 118, "4": 0, "5+": 1},
+        "irregular": 0.0125,
+        "skipped": 3,
+    }
+    return d
+
+
+def test_m2_v5_prints_cadence_values_only(tmp_path):
+    r = run(write(tmp_path, "result-M2-v5.json", _m2_v5_sample()))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "스키마 검증 실패" not in r.stdout
+    for s in ("cadence", "srcFpsNominal", "23.976", "irregular", "0.0125", "skipped", "hold5+", "118"):
+        assert s in r.stdout
+    for word in ("PASS", "FAIL", "통과", "판정:"):
+        assert word not in r.stdout
+
+
+def test_m2_v1_to_v4_have_no_cadence_section(tmp_path):
+    for name, d in (("v1", M2_SAMPLE), ("v2", _v2_sample()), ("v3", _v3_sample()), ("v4", _v4_sample())):
+        r = run(write(tmp_path, "result-M2-%s.json" % name, d))
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "srcFpsNominal" not in r.stdout
+
+
+def test_m2_v5_baseline_and_null_cadence_ok_and_bad_types_fail(tmp_path):
+    ok = _m2_v5_sample()
+    ok["render"].update({"mode": "baseline", "frames": 0, "path": None, "cadence": None})
+    r = run(write(tmp_path, "result-M2-v5-baseline.json", ok))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "baseline" in r.stdout
+    bad = _m2_v5_sample()
+    bad["render"]["mode"] = "bogus"
+    r = run(write(tmp_path, "result-M2-v5-bad-mode.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    bad = _m2_v5_sample()
+    bad["render"]["cadence"]["irregular"] = "0.1"
+    r = run(write(tmp_path, "result-M2-v5-bad-irregular.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    bad = _m2_v5_sample()
+    bad["render"]["cadence"]["holdHist"]["2"] = 1.5
+    r = run(write(tmp_path, "result-M2-v5-bad-hist.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout

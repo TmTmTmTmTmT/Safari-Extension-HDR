@@ -77,7 +77,7 @@ test('canvasResolution: min(원본, 표시 x DPR) (probe와 같은 사례)', () 
 
 test('normalizeSettings: 잘못된 값은 기본값', () => {
   const { normalizeSettings, KEYS, MODES } = ns.params;
-  assert.deepStrictEqual(plain(MODES), ['itm', 'identity', 'stripes']);
+  assert.deepStrictEqual(plain(MODES), ['itm', 'identity', 'stripes', 'baseline']);
   const def = { enabled: true, mode: 'itm' };
   assert.deepStrictEqual(plain(normalizeSettings(undefined)), def);
   assert.deepStrictEqual(plain(normalizeSettings(null)), def);
@@ -86,6 +86,10 @@ test('normalizeSettings: 잘못된 값은 기본값', () => {
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: false, [KEYS.mode]: 'stripes' })),
     { enabled: false, mode: 'stripes' },
+  );
+  assert.deepStrictEqual(
+    plain(normalizeSettings({ [KEYS.enabled]: true, [KEYS.mode]: 'baseline' })),
+    { enabled: true, mode: 'baseline' },
   );
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: 'yes', [KEYS.mode]: 'bogus' })),
@@ -191,7 +195,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'flags',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 4);
+  assert.strictEqual(d.schemaVersion, 5);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -561,7 +565,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 4);
+  assert.strictEqual(d.schemaVersion, 5);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -601,4 +605,137 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
     ],
     [null, null, null, null, null],
   );
+});
+
+// ---- S2 cadenceStats: 순수 함수. hold[i]는 i번째 소스 프레임을 그린 갱신 수. ----
+function holdSeq(fps, displayHz, holds) {
+  const src = [];
+  const loop = [];
+  let k = 0;
+  holds.forEach((h, i) => {
+    for (let j = 0; j < h; j++) {
+      src.push(i / fps);
+      loop.push((k++ * 1000) / displayHz);
+    }
+  });
+  return { src, loop };
+}
+
+test('cadenceStats: 24fps 소스 60Hz 3·2 반복 -> irregular 0', () => {
+  const holds = Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? 3 : 2));
+  const { src, loop } = holdSeq(24, 60, holds);
+  const c = plain(ns.hud.cadenceStats(src, loop, 60));
+  near(c.srcFps, 24);
+  assert.strictEqual(c.srcFpsNominal, 24);
+  assert.strictEqual(c.irregular, 0);
+  assert.strictEqual(c.skipped, 0);
+  assert.deepStrictEqual(c.holdHist, { 1: 0, 2: 19, 3: 19, 4: 0, '5+': 0 });
+});
+
+test('cadenceStats: 3·3·1이 섞인 시퀀스 -> 이상 유지 비율', () => {
+  // 가장자리(처음·마지막 유지)는 제외되므로 안쪽 16개 중 1이 2개.
+  const holds = [3, 2, 3, 2, 3, 3, 1, 3, 2, 3, 2, 3, 2, 3, 3, 1, 2, 3];
+  const { src, loop } = holdSeq(24, 60, holds);
+  const c = plain(ns.hud.cadenceStats(src, loop, 60));
+  assert.strictEqual(c.irregular, 2 / 16);
+  assert.strictEqual(c.holdHist['1'], 2);
+});
+
+test('cadenceStats: 60fps 소스 60Hz -> holdHist 1에 집중, 29.97은 가장 가까운 값으로', () => {
+  const { src, loop } = holdSeq(60, 60, Array(100).fill(1));
+  const c = plain(ns.hud.cadenceStats(src, loop, 60));
+  assert.strictEqual(c.srcFpsNominal, 60);
+  assert.deepStrictEqual(c.holdHist, { 1: 98, 2: 0, 3: 0, 4: 0, '5+': 0 });
+  assert.strictEqual(c.irregular, 0);
+  const t = holdSeq(30000 / 1001, 60, Array(60).fill(2));
+  const c2 = plain(ns.hud.cadenceStats(t.src, t.loop, 60));
+  assert.strictEqual(c2.srcFpsNominal, 29.97);
+  near(c2.srcFps, 30000 / 1001, 1e-6);
+  assert.strictEqual(c2.irregular, 0);
+});
+
+test('cadenceStats: 소스 프레임 건너뜀 1회 -> skipped 1', () => {
+  const src = [];
+  const loop = [];
+  let k = 0;
+  for (let i = 0; i < 100; i++) {
+    if (i === 50) continue; // 그리지 못하고 지나간 소스 프레임
+    src.push(i / 60);
+    loop.push((k++ * 1000) / 60);
+  }
+  const c = plain(ns.hud.cadenceStats(src, loop, 60));
+  assert.strictEqual(c.skipped, 1);
+  assert.strictEqual(c.srcFpsNominal, 60);
+});
+
+test('cadenceStats: 500 ms 넘는 공백은 유지 길이에서 제외, 입력 부족은 null', () => {
+  const a = holdSeq(
+    24,
+    60,
+    Array.from({ length: 12 }, (_, i) => (i % 2 === 0 ? 3 : 2)),
+  );
+  const b = holdSeq(
+    24,
+    60,
+    Array.from({ length: 12 }, (_, i) => (i % 2 === 0 ? 3 : 2)),
+  );
+  // 두 구간 사이에 2초 공백. 공백에 걸친 유지(길게 늘어난 5+)가 집계되면 안 된다.
+  const src = a.src.concat(b.src.map((v) => v + 100));
+  const loop = a.loop.concat(b.loop.map((v) => v + 2000 + a.loop[a.loop.length - 1]));
+  const c = plain(ns.hud.cadenceStats(src, loop, 60));
+  assert.strictEqual(c.holdHist['5+'], 0);
+  assert.strictEqual(c.irregular, 0);
+  assert.strictEqual(c.skipped, 0);
+  const e = plain(ns.hud.cadenceStats([], [], 60));
+  assert.deepStrictEqual(e, {
+    srcFps: null,
+    srcFpsNominal: null,
+    holdHist: null,
+    irregular: null,
+    skipped: null,
+  });
+  assert.strictEqual(plain(ns.hud.cadenceStats([1, 1, 1], [0, 16, 32], 60)).srcFps, null);
+  const n = holdSeq(24, 60, [3, 2, 3, 2, 3, 2]);
+  assert.strictEqual(plain(ns.hud.cadenceStats(n.src, n.loop, null)).irregular, null);
+});
+
+test('buildDiag v5: render.cadence와 baseline 모드, 스키마 선언 일치', () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'result-schema-m2.json'), 'utf8'),
+  );
+  const { src, loop } = holdSeq(
+    24,
+    60,
+    Array.from({ length: 30 }, (_, i) => (i % 2 === 0 ? 3 : 2)),
+  );
+  const d = plain(
+    ns.hud.buildDiag({ render: { mode: 'itm', frames: 75, srcTimes: src, loopTimestamps: loop } }),
+  );
+  assert.strictEqual(d.render.displayHz, 60);
+  assert.strictEqual(d.render.cadence.srcFpsNominal, 24);
+  assert.strictEqual(d.render.cadence.irregular, 0);
+  assert.strictEqual(d.render.cadence.skipped, 0);
+  const cp = schema.properties.render.properties.cadence.properties;
+  for (const k of Object.keys(d.render.cadence)) assert.ok(k in cp, k);
+  assert.deepStrictEqual(schema.properties.render.properties.mode.enum, [
+    'itm',
+    'identity',
+    'stripes',
+    'baseline',
+    null,
+  ]);
+  assert.deepStrictEqual(
+    schema.properties.render.properties.mode.enum.filter((m) => m).sort(),
+    plain(ns.params.MODES).sort(),
+  );
+  // baseline: 소스 시각 없음 -> cadence null, loopFps는 그대로 계산
+  const b = plain(
+    ns.hud.buildDiag({
+      render: { mode: 'baseline', frames: 0, loopTimestamps: seq(1000 / 60, 100) },
+    }),
+  );
+  assert.strictEqual(b.render.cadence, null);
+  assert.strictEqual(b.render.mode, 'baseline');
+  near(b.render.loopFps, 60, 0.01);
+  assert.strictEqual(plain(ns.hud.buildDiag({})).render.cadence, null);
 });

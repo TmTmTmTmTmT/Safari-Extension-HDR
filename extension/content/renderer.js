@@ -53,6 +53,9 @@
     const copyTimes = [];
     const vfTimes = [];
     const loopTs = [];
+    // 렌더한 rAF마다 그린 소스 프레임 시각(초). loopTs와 같은 인덱스로 정렬된다 (FIX_GUIDE S2).
+    const srcTs = [];
+    let lastSrc = null;
     const api = { gpu: null, adapter: null, device: null, configure: null, configRead: null };
     const onProbe = hooks && typeof hooks.onProbe === 'function' ? hooks.onProbe : null;
     const onUndecided = hooks && typeof hooks.onUndecided === 'function' ? hooks.onUndecided : null;
@@ -95,18 +98,24 @@
       rafId = null;
     }
 
-    // video 모드에서 경로가 정해지기 전에는 렌더하지 않는다. stripes는 경로와 무관.
+    // video 모드에서 경로가 정해지기 전에는 렌더하지 않는다. stripes는 경로와 무관. baseline은 렌더하지 않는다.
     function pathReady() {
+      if (mode === 'baseline') return false;
       return mode === 'stripes' || path === 'ext' || path === 'vf' || path === 'copy';
     }
 
-    // 결정 전 video 모드에서는 캔버스를 숨겨 원본 video가 보이게 한다.
+    // 결정 전 video 모드와 baseline에서는 캔버스를 숨겨 원본 video가 보이게 한다.
     function updateVisibility() {
       if (canvas && canvas.style) canvas.style.visibility = pathReady() ? '' : 'hidden';
     }
 
+    // baseline은 렌더 없이 rAF 루프만 돈다 (FIX_GUIDE S1).
+    function loopReady() {
+      return mode === 'baseline' || pathReady();
+    }
+
     function kick() {
-      if (!running || destroyed || rafId !== null || document.hidden || !pathReady()) return;
+      if (!running || destroyed || rafId !== null || document.hidden || !loopReady()) return;
       rafId = requestAnimationFrame(tick);
     }
 
@@ -131,8 +140,10 @@
       if (!adapter) throw new Error('requestAdapter()가 null');
       device = await withTimeout(adapter.requestDevice(), GPU_TIMEOUT_MS, 'requestDevice');
       api.device = true;
+      const lostDevice = device;
       device.lost.then((info) => {
-        if (!destroyed)
+        // baseline 전환 등으로 우리가 해제한 device의 lost는 오류가 아니다.
+        if (!destroyed && device === lostDevice)
           fail(new Error('device.lost ' + info.reason + ' ' + info.message), 'device.lost');
       });
       device.addEventListener('uncapturederror', (ev) => fail(ev.error, 'uncapturederror'));
@@ -252,6 +263,8 @@
 
     // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
     function renderOnce() {
+      lastSrc = null;
+      if (mode === 'baseline') return false;
       const isVideo = mode !== 'stripes';
       if (isVideo && (video.readyState < 2 || !pathReady())) return false;
       const useCopy = isVideo && path === 'copy';
@@ -308,6 +321,15 @@
         pass.draw(3);
         pass.end();
         device.queue.submit([enc.finish()]);
+        // 이번에 그린 소스 프레임 시각(초). vf는 frame.timestamp(us), 그 외는 video.currentTime (FIX_GUIDE S2).
+        if (isVideo) {
+          const t = useVf
+            ? frame.timestamp === undefined
+              ? NaN
+              : frame.timestamp / 1e6
+            : video.currentTime;
+          lastSrc = typeof t === 'number' && Number.isFinite(t) ? t : null;
+        }
         return true;
       } finally {
         if (frame) closeFrame(frame);
@@ -318,17 +340,23 @@
       rafId = null;
       if (!running || destroyed) return;
       const t0 = performance.now();
-      try {
-        if (renderOnce()) {
-          push(frameTimes, performance.now() - t0);
-          push(loopTs, ts);
-          frames += 1;
-        }
-      } catch (e) {
-        if (path === 'vf') fallBackFromVf(e, 'vf.render');
-        else {
-          fail(e, 'render');
-          return;
+      if (mode === 'baseline') {
+        // 기준선: 루프 타이밍만 기록하고 import·렌더·submit은 하지 않는다 (FIX_GUIDE S1).
+        push(loopTs, ts);
+      } else {
+        try {
+          if (renderOnce()) {
+            push(frameTimes, performance.now() - t0);
+            push(loopTs, ts);
+            push(srcTs, lastSrc);
+            frames += 1;
+          }
+        } catch (e) {
+          if (path === 'vf') fallBackFromVf(e, 'vf.render');
+          else {
+            fail(e, 'render');
+            return;
+          }
         }
       }
       if (onFrame) onFrame();
@@ -487,7 +515,7 @@
         const vf = await runPath(probeVf);
         const copy = await runPath(probeCopy);
         const c2d = await runPath(probeC2d);
-        if (destroyed) return;
+        if (destroyed || mode === 'baseline') return; // 진단 중 baseline으로 바뀌면 결과를 버린다
         probeN += 1;
         frameProbe = {
           at: performance.now() - createdAt,
@@ -553,7 +581,8 @@
     // 보류 중에는 재생 중일 때만 1초마다(상한 있음), 결정 후에는 재생 중일 때만 30초마다.
     // stripes 모드와 실행 중에는 건너뜀.
     function probePoll() {
-      if (probeBusy || destroyed || !running || !device || mode === 'stripes') return;
+      if (probeBusy || destroyed || !running || !device) return;
+      if (mode === 'stripes' || mode === 'baseline') return;
       if (undecided || path === 'none') return;
       if (video.readyState < 2) return;
       if (path !== null && (video.paused || video.ended)) return;
@@ -569,6 +598,7 @@
       copyTimes.length = 0;
       vfTimes.length = 0;
       loopTs.length = 0;
+      srcTs.length = 0;
     }
     const onWake = () => {
       clearRings();
@@ -591,16 +621,79 @@
       video.addEventListener('play', onWake);
       video.addEventListener('seeked', onWake);
       document.addEventListener('visibilitychange', onVisibility);
+      if (mode === 'baseline') {
+        kick();
+        return Promise.resolve();
+      }
+      return startPipeline();
+    }
+
+    // GPU 초기화와 프레임 루프·frameProbe 시작. baseline에서는 호출하지 않는다.
+    function startPipeline() {
       if (!initPromise) {
         initPromise = init().catch((e) => fail(e, 'init'));
       }
       return initPromise.then(() => {
         if (!device || destroyed || !running) return;
+        if (mode === 'baseline') {
+          // 초기화 중 baseline으로 바뀐 경우 방금 만든 GPU 자원을 바로 해제한다.
+          releaseGpu();
+          return;
+        }
         if (video.readyState >= 2) kick();
         else video.addEventListener('loadeddata', onLoaded, { once: true });
         if (probeTimer === null) probeTimer = setInterval(probePoll, PROBE_POLL_MS);
         probePoll();
       });
+    }
+
+    function stopProbeTimer() {
+      if (probeTimer !== null) clearInterval(probeTimer);
+      probeTimer = null;
+    }
+
+    // 이전 모드의 GPU 자원 해제. 진행 중인 init은 건드리지 않는다(startPipeline이 끝난 뒤 처리).
+    function releaseGpu() {
+      if (!device) return;
+      try {
+        destroyCopyTexture();
+        if (ctx) ctx.unconfigure();
+        device.destroy();
+      } catch (e) {
+        // 정리 중 오류는 무시한다.
+      }
+      device = null;
+      ctx = null;
+      sampler = null;
+      pipelines = null;
+      probePipeline = null;
+      for (const k of Object.keys(copyPipelines)) delete copyPipelines[k];
+      initPromise = null;
+    }
+
+    // baseline 진입: 파이프라인·frameProbe·경로 상태를 모두 정리한다 (FIX_GUIDE S1).
+    function enterBaseline() {
+      cancel();
+      stopProbeTimer();
+      video.removeEventListener('loadeddata', onLoaded);
+      releaseGpu();
+      Object.assign(api, {
+        gpu: null,
+        adapter: null,
+        device: null,
+        configure: null,
+        configRead: null,
+      });
+      path = null;
+      frameProbe = null;
+      pendingCount = 0;
+      noneStreak = 0;
+      vfCreateFails = 0;
+      undecided = false;
+      probeDue = 0;
+      frames = 0;
+      copySkipped = 0;
+      clearRings();
     }
 
     function removeListeners() {
@@ -614,16 +707,24 @@
       running = false;
       cancel();
       removeListeners();
-      if (probeTimer !== null) clearInterval(probeTimer);
-      probeTimer = null;
+      stopProbeTimer();
     }
 
     function setMode(next) {
-      if (next !== 'itm' && next !== 'identity' && next !== 'stripes') return;
+      if (!['itm', 'identity', 'stripes', 'baseline'].includes(next)) return;
+      const prev = mode;
       mode = next;
+      if (next === 'baseline' && prev !== 'baseline') enterBaseline();
       updateVisibility();
+      if (prev === 'baseline' && next !== 'baseline') {
+        // baseline에서 나올 때는 이전 측정을 섞지 않고 GPU 초기화부터 다시 한다.
+        clearRings();
+        frames = 0;
+        if (running) startPipeline();
+        return;
+      }
       // 정지 상태에서도 변경이 보이도록 1회 렌더.
-      if (device) kick();
+      if (device || next === 'baseline') kick();
     }
 
     function destroy() {
@@ -661,6 +762,7 @@
         }),
         frameTimesMs: frameTimes.slice(),
         loopTimestamps: loopTs.slice(),
+        srcTimes: srcTs.slice(),
         frameProbe: frameProbe && Object.assign({}, frameProbe),
       };
     }

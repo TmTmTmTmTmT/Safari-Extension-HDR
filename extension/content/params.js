@@ -13,7 +13,8 @@
     hs: [0.5, 1.5],
   };
 
-  const MODES = ['itm', 'identity', 'stripes'];
+  // baseline은 진단용: 캔버스를 숨기고 rAF 루프만 돈다 (FIX_GUIDE S1, GUIDELINES 2.6-3).
+  const MODES = ['itm', 'identity', 'stripes', 'baseline'];
   const KEYS = { enabled: 'sdrhdr.enabled', mode: 'sdrhdr.mode', diag: 'sdrhdr.diag' };
   const DEFAULTS = { enabled: true, mode: 'itm' };
 

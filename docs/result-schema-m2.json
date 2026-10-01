@@ -85,7 +85,11 @@
       "type": "object",
       "required": ["mode", "frames", "loopFps", "jsP50", "jsP95"],
       "properties": {
-        "mode": { "type": ["string", "null"] },
+        "mode": {
+          "type": ["string", "null"],
+          "enum": ["itm", "identity", "stripes", "baseline", null],
+          "description": "baseline은 schemaVersion 5 이상의 진단용: 캔버스를 숨기고 rAF 루프만 돈다(렌더 없음, frames 0, path null)."
+        },
         "frames": { "type": ["number", "null"] },
         "loopFps": { "type": ["number", "null"] },
         "jsP50": { "type": ["number", "null"] },
@@ -102,6 +106,39 @@
         "displayMissRate": {
           "type": ["number", "null"],
           "description": "schemaVersion 3 이상. 콜백 간격 > 1.5/displayHz를 놓친 갱신으로 센 비율."
+        },
+        "cadence": {
+          "type": ["object", "null"],
+          "description": "schemaVersion 5 이상. 샘플링 cadence(렌더한 rAF마다 그린 소스 프레임 시각 기준). 렌더 기록이 없으면(baseline 포함) null.",
+          "properties": {
+            "srcFps": {
+              "type": ["number", "null"],
+              "description": "서로 다른 소스 시각 간격 중앙값의 역수(원값)."
+            },
+            "srcFpsNominal": {
+              "type": ["number", "null"],
+              "description": "23.976/24/25/29.97/30/50/59.94/60 중 srcFps에 가장 가까운 값."
+            },
+            "holdHist": {
+              "type": ["object", "null"],
+              "description": "같은 소스 프레임을 연속으로 그린 갱신 수의 횟수 분포. 500 ms 초과 공백과 구간 경계의 잘린 유지는 제외.",
+              "properties": {
+                "1": { "type": "integer" },
+                "2": { "type": "integer" },
+                "3": { "type": "integer" },
+                "4": { "type": "integer" },
+                "5+": { "type": "integer" }
+              }
+            },
+            "irregular": {
+              "type": ["number", "null"],
+              "description": "이상 유지 길이(floor/ceil(displayHz/srcFpsNominal))에 들지 않는 유지 구간의 비율."
+            },
+            "skipped": {
+              "type": ["integer", "null"],
+              "description": "소스 시각 간격이 1/srcFps의 1.5배를 넘은 횟수."
+            }
+          }
         },
         "copyMsP50": {
           "type": ["number", "null"],

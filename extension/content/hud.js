@@ -79,6 +79,81 @@
     return missed / ((measuredMs / 1000) * displayHz);
   }
 
+  const NOMINAL_FPS = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
+  const HOLD_KEYS = ['1', '2', '3', '4', '5+'];
+
+  // 순수: 소스 프레임 시각(초)과 rAF 콜백 시각(ms)으로 샘플링 cadence를 요약한다 (FIX_GUIDE S2).
+  // 두 배열은 같은 인덱스로 정렬된 렌더 1회분이다. 짝이 유효하지 않은 항목은 버린다.
+  // 콜백 간격이 500 ms를 넘는 곳에서 구간을 나누고, 구간의 처음·마지막 유지 구간(경계에서 잘렸을 수 있음)은 holdHist에서 뺀다.
+  // 이상 유지 길이 집합: displayHz/srcFps가 정수에 0.01 이내면 그 정수, 아니면 {floor, ceil}.
+  function cadenceStats(srcTimes, loopTimes, displayHz) {
+    const empty = {
+      srcFps: null,
+      srcFpsNominal: null,
+      holdHist: null,
+      irregular: null,
+      skipped: null,
+    };
+    const src = Array.isArray(srcTimes) ? srcTimes : [];
+    const loop = Array.isArray(loopTimes) ? loopTimes : [];
+    const n = Math.min(src.length, loop.length);
+    const ok = (v) => typeof v === 'number' && Number.isFinite(v);
+    const segments = [];
+    let seg = null;
+    let prevLoop = null;
+    for (let i = 0; i < n; i++) {
+      if (!ok(src[i]) || !ok(loop[i])) continue;
+      if (seg === null || (prevLoop !== null && loop[i] - prevLoop > LOOP_BREAK_MS)) {
+        seg = [];
+        segments.push(seg);
+      }
+      seg.push(src[i]);
+      prevLoop = loop[i];
+    }
+    if (segments.length === 0) return empty;
+
+    // 구간별 유지 길이(같은 소스 시각을 연속으로 그린 횟수)와 서로 다른 소스 시각 간격.
+    const holdRuns = [];
+    const diffs = [];
+    for (const times of segments) {
+      const runs = [];
+      let count = 0;
+      for (let i = 0; i < times.length; i++) {
+        if (i > 0 && times[i] === times[i - 1]) {
+          count += 1;
+          continue;
+        }
+        if (i > 0) {
+          runs.push(count);
+          const d = times[i] - times[i - 1];
+          if (d > 0 && d <= LOOP_BREAK_MS / 1000) diffs.push(d);
+        }
+        count = 1;
+      }
+      runs.push(count);
+      if (runs.length > 2) holdRuns.push(...runs.slice(1, -1));
+    }
+    const med = percentile(diffs, 50);
+    if (med === null) return empty;
+    const srcFps = 1 / med;
+    let nominal = NOMINAL_FPS[0];
+    for (const f of NOMINAL_FPS) if (Math.abs(f - srcFps) < Math.abs(nominal - srcFps)) nominal = f;
+
+    const holdHist = {};
+    for (const k of HOLD_KEYS) holdHist[k] = 0;
+    for (const h of holdRuns) holdHist[h >= 5 ? '5+' : String(h)] += 1;
+
+    let irregular = null;
+    if (holdRuns.length > 0 && displayHz > 0) {
+      const r = displayHz / nominal;
+      const allowed =
+        Math.abs(r - Math.round(r)) < 0.01 ? [Math.round(r)] : [Math.floor(r), Math.ceil(r)];
+      irregular = holdRuns.filter((h) => !allowed.includes(h)).length / holdRuns.length;
+    }
+    const skipped = diffs.filter((d) => d > 1.5 * med).length;
+    return { srcFps, srcFpsNominal: nominal, holdHist, irregular, skipped };
+  }
+
   // 순수: 경로와 v 쿼리만 남긴다 (GUIDELINES 2.6-1). URL 전역이 없는 환경을 위해 정규식으로 파싱.
   function sanitizePageUrl(href) {
     const m = /^https?:\/\/[^/?#]+(\/[^?#]*)?(?:\?([^#]*))?/.exec(String(href || ''));
@@ -163,10 +238,12 @@
       displayHz === null
         ? null
         : displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], displayHz);
+    const cad = cadenceStats(render.srcTimes, loopTs, displayHz);
+    const hasCadence = Array.isArray(render.srcTimes) && render.srcTimes.length > 0;
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 4,
+      schemaVersion: 5,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -212,6 +289,15 @@
         path: ['ext', 'vf', 'copy', 'pending'].includes(render.path) ? render.path : null,
         displayHz,
         displayMissRate: miss === null ? null : Math.round(miss * 1e5) / 1e5,
+        cadence: hasCadence
+          ? {
+              srcFps: cad.srcFps === null ? null : Math.round(cad.srcFps * 100) / 100,
+              srcFpsNominal: cad.srcFpsNominal,
+              holdHist: cad.holdHist,
+              irregular: cad.irregular === null ? null : Math.round(cad.irregular * 1e4) / 1e4,
+              skipped: cad.skipped,
+            }
+          : null,
         copyMsP50: round2(percentile(copyTimes, 50)),
         copyMsP95: round2(percentile(copyTimes, 95)),
         copySkipped: numOrNull(render.copySkipped),
@@ -242,6 +328,7 @@
     meanBrightness,
     estimateDisplayHz,
     displayMissRate,
+    cadenceStats,
     normalizeFrameProbe,
     buildDiag,
   };

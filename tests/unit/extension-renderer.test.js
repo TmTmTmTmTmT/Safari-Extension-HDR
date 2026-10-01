@@ -178,6 +178,7 @@ function setup({
       constructor() {
         if (state.vfNewErr) throw state.vfNewErr;
         this.isFrame = true;
+        if (state.vfTs !== undefined) this.timestamp = state.vfTs;
         this.closed = 0;
         state.calls.push('new VideoFrame');
         state.frames.push(this);
@@ -811,4 +812,105 @@ test('Q2: play·seeked·가시 복귀 시 루프·JS·복사 버퍼를 비운다
     assert.ok(s.renderer.getStats().loopTimestamps.length > 0);
   }
   s.renderer.destroy();
+});
+
+// ---- S1 baseline / S2 소스 시각 기록: stub 검사. 실제 WebGPU·VideoFrame 동작 검증이 아니다. ----
+
+test('S1: baseline은 캔버스를 숨기고 rAF 루프만 돌며 GPU·frameProbe·경로 결정을 하지 않는다', async () => {
+  const s = setup({ readyState: 4, paused: false, mode: 'baseline' });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  assert.strictEqual(s.raf.length, 1);
+  for (let i = 0; i < 5; i++) {
+    const q = s.raf.splice(0);
+    q.forEach((fn) => fn(i * 16.7));
+  }
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.mode, 'baseline');
+  assert.strictEqual(st.loopTimestamps.length, 5);
+  assert.deepStrictEqual([st.frames, st.path, st.frameProbe], [0, null, null]);
+  assert.deepStrictEqual([...st.srcTimes], []);
+  assert.deepStrictEqual([...st.frameTimesMs], []);
+  assert.deepStrictEqual(
+    [s.submits, s.renders, s.calls.length, s.intervals.length, st.api.gpu],
+    [0, 0, 0, 0, null],
+  );
+  assert.ok(s.raf.length === 1, 'loop continues while playing');
+  s.renderer.destroy();
+});
+
+test('S1: itm에서 baseline으로 바꾸면 파이프라인·타이머·측정을 정리하고, 되돌리면 다시 결정한다', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, vf: 60, copy: 0, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  s.video.currentTime = 1;
+  s.flush();
+  let st = s.renderer.getStats();
+  assert.strictEqual(st.path, 'vf');
+  assert.ok(st.frames > 0 && st.frameProbe);
+  const probesBefore = s.probes.length;
+  s.renderer.setMode('baseline');
+  assert.strictEqual(s.intervals[0], null, '진단 타이머 해제');
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  st = s.renderer.getStats();
+  assert.deepStrictEqual(
+    [st.mode, st.path, st.frames, st.frameProbe, st.srcTimes.length, st.api.device],
+    ['baseline', null, 0, null, 0, null],
+  );
+  const submits = s.submits;
+  s.flush();
+  s.flush();
+  assert.strictEqual(s.submits, submits, 'baseline은 submit하지 않는다');
+  assert.strictEqual(s.probes.length, probesBefore);
+  assert.ok(s.renderer.getStats().loopTimestamps.length > 0);
+  // 되돌리면 GPU를 다시 초기화하고 경로를 새로 결정한다.
+  s.renderer.setMode('itm');
+  await s.settle();
+  assert.ok(s.intervals.length >= 2 && typeof s.intervals[s.intervals.length - 1] === 'function');
+  s.intervals[s.intervals.length - 1]();
+  await s.settle();
+  s.flush();
+  st = s.renderer.getStats();
+  assert.strictEqual(st.path, 'vf');
+  assert.ok(st.api.device === true && st.frames > 0);
+  s.renderer.destroy();
+});
+
+test('S1: baseline에서는 DRM 검사용 onFrame 외에 렌더 관련 호출이 없다(destroy 포함)', async () => {
+  const s = setup({ readyState: 4, paused: false, mode: 'baseline' });
+  await s.renderer.start();
+  s.flush();
+  s.fire('play');
+  s.fire('seeked');
+  s.renderer.destroy();
+  assert.strictEqual(s.listeners.play.size, 0);
+  assert.strictEqual(s.listeners.seeked.size, 0);
+  assert.deepStrictEqual(s.calls, []);
+});
+
+test('S2: vf 경로는 frame.timestamp(us)->초, ext 경로는 video.currentTime을 렌더마다 기록하고 play에서 비운다', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, vf: 60, copy: 0, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'vf');
+  s.vfTs = 1500000;
+  s.flush();
+  s.vfTs = 1541667;
+  s.flush();
+  const st = s.renderer.getStats();
+  assert.deepStrictEqual([...st.srcTimes.slice(-2)], [1.5, 1.541667]);
+  assert.strictEqual(st.srcTimes.length, st.loopTimestamps.length);
+  s.fire('play');
+  assert.strictEqual(s.renderer.getStats().srcTimes.length, 0);
+  s.renderer.destroy();
+
+  const e = setup({ readyState: 4, paused: false });
+  await e.renderer.start();
+  await e.settle();
+  assert.strictEqual(e.renderer.getStats().path, 'ext');
+  e.video.currentTime = 2.5;
+  e.flush();
+  assert.strictEqual(e.renderer.getStats().srcTimes.slice(-1)[0], 2.5);
+  e.renderer.destroy();
 });

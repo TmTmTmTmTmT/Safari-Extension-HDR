@@ -368,8 +368,15 @@ def summarize_m2(name, data):
     if any(k in render for k in ("vfMsP50", "vfMsP95")):  # schemaVersion 4 이상
         v3_cols = v3_cols + ["vfMsP50", "vfMsP95"]
     if any(k in render for k in v3_cols):  # schemaVersion 3 이상. v1/v2 파일은 건너뛴다.
-        print("\nrender 비용 진단 (v3~v4, 값만)")
+        print("\nrender 비용 진단 (v3~v5, 값만)")
         print(table(v3_cols, [[fmt(render.get(c)) for c in v3_cols]]))
+    cad = render.get("cadence")
+    if isinstance(cad, dict):  # schemaVersion 5 이상. 값만 출력하고 판정하지 않는다.
+        hist = cad.get("holdHist") if isinstance(cad.get("holdHist"), dict) else {}
+        cols = ["srcFps", "srcFpsNominal", "irregular", "skipped"] + ["hold" + k for k in ("1", "2", "3", "4", "5+")]
+        row = [fmt(cad.get(c)) for c in cols[:4]] + [fmt(hist.get(k)) for k in ("1", "2", "3", "4", "5+")]
+        print("\nrender cadence (v5, 값만)")
+        print(table(cols, [row]))
     errs = data.get("errors") or []
     print("errors (%d)" % len(errs))
     if errs:

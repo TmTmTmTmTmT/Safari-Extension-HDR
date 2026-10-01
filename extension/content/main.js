@@ -80,10 +80,10 @@
   }
 
   // N2: 선택된 경로의 출력이 연속 2회 검으면 detach (detach 방향으로만 작동, GUIDELINES 2.4-3).
-  // stripes 모드는 video를 그리지 않으므로 가드를 적용하지 않는다.
+  // stripes 모드는 video를 그리지 않고 baseline은 렌더하지 않으므로 가드를 적용하지 않는다.
   function onProbe(a, probe, path) {
     if (cur !== a) return;
-    if (!settings || settings.mode === 'stripes') {
+    if (!settings || settings.mode === 'stripes' || settings.mode === 'baseline') {
       a.blackStreak = 0;
       return;
     }
@@ -211,6 +211,7 @@
             frames: last.render.frames,
             frameTimesMs: last.render.frameTimesMs,
             loopTimestamps: last.render.loopTimestamps,
+            srcTimes: last.render.srcTimes,
             path: last.render.path,
             copyTimesMs: last.render.copyTimesMs,
             vfTimesMs: last.render.vfTimesMs,

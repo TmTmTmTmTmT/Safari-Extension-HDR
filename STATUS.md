@@ -51,6 +51,13 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
 - Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
 
+## M2 S 회차 구현 (FIX_GUIDE S1~S3, 구현 완료 · Mac 확인 대기)
+
+- S1 popup 진단 모드 `baseline`(캔버스 숨김, rAF만 돌리고 import·렌더·submit 없음, frameProbe·경로 결정·N2 가드 제외, DRM 검사는 유지), S2 샘플링 cadence 지표(`render.cadence`: srcFps·srcFpsNominal·holdHist·irregular·skipped, 진단 schemaVersion 5), S3 체크리스트 0b "끊김 원인 분리 절차"(이전 소절은 "0b 이전 회차 절차"로 접음)
+- → verify: lint 통과, npm test 129/129, pytest sim 106/106, results 전체 parse-result rc=0 / (1). Safari에서 baseline 동작, `VideoFrame.timestamp` 값, cadence 값의 의미는 미검증 / (3)
+- Opus 확인 필요(구현 선택): (a) holdHist·irregular에서 구간 경계의 첫·마지막 유지 구간 제외 (b) 이상 유지 길이 집합은 `displayHz/srcFpsNominal`이 정수에 0.01 이내면 그 정수 하나, 아니면 {floor, ceil} (c) baseline의 frames 0·path null·cadence null (d) baseline 진입 시 GPU device·canvas 설정 해제, 나올 때 재초기화
+- 다음: 사용자 Mac에서 S3 절차(밝기 최대, `baseline`/`itm`/확장 off 비교, 60Hz 표기·프로브 G3 매트릭스 재실행) → JSON 회신 → Opus가 S4 표로 판정
+
 ## M2 0b 4차 회신 (2026-10-01, R4 절차, 사용자 Mac)
 
 - vf 경로 동작: 영상 2개(vF5oXa1cVEg 3840×2160, MR_53SGVXXc 3840×1920) 모두 `render.path: vf`, errors 없음, vfErr 없음(content script에서 VideoFrame 사용 가능 → A23의 isolated world 항목 확인). 오버레이가 "거의 바로" 뜸(Q1 결함 해소) / (3)

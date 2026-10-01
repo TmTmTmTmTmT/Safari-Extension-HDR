@@ -62,7 +62,23 @@
 - 조건마다 popup의 진단 JSON을 "복사"로 복사해 `results/result-M2-<YYYYMMDD>-<전원>-<밝기>-<해상도>-<모드>.json`으로 저장한다. "JSON 저장" 링크의 Safari popup 동작은 [미확인]이므로 복사를 기본 경로로 한다. 전원은 `ac`, 밝기는 `mid`, 해상도는 `1080p60`/`2160p60`, 모드는 `stripes`/`identity`/`itm`으로 적는다.
 - 확인하지 못한 항목은 비워 두지 말고 [미확인]으로 적는다.
 
-### 0b VideoFrame 경로 확인 절차 (FIX_GUIDE R4)
+### 0b 끊김 원인 분리 절차 (FIX_GUIDE S1~S3)
+
+확장 렌더가 끊김의 원인인지 가르기 위한 절차다. 이 클라우드 환경에서는 Safari 확장·WebGPU·`VideoFrame` 동작을 검증하지 못했다. 확인하지 못한 항목은 [미확인]으로 적는다. 이 절차가 아래 "이전 회차" 소절들을 대체한다.
+
+1. `git pull` → Xcode Run → Safari 재시작, "서명되지 않은 확장 허용"을 다시 확인한다. 전원 연결, 저전력 모드 끔, ProMotion, 밝기 **최대**(체감이 잘 되는 조건).
+2. 영상마다(vF5oXa1cVEg, MR_53SGVXXc, 그리고 확실한 60fps 영상 1개) Stats for nerds의 `Current / Optimal Res`에 표시된 `@fps` 값을 적는다.
+3. 같은 영상, 창 모드, 각 30초씩 일시정지 없이 아래를 한다. 영상마다 페이지를 새로 로드하고, 모드를 바꾼 뒤에도 30초를 새로 잰다.
+   - popup 모드 `baseline` → popup JSON 복사·저장
+   - popup 모드 `itm` → popup JSON 복사·저장, 끊김 육안(없음/가끔/자주)
+   - popup에서 확장 끔 → 끊김 육안(없음/가끔/자주). **확장 off에서도 같은 끊김이 보이는지가 핵심**
+4. 60Hz 확인: 시스템 설정 → 디스플레이 → 주사율 목록의 정확한 표기(예: "60Hz", "59.94Hz", "ProMotion")를 적고 60Hz로 바꾼 뒤, 프로브 P0-4 "G3 진단 일괄 측정"을 1회 실행해 JSON을 export한다(0a 4차와 같은 절차로 30회/s 여부를 비교). 끝나면 ProMotion으로 되돌린다.
+
+`baseline`은 진단용 모드다: 캔버스를 숨겨 원본이 보이고, rAF 루프만 돌며 렌더·submit을 하지 않는다. JSON의 `render.mode`가 `baseline`이고 `render.path`는 null, `render.frames`는 0이다. 파일명은 `results/result-M2-<YYYYMMDD>-ac-max-<해상도>-<baseline|itm>-<영상ID>.json` 형식을 쓴다. 판정 자료: `render.displayMissRate`(baseline과 itm 비교), `render.displayHz`, `render.loopFps`, `render.cadence`(srcFps, srcFpsNominal, holdHist, irregular, skipped; itm에서만 채워짐), `render.videoDropped/videoTotal`. `python3 scripts/parse-result.py`가 값만 표로 출력한다(판정 없음).
+
+### 0b 이전 회차 절차 (보관, 위 "끊김 원인 분리 절차"로 대체됨)
+
+#### 0b VideoFrame 경로 확인 절차 (FIX_GUIDE R4)
 
 확장은 첫 frameProbe 결과로 `ext` → `vf` → `copy` 순서로 처음 비검정인 경로를 고른다(`render.path`). 아래 순서로 확인하며, 이 절차가 아래 "복사 경로 확인 절차"와 "경로 보류·측정 창 확인 절차"를 대체한다. 확인하지 못한 항목은 [미확인]으로 적는다. 이 클라우드 환경에서는 `VideoFrame`·WebGPU·Safari 확장 동작을 검증하지 못했다.
 
@@ -76,7 +92,7 @@
 
 파일명은 `results/result-M2-<YYYYMMDD>-ac-mid-<해상도>-itm-vf-<window|fullscreen>[-60hz]-<영상ID>.json` 형식으로 둔다. 판정 자료: `render.path`, `render.vfMsP50/P95`, `render.displayMissRate`, `render.displayHz`, `render.videoDropped/videoTotal`, `frameProbe.vf/vfErr/vfSyncMs`. `python3 scripts/parse-result.py`가 값만 표로 출력한다.
 
-### 0b 복사 경로 확인 절차 (FIX_GUIDE P4)
+#### 0b 복사 경로 확인 절차 (FIX_GUIDE P4)
 
 VP9 영상에서 외부 텍스처가 검어(PLAN.md A21) 확장은 첫 frameProbe 결과로 복사 경로(`render.path:"copy"`)를 고른다. 아래 순서로 확인한다. 확인하지 못한 항목은 [미확인]으로 적는다.
 
@@ -88,7 +104,7 @@ VP9 영상에서 외부 텍스처가 검어(PLAN.md A21) 확장은 첫 frameProb
 6. 60Hz: 시스템 설정 → 디스플레이 → 주사율을 60Hz로 바꾸고 3번만 반복한다(파일명에 `60hz`를 붙인다). 끝나면 주사율을 ProMotion으로 되돌린다.
 7. stripes: popup에서 모드를 `stripes`로 **먼저** 바꾼 뒤 페이지를 새로고침한다(가드가 이미 detach한 video에는 재attach하지 않는다). 밝기 중간에서 30초 기다린 뒤 왼쪽부터 구분되는 마지막 줄 번호를 적는다(줄은 1.0 / 1.25 / 1.5 / 2 / 3 / 4 / 6 / 8 / 16 순서).
 
-### 0b 경로 보류·측정 창 확인 절차 (FIX_GUIDE Q1·Q2, Q4-1·2)
+#### 0b 경로 보류·측정 창 확인 절차 (FIX_GUIDE Q1·Q2, Q4-1·2)
 
 1. `git pull` → Xcode Run 재실행 → Safari 재시작 후 "서명되지 않은 확장 허용"을 다시 확인한다(Q1·Q2 반영 확인용).
 2. 전원 연결, 밝기 중간, 창 모드, 같은 YouTube 영상 2160p60, 모드 `itm`. 페이지를 새로 열어 재생을 시작하고 **재생 시작 직후 검은 화면이 없이 원본이 보이다가 오버레이로 바뀌는지**, 바뀌기까지 몇 초 걸렸는지 한 줄 적는다([미확인]이면 그렇게 적는다). 재생 중 30초 뒤 **일시정지하지 말고** popup JSON을 복사해 `results/result-M2-<날짜>-ac-mid-2160p60-itm-q-window.json`으로 저장한다. `render.path`가 `pending`이면(errors에 `PathUndecided` 포함 여부도) 그대로 적는다.
