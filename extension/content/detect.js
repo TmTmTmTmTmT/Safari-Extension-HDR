@@ -7,6 +7,23 @@
     video: 'video.html5-main-video',
   };
 
+  // YouTube 이벤트·클래스 이름도 셀렉터와 같이 이 파일에만 둔다 (GUIDELINES 2.7-1).
+  const NAV_EVENT = 'yt-navigate-finish';
+  const PIP_EVENTS = [
+    'enterpictureinpicture',
+    'leavepictureinpicture',
+    'webkitpresentationmodechanged',
+  ];
+  const AD_CLASS = 'ad-showing';
+  const PIP_PRESENTATION_MODE = 'picture-in-picture';
+  const HDR_TRANSFERS = ['pq', 'hlg'];
+  // [미확인] 아래 셀렉터는 추측값이다. M3-5 DOM 스냅샷 커밋 후 확정한다 (GUIDELINES 2.7-4).
+  const MODE_SELECTORS = {
+    theater: 'ytd-watch-flexy[theater]',
+    miniplayer: 'ytd-miniplayer[active]',
+    hdrBadge: '.ytp-hdr-badge',
+  };
+
   // 순수: DRM 신호가 하나라도 있으면 true (GUIDELINES 2.4).
   function isDrm(sig) {
     const s = sig || {};
@@ -110,8 +127,83 @@
     }
   }
 
+  // 순수: HDR 원본 판정 (PLAN D-M3 M3-2). 1순위 VideoFrame.colorSpace.transfer, 정보가 없을 때만 2순위 DOM 배지.
+  // primaries가 bt2020이어도 SDR transfer면 HDR이 아니다.
+  function isHdrSource(input) {
+    const i = input || {};
+    const cs = i.frameColorSpace;
+    const transfer = cs && typeof cs === 'object' ? cs.transfer : null;
+    if (typeof transfer === 'string' && transfer) return HDR_TRANSFERS.includes(transfer);
+    return i.badge === true;
+  }
+
+  // 순수: 화면 모드 우선순위 fullscreen > miniplayer > theater > default (진단용).
+  function playerMode(flags) {
+    const f = flags || {};
+    if (f.isFullscreen) return 'fullscreen';
+    if (f.isMiniplayer) return 'miniplayer';
+    if (f.isTheater) return 'theater';
+    return 'default';
+  }
+
+  // 순수: PiP 여부. Safari webkitPresentationMode 또는 표준 pictureInPictureElement.
+  function isPipActive(video, doc) {
+    try {
+      if (!video) return false;
+      return (
+        video.webkitPresentationMode === PIP_PRESENTATION_MODE ||
+        (!!doc && doc.pictureInPictureElement === video)
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // DOM: 광고 재생 중 여부. 실패 시 false.
+  function isAdShowing(doc) {
+    try {
+      const player = doc.querySelector(SELECTORS.player);
+      return !!player && player.classList.contains(AD_CLASS);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // DOM: 화면 모드·광고·HDR 배지 플래그. 셀렉터가 실패하면 해당 값은 false.
+  function readPlayerFlags(doc) {
+    const has = (sel) => {
+      try {
+        return !!doc.querySelector(sel);
+      } catch (e) {
+        return false;
+      }
+    };
+    let isFullscreen = false;
+    try {
+      isFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement);
+    } catch (e) {
+      isFullscreen = false;
+    }
+    return {
+      isTheater: has(MODE_SELECTORS.theater),
+      isMiniplayer: has(MODE_SELECTORS.miniplayer),
+      isFullscreen,
+      adShowing: isAdShowing(doc),
+      hdrBadge: has(MODE_SELECTORS.hdrBadge),
+    };
+  }
+
   globalThis.__sdrhdr.detect = {
     SELECTORS,
+    MODE_SELECTORS,
+    NAV_EVENT,
+    PIP_EVENTS,
+    AD_CLASS,
+    isHdrSource,
+    playerMode,
+    isPipActive,
+    isAdShowing,
+    readPlayerFlags,
     BLACK_STREAK_LIMIT,
     NONE_STREAK_LIMIT,
     isDrm,

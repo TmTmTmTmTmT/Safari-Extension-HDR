@@ -8,10 +8,17 @@
     // z-index는 지정하지 않는다: video 바로 뒤 DOM 순서로 컨트롤 아래를 유지 (GUIDELINES 2.3-3).
     container.insertBefore(canvas, video.nextSibling);
 
-    let observer = null;
+    let videoObserver = null;
+    let containerObserver = null;
+    let rafId = null;
 
     // video 표시 상자 안의 콘텐츠 사각형에 맞춰 위치·크기·백킹 크기를 갱신한다.
     function update() {
+      // 직접 호출이 예약 갱신을 대체하므로 같은 프레임의 중복 계산을 막는다.
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       const boxW = video.offsetWidth;
       const boxH = video.offsetHeight;
       const rect = detect.contentRect(boxW, boxH, video.videoWidth, video.videoHeight);
@@ -35,21 +42,39 @@
       return res;
     }
 
-    if (typeof ResizeObserver === 'function') {
-      observer = new ResizeObserver(() => update());
-      observer.observe(video);
+    // 한 프레임에 여러 트리거(Observer, 전체화면, 메타데이터)가 겹쳐도 계산은 1회로 합친다.
+    function schedule() {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        update();
+      });
     }
-    document.addEventListener('fullscreenchange', update);
+
+    if (typeof ResizeObserver === 'function') {
+      videoObserver = new ResizeObserver(schedule);
+      videoObserver.observe(video);
+      containerObserver = new ResizeObserver(schedule);
+      containerObserver.observe(container);
+    }
+    // Safari는 접두사 이벤트를 따로 보내는 경우가 있어 둘 다 듣는다.
+    document.addEventListener('fullscreenchange', schedule);
+    document.addEventListener('webkitfullscreenchange', schedule);
     // 메타데이터 로드·해상도 변경은 상자 크기가 그대로여서 ResizeObserver가 잡지 못한다.
-    video.addEventListener('loadedmetadata', update);
-    video.addEventListener('resize', update);
+    video.addEventListener('loadedmetadata', schedule);
+    video.addEventListener('resize', schedule);
 
     function destroy() {
-      if (observer) observer.disconnect();
-      observer = null;
-      document.removeEventListener('fullscreenchange', update);
-      video.removeEventListener('loadedmetadata', update);
-      video.removeEventListener('resize', update);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = null;
+      if (videoObserver) videoObserver.disconnect();
+      if (containerObserver) containerObserver.disconnect();
+      videoObserver = null;
+      containerObserver = null;
+      document.removeEventListener('fullscreenchange', schedule);
+      document.removeEventListener('webkitfullscreenchange', schedule);
+      video.removeEventListener('loadedmetadata', schedule);
+      video.removeEventListener('resize', schedule);
       canvas.remove();
     }
 

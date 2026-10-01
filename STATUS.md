@@ -43,6 +43,13 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 
 - M4: 기본 프리셋 수치(밝기 최대 체감 기준 균형 초안보다 약하게), P와 밝기 대응, S4/S5 기준, S6 근사·ΔE ITP 계수, 참조 HDR 이미지 부재
 
+## M3 진행 (브랜치 claude/m3-lifecycle)
+
+- 1단계 완료(미커밋): W-A detect.js(isHdrSource·playerMode·isPipActive·isAdShowing·readPlayerFlags, 이벤트·셀렉터 상수), scripts/dom-skeleton.js, tests/unit/extension-detect-m3.test.js, tests/dom/m3-detect.spec.js·픽스처 2개. W-B overlay.js(ResizeObserver video+container, rAF 합류, webkitfullscreenchange), tests/unit/extension-overlay.test.js
+- 극장·미니플레이어·HDR 배지 셀렉터는 추측값([미확인]). 스냅샷(M3-5) 후 확정
+- → verify: lint 통과, npm test 141/141, test:dom 7/7 / (1) 로컬 Mac. pytest sim은 로컬에 pytest 미설치로 미실행(`pip install --user pytest numpy`는 docs/local-session.md 준비 단계, 사용자 Mac 환경 변경이라 설치하지 않음). M3 1단계는 sim 무관
+- 미검증(사용자 Mac): 미니플레이어 전환 시 캔버스 이동 여부
+
 ## 다음 단계
 
 1. 로컬 Mac 세션 준비: docs/local-session.md 1~4단계
