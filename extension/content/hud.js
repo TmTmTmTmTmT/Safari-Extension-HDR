@@ -235,6 +235,14 @@
     };
   }
 
+  // 순수: 사용자 지정 곡선 진단 {P,k,n,g,s,hs}. 없거나 형식이 다르면 null, 값은 소수 둘째 자리.
+  function normalizeCustomDiag(c) {
+    if (!c || typeof c !== 'object') return null;
+    const out = {};
+    for (const k of ['P', 'k', 'n', 'g', 's', 'hs']) out[k] = round2(numOrNull(c[k]));
+    return out;
+  }
+
   // 순수: M3-4 lifecycle 진단. 이벤트 로그는 최근 MAX_EVENTS개, 문자열은 짧게 자른다 (URL 등 미포함).
   function normalizeLifecycle(l) {
     const x = l && typeof l === 'object' ? l : {};
@@ -280,7 +288,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 8,
+      schemaVersion: 9,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -320,7 +328,11 @@
       },
       render: {
         mode: orNull(render.mode),
-        preset: ['accurate', 'balanced', 'vivid'].includes(render.preset) ? render.preset : null,
+        preset: ['accurate', 'balanced', 'vivid', 'custom'].includes(render.preset)
+          ? render.preset
+          : null,
+        custom: normalizeCustomDiag(render.custom),
+        effectivePeak: round2(numOrNull(render.effectivePeak)),
         strength: round2(numOrNull(render.strength)),
         sharpness: round2(numOrNull(render.sharpness)),
         saturation: round2(numOrNull(render.saturation)),
@@ -355,6 +367,7 @@
         fullscreen: !!flags.fullscreen,
         blackFrame: !!flags.blackFrame,
         hdrSource: !!flags.hdrSource,
+        hud: !!flags.hud,
       },
       lifecycle: normalizeLifecycle(s.lifecycle),
       errors: (Array.isArray(s.errors) ? s.errors : []).slice(0, MAX_ERRORS).map((e) => ({
@@ -362,6 +375,84 @@
         name: orNull(e && e.name),
         message: orNull(e && e.message),
       })),
+    };
+  }
+
+  const PRESET_LABELS = {
+    accurate: '정확',
+    balanced: '균형',
+    vivid: '선명',
+    custom: '사용자 지정',
+  };
+
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  const fixed = (v, d) => (isNum(v) ? v.toFixed(d) : '-');
+  const pct = (v) => (isNum(v) ? String(Math.round(v * 100)) : '-');
+  const text = (v) => (typeof v === 'string' && v !== '' ? v : '-');
+
+  // 순수: 페이지 HUD 5줄. URL·제목 같은 개인정보 필드는 입력에 없다 (GUIDELINES 2.6).
+  function hudLines(info) {
+    const i = info && typeof info === 'object' ? info : {};
+    const state = text(i.state);
+    const skip =
+      typeof i.skipReason === 'string' && i.skipReason !== '' ? '(' + i.skipReason + ')' : '';
+    const label = Object.prototype.hasOwnProperty.call(PRESET_LABELS, i.preset)
+      ? PRESET_LABELS[i.preset]
+      : '-';
+    return [
+      state + skip + '  경로 ' + text(i.path),
+      label +
+        ' 강도 ' +
+        pct(i.strength) +
+        '%  선명 ' +
+        pct(i.sharpness) +
+        '%  채도 ' +
+        pct(i.saturation) +
+        '%',
+      '유효 피크 ×' + fixed(i.effectivePeak, 2),
+      'fps ' +
+        fixed(i.loopFps, 1) +
+        '  JS p95 ' +
+        fixed(i.jsP95, 1) +
+        'ms  누락 ' +
+        fixed(i.missPct, 1) +
+        '%',
+      'video ' + (isNum(i.videoW) ? i.videoW : '-') + 'x' + (isNum(i.videoH) ? i.videoH : '-'),
+    ];
+  }
+
+  const HUD_STYLE = [
+    'position:absolute',
+    'left:8px',
+    'top:8px',
+    'pointer-events:none',
+    'font:11px ui-monospace,monospace',
+    'color:#fff',
+    'background:rgba(0,0,0,0.55)',
+    'padding:4px 6px',
+    'border-radius:4px',
+    'white-space:pre',
+    'line-height:1.35',
+  ].join(';');
+
+  // DOM: container 바로 뒤에 넣어 DOM 순서로 캔버스 뒤·컨트롤 앞이 되게 한다(z-index 미지정).
+  function createHud(container) {
+    const parent = container && container.parentNode;
+    if (!parent) return { update() {}, destroy() {} };
+    const el = container.ownerDocument.createElement('div');
+    el.style.cssText = HUD_STYLE;
+    parent.insertBefore(el, container.nextSibling);
+    let last = null;
+    return {
+      update(lines) {
+        const t = Array.isArray(lines) ? lines.join('\n') : '';
+        if (t === last) return;
+        last = t;
+        el.textContent = t;
+      },
+      destroy() {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      },
     };
   }
 
@@ -377,5 +468,7 @@
     normalizeColorSpace,
     normalizeLifecycle,
     buildDiag,
+    hudLines,
+    createHud,
   };
 })();

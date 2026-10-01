@@ -6,15 +6,16 @@
     balanced: { P: 3.0, k: 0.45, n: 2.0, g: 1.0, s: 1.0, hs: 1.0 },
     vivid: { P: 4.0, k: 0.45, n: 2.0, g: 1.0, s: 1.2, hs: 1.0 },
   };
-  const PRESET_IDS = Object.keys(PRESETS);
-  const DEFAULT_PRESET = 'balanced';
+  // 'custom'은 상세 슬라이더로 만든 값(sdrhdr.custom)을 쓰는 가상 프리셋이다 (PLAN D-M5 M5-1).
+  const PRESET_IDS = Object.keys(PRESETS).concat('custom');
+  const DEFAULT_PRESET = 'accurate'; // 사용자 선택 (PLAN M5-0)
   const PRESET_BALANCED = PRESETS.balanced;
 
   // PLAN C절 파라미터 범위 [min, max]. 범위 정의는 이 한 곳 (GUIDELINES 3-5).
   const RANGES = {
     P: [1.0, 8.0],
     k: [0.4, 0.9],
-    n: [1.5, 4],
+    n: [2.0, 4], // 하한 1.5→2.0: n<2는 k에서 곡률이 무한대라 무릎선 위험 (PLAN M5-1)
     g: [0.8, 1.5],
     s: [0.8, 1.5],
     hs: [0.5, 1.5],
@@ -26,15 +27,19 @@
     enabled: 'sdrhdr.enabled',
     mode: 'sdrhdr.mode',
     preset: 'sdrhdr.preset',
+    custom: 'sdrhdr.custom',
+    hud: 'sdrhdr.hud',
     strength: 'sdrhdr.strength',
     sharpness: 'sdrhdr.sharpness',
     saturation: 'sdrhdr.saturation',
     diag: 'sdrhdr.diag',
   };
   // 슬라이더 범위·기본값 (PLAN D-M4a, M4-E). 강도 0 = 색 변환만, 1 = ITM 전체. 기본 0.45는 M4a 사용자 회신으로 확정.
-  const STRENGTH = { min: 0, max: 1, step: 0.01, default: 0.45 };
+  const STRENGTH = { min: 0, max: 1, step: 0.01, default: 0.53 };
   const SHARPNESS = { min: 0, max: 1, step: 0.01, default: 0 };
-  const SATURATION = { min: 0.5, max: 1.5, step: 0.01, default: 1.0 };
+  const SATURATION = { min: 0.5, max: 1.5, step: 0.01, default: 1.05 };
+  // 상세 슬라이더 step (PLAN M5-1). 범위는 RANGES 한 곳.
+  const DETAIL_STEPS = { P: 0.1, k: 0.01, n: 0.1, g: 0.01, s: 0.01, hs: 0.01 };
   const DEFAULTS = {
     enabled: true,
     mode: 'itm',
@@ -42,6 +47,8 @@
     strength: STRENGTH.default,
     sharpness: SHARPNESS.default,
     saturation: SATURATION.default,
+    custom: Object.assign({}, PRESETS.accurate),
+    hud: false,
   };
 
   // 셰이더 uniform(ItmParams) 필드 순서. WGSL 구조체와 renderer 직렬화가 이 순서를 따른다 (PLAN M4-B).
@@ -57,6 +64,34 @@
   }
   const normalizeStrength = (v) => normalizeRange(STRENGTH, v);
 
+  // 순수: 사용자 지정 곡선 값 {P,k,n,g,s,hs}. 각 값은 RANGES로 클램프하고 step으로 반올림, 누락·비숫자는 정확 프리셋 값.
+  function normalizeCustom(raw) {
+    const r = raw && typeof raw === 'object' ? raw : {};
+    const out = {};
+    for (const key of Object.keys(DETAIL_STEPS)) {
+      const [min, max] = RANGES[key];
+      out[key] = normalizeRange(
+        { min, max, step: DETAIL_STEPS[key], default: PRESETS.accurate[key] },
+        r[key],
+      );
+    }
+    return out;
+  }
+
+  // 순수: 설정 -> 곡선 파라미터. custom이면 사용자 지정 값, 아니면 프리셋 값.
+  function curveOf(settings) {
+    const s = settings || {};
+    if (s.preset === 'custom') return normalizeCustom(s.custom);
+    return PRESETS[s.preset] || PRESETS[DEFAULT_PRESET];
+  }
+
+  // 순수: 유효 피크 = 1 + t (P g - 1) (PLAN M5-1). 밝기 최대 헤드룸(약 2)을 넘으면 하이라이트가 잘릴 수 있다.
+  function effectivePeak(settings) {
+    const c = curveOf(settings);
+    const t = normalizeRange(STRENGTH, (settings || {}).strength);
+    return 1 + t * (c.P * c.g - 1);
+  }
+
   // 순수: storage 원본 객체(저장 키 기준) -> 유효한 설정. 잘못된 값은 기본값.
   function normalizeSettings(raw) {
     const r = raw && typeof raw === 'object' ? raw : {};
@@ -70,13 +105,15 @@
       strength: normalizeRange(STRENGTH, r[KEYS.strength]),
       sharpness: normalizeRange(SHARPNESS, r[KEYS.sharpness]),
       saturation: normalizeRange(SATURATION, r[KEYS.saturation]),
+      custom: normalizeCustom(r[KEYS.custom]),
+      hud: typeof r[KEYS.hud] === 'boolean' ? r[KEYS.hud] : DEFAULTS.hud,
     };
   }
 
   // 순수: 설정 -> uniform 배열(UNIFORM_FLOATS개 숫자). renderer가 writeBuffer로 그대로 쓴다.
   function toUniformArray(settings) {
     const s = settings || {};
-    const p = PRESETS[s.preset] || PRESETS[DEFAULT_PRESET];
+    const p = curveOf(s);
     const vals = {
       strength: normalizeRange(STRENGTH, s.strength),
       P: p.P,
@@ -100,6 +137,8 @@
     KEYS.strength,
     KEYS.sharpness,
     KEYS.saturation,
+    KEYS.custom,
+    KEYS.hud,
   ];
 
   // 아래 함수는 호출 시점에만 browser.storage에 접근한다.
@@ -136,9 +175,13 @@
     STRENGTH,
     SHARPNESS,
     SATURATION,
+    DETAIL_STEPS,
     UNIFORM_ORDER,
     UNIFORM_FLOATS,
     normalizeRange,
+    normalizeCustom,
+    curveOf,
+    effectivePeak,
     normalizeStrength,
     normalizeSettings,
     toUniformArray,

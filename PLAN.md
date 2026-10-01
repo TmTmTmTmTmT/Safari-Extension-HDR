@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.16 (2026-10-01, M4-A 결과로 프리셋 수치 확정, M4-B 착수)
+> 버전: v1.17 (2026-10-01, M4 판정, D-M5 상세 계획)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -149,7 +149,7 @@ results/                       # 사용자 회신 JSON
 |---|---|---|---|---|
 | 피크 배율 P | 1.0–8.0 | 2.0 | 3.0 | 4.0 |
 | 확장 시작 k | 0.4–0.9 | 0.5 | 0.45 | 0.45 |
-| 곡선 지수 n | 1.5–4 | 2.0 | 2.0 | 2.0 |
+| 곡선 지수 n | 2.0–4 (M5에서 하한 1.5→2.0, D-M5 M5-1) | 2.0 | 2.0 | 2.0 |
 | 밝기 g | 0.8–1.5 | 1.0 | 1.0 | 1.0 |
 | 채도 s | 0.8–1.5 | 1.0 | 1.0 | 1.2 |
 | 하이라이트 채도 hs | 0.5–1.5 | 1.0 | 1.0 | 1.0 |
@@ -177,7 +177,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M3 | 감지·수명주기 (상세: D-M3) | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
 | M4a | HDR 강도 슬라이더 (상세: D-M4a) | ITM 출력과 원본 사이 선형 혼합 강도 1개, popup 슬라이더, 진단 v7 | Sonnet 본 세션(파일 간 결합이 커서 분할하지 않음) | → verify: 단위·pytest(혼합 성질) 통과 + 사용자 Mac 선호 강도 회신 |
 | M4 | 알고리즘·프리셋 확정 (상세: D-M4) | 셰이더 최종(파라미터 유니폼화), JS 미러, 프리셋 수치, 기본 강도, popup 프리셋 선택·선명도 슬라이더·채도 슬라이더(M5에서 앞당김) | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
-| M5 | popup + HUD | 상세 슬라이더 UI, **하이라이트(화이트포인트) 휘도 슬라이더**(D-M4a M4a-5), HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
+| M5 | popup + HUD (상세: D-M5) | 기본값 갱신, 상세 슬라이더 6개("하이라이트 밝기" = P, 사용자 지정 프리셋), 진단 영역 정리, 페이지 HUD, 진단 v9 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 | 해상도 정책 튜닝, install.md(7일 재서명, "서명되지 않은 확장 허용" 재설정) | Sonnet | → verify: 사용자 Mac 2160p60 30분 soak에서 드롭 < 1%, HUD 메모리 추세 평탄 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
@@ -314,6 +314,48 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
 - 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
 - M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
+
+### D-M5. M5 상세 계획 (2026-10-01, Opus)
+
+목적: 사용자가 프리셋을 출발점으로 곡선을 직접 조정하고(하이라이트 밝기 포함), 페이지 위에서 상태를 확인할 수 있게 한다. 진단용 UI는 일반 조작과 분리한다(GUIDELINES 2.6-3).
+
+**M5-0. 기본값 갱신 (M4 사용자 선택 반영)**
+- 사용자 선택(2026-10-01): 프리셋 정확, 강도 53%, 선명도 0, 채도 105%. 기본값을 이 값으로 바꾼다: `DEFAULT_PRESET = 'accurate'`, `STRENGTH.default = 0.53`, `SATURATION.default = 1.05`, `SHARPNESS.default = 0`(그대로). 근거: 단일 사용자 도구이고 사용자가 직접 고른 값이다. 정확 P=2에서 t=0.53이면 피크 1.53으로 밝기 최대 헤드룸(약 2) 안이다.
+- 이미 저장된 설정은 그대로 둔다(기본값은 저장값이 없을 때만 쓰임).
+
+**M5-1. 상세 슬라이더와 사용자 지정 프리셋 (하이라이트 슬라이더 결정, M4a-5 해소)**
+- 결정(M4a-5 (a)(b)): 별도 "하이라이트 슬라이더"를 두지 않고, 상세 슬라이더 6개 중 피크 배율 P를 **"하이라이트 밝기"**라는 이름으로 맨 위에 둔다. 강도 t는 곡선 혼합 비율로 유지한다(피크 = 1 + t(P·g − 1)). 두 값이 겹치는 것은 popup에 **유효 피크** 표시로 해결한다.
+- 상세 슬라이더(상세 영역 `<details>` 안, 기본 접힘): 하이라이트 밝기 P(1.0–8.0, 0.1), 확장 시작 k(0.4–0.9, 0.01), 곡선 지수 n(2.0–4.0, 0.1), 밝기 g(0.8–1.5, 0.01), 곡선 채도 s(0.8–1.5, 0.01), 하이라이트 채도 hs(0.5–1.5, 0.01). 범위는 `params.RANGES` 한 곳(GUIDELINES 3-5).
+- `RANGES.n` 하한을 1.5 → **2.0**으로 바꾼다(M4-A2: n<2는 k에서 곡률 무한대, 무릎선 위험). `sim/presets.py` RANGES와 sim 스윕 격자도 같은 하한으로 맞춘다(S2 격자의 n=1.5 행 제거, 성질 테스트는 유지).
+- 사용자 지정: 상세 슬라이더를 움직이면 프리셋이 `'custom'`으로 바뀌고 값은 `sdrhdr.custom`(객체 `{P,k,n,g,s,hs}`)에 저장한다. 처음 사용자 지정으로 들어갈 때는 직전 프리셋 값을 복사해 시작한다. 프리셋 select에 "사용자 지정"이 추가되고, 다른 프리셋을 고르면 상세 슬라이더가 그 프리셋 값을 보여 준다(읽기 전용 아님: 움직이면 다시 custom).
+- `normalizeCustom(raw)`: 각 값 `RANGES`로 클램프·step 반올림, 누락·비숫자는 `PRESETS.accurate` 값. `toUniformArray`는 preset이 `'custom'`이면 custom 값을 쓴다.
+- 유효 피크 표시: popup에 "유효 피크 ×N.NN"(= 1 + t(P·g − 1)). 2.0을 넘으면 "밝기 최대에서 하이라이트가 잘릴 수 있음" 안내를 같은 줄에 표시한다. 계산은 params의 순수 함수 `effectivePeak(settings)`.
+
+**M5-2. popup 정리**
+- 일반 영역(위에서 아래): 켜기, 프리셋(정확/균형/선명/사용자 지정), HDR 강도, 선명도, 채도, 유효 피크 표시, 상세 설정(`<details>` 6개 슬라이더), HUD 표시 체크박스.
+- 진단 영역(`<details>`, 기본 접힘, 제목 "진단"): 모드 select(itm/identity/stripes/baseline), 진단 JSON·복사·저장. 모드가 itm이 아니면 일반 영역의 셰이더 컨트롤 비활성(현행 유지).
+- 슬라이더 공통 동작은 M4와 같다(100 ms 저장, change 시 flush).
+
+**M5-3. 페이지 HUD (hud.js)**
+- 키 `sdrhdr.hud`(기본 false). 켜면 플레이어(`#movie_player`) 안 왼쪽 위에 작은 텍스트 상자를 둔다: `pointer-events:none`, 고정폭 글꼴 11px, 반투명 배경, z-index 지정 없음(컨트롤 아래 순서 유지 원칙과 같게 DOM 순서로 캔버스 뒤·컨트롤 앞). 셀렉터·삽입 위치는 detect.js 함수로 받는다(GUIDELINES 2.3-1).
+- 내용(1초 갱신, 진단 수집 주기와 별개로 렌더 통계만 읽음): `state/skipReason`, `path`, `preset t=xx% sh=xx% cs=xx%`, `유효 피크 ×N.NN`, `loopFps`, `JS p95`, `miss%`, `video WxH`. 개인정보 규칙(GUIDELINES 2.6) 동일: URL·제목 없음.
+- HUD는 진단용이 아니라 사용자 확인용이므로 일반 영역에 둔다(GUIDELINES 2.6-3 대상 아님). 순수 함수 `hudLines(stats, lifecycle, settings)` → 문자열 배열(테스트 대상), DOM 생성·갱신은 main.js에서 호출되는 `createHud(player)` → `{update(lines), destroy}`.
+- 비용: 1초에 한 번 textContent 갱신만 한다. 렌더 루프와 무관.
+
+**M5-4. 진단 v9**
+- `render.preset`에 `'custom'` 허용, `render.custom`(`{P,k,n,g,s,hs}` 또는 null, preset이 custom일 때만), `render.effectivePeak`, `flags.hud`. 스키마·parse-result 갱신.
+
+**M5-5. 작업 분할**
+- 1단계(본 세션 Sonnet): params(`RANGES.n`, 기본값, custom, `effectivePeak`, `toUniformArray`), sim RANGES·격자, main(custom·hud 설정 전달), renderer 변경 없음 확인, 스키마 v9. 단위 테스트.
+- 2단계(impl-worker 병렬, 파일 비중첩): W-A `popup/*`(M5-1·M5-2 UI), W-B `content/hud.js`의 HUD 부분(`hudLines`, `createHud`)과 `detect.js`의 HUD 삽입 위치 함수 + 테스트. main.js의 HUD 연결은 2단계 후 본 세션이 한다.
+- 체크리스트 M5 절(Sonnet): (1) 상세 슬라이더 반영 < 1초, 움직이면 "사용자 지정"으로 바뀌는지, 다른 프리셋 선택 시 값이 바뀌는지, 브라우저 재시작 후 사용자 지정 값 유지 (2) 하이라이트 밝기를 올릴 때 유효 피크 표시와 경고 (3) HUD 켜기/끄기, 위치(컨트롤 가리지 않음), 내용 갱신, 끊김 변화 없음 (4) 진단 영역 접힘·모드 변경 동작 (5) 기본값(설정 초기화 후 정확·53%·105%) 확인 방법: Safari 확장 설정에서 데이터 삭제가 어려우면 [미확인]으로 둔다.
+
+**M5-6. 검증**
+- (1) lint, `npm test`(params custom 직렬화·클램프·effectivePeak·hudLines 테스트 포함), `npm run test:dom`(HUD 삽입 위치 함수 픽스처 테스트), pytest sim(RANGES 변경 반영).
+- (2) CI green.
+- (3) 사용자 Mac 체크리스트 M5 절. 판정: (1)(3) 예이면 M5 완료.
+
+**M5-7. 범위 밖**: 헤드룸 자동 추정, 프리셋 이름 변경·추가 저장, 단축키, 선명도 알고리즘 고도화(M4-D), M6 항목(성능·soak·문서).
 
 ### D-M4. M4 상세 계획 (2026-10-01, Opus)
 
@@ -614,6 +656,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | G3c vf 경로(확장) 재판정 | 2026-10-01 | results/result-M2-20261001-ac-max-promotion-2160p60-{itm-vf,baseline}-9qT.json | **통과(ProMotion·창 모드)** | 60fps 소스(9qT9KyyGGhM, 3840×1920, srcFps 59.94): 누락 itm 1.8% − baseline 4.8% = −3.0%p(개정 기준 < 1%p 충족), JS p95 1 ms, vf p95 1 ms, video 드롭 0(Stats for nerds 포함), 끊김 육안 없음. cadence: 유지 1회 570 / 2회 14, irregular 2.4%, skipped 18(기준선 누락 4.8%와 같은 규모 → 페이지 부하 C-a로 봄). 이전 회차 끊김 '조금'은 비60fps 소스(vF5oXa1cVEg)에서 관찰 → C-b/C-c 미분리, M6 항목. 미측정: 전체화면, 60Hz(A24, 사용자 판단으로 생략) → M6에서 확인 |
 | M3 수명주기 | 2026-10-01 | results/result-M3-20261001-1-6.json + 사용자 보고 | **통과(범위 조정)** | 체크리스트 1 SPA(navCount 4·srcChanges 3, 소스 변경 후 약 1.2초에 판정)·2 화면 모드(극장·전체화면·기본)·3 창 크기·5 HDR 원본 스킵(transfer pq, bt2020)·7 DRM 통과. 4 광고(프리미엄 계정), 6 PiP 복귀 후 재개, 미니플레이어, 극장·미니플레이어 셀렉터 확정은 **사용자 결정으로 생략**하고 [미확인]으로 남긴다(진단용 `playerMode`만 영향, 배치·스킵 로직과 무관). PiP 진입 시 Apple 네이티브 PiP로 넘어가 확장이 동작하지 않는 것은 예상 동작. 후속: 회귀 발견 시 FIX_GUIDE. M6 후보 추가: HDR 4K 첫 frameProbe에서 `c2dSyncMs` 608 ms(메인 스레드 점유, 소스 변경·attach마다 반복 가능, 체감 보고 없음). PR #5 머지 가능 |
 | M4a 강도 슬라이더 | 2026-10-01 | 사용자 회신(체크리스트 M4a) + 진단 JSON 1개(`results/result-M4a-20261001-strength68.json`로 저장 예정) | **통과** | (a) 드래그 후 1초 안 반영. WGSL 강도 혼합 셰이더가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, frames 1220, JS p95 1 ms). 선호·뭉개짐 강도는 D-M4a M4a-6에 M4 입력으로 기록. 측정 조건 중 진단 JSON의 밝기는 미기재 |
+| M4 알고리즘·프리셋 | 2026-10-01 | results/result-M4-20261001-accurate-first.json + 사용자 회신 | **통과(범위 조정)** | 새 셰이더(uniform 파라미터·강도 혼합·채도)가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, 갱신 누락 0, JS p95 1 ms, 드롭 0). 사용자 선택: 정확 프리셋·강도 53%·선명도 0·채도 105% → M5-0에서 기본값으로 채택. 체크리스트 M4 절 중 뭉개짐 시작 강도(균형 85% 목표), 중간톤 비교, 선명도 GPU 비용·헤일로는 사용자가 원하는 설정을 찾아 측정하지 않음 → [미확인]. 선명도는 기본 0이라 비용 영향 없음, 사용자가 쓰기 시작하면 체크리스트 M4 4번으로 확인. M5 착수 |
 
 ---
 

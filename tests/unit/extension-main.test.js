@@ -83,6 +83,19 @@ async function setup(mode = 'itm') {
     t.diag = d;
   };
   const renderers = [];
+  // 페이지 HUD는 DOM이 없는 vm 환경이라 스텁으로 바꾼다 (PLAN M5-3).
+  t.huds = [];
+  ns.hud.createHud = (container) => {
+    const h = { container, lines: null, destroyed: 0 };
+    h.update = (lines) => {
+      h.lines = lines;
+    };
+    h.destroy = () => {
+      h.destroyed += 1;
+    };
+    t.huds.push(h);
+    return h;
+  };
   ns.overlay.createOverlay = () => ({
     canvas: { style: {}, width: 0, height: 0 },
     update() {},
@@ -101,7 +114,20 @@ async function setup(mode = 'itm') {
       setParams: (v) => calls.push('setParams:' + JSON.stringify(v)),
       restartSource: () => calls.push('restartSource'),
       destroy: () => calls.push('destroy'),
-      getStats: () => ({ mode, path: 'ext', frames: 0, api: {}, colorSpace: r.colorSpace }),
+      getStats: () => ({
+        mode,
+        path: 'ext',
+        frames: 0,
+        api: {},
+        colorSpace: r.colorSpace,
+        preset: 'balanced',
+        strength: 0.5,
+        sharpness: 0,
+        saturation: 1,
+        effectivePeak: 2,
+        frameTimesMs: [],
+        loopTimestamps: [],
+      }),
     };
     renderers.push(r);
     return r;
@@ -280,4 +306,78 @@ test('셰이더 설정: attach 시 hooks.settings로 전달, 변경은 바뀐 �
   const n = t.calls.filter((c) => c.startsWith('setParams')).length;
   t.settings({ ...base, strength: 0.8, sharpness: 0.4, saturation: 1.2, preset: 'vivid' }); // 같은 값은 무시
   assert.strictEqual(t.calls.filter((c) => c.startsWith('setParams')).length, n);
+});
+
+test('custom 곡선·프리셋 변경은 setParams로 custom을 함께 전달한다 (M5)', async () => {
+  const t = await setup();
+  const base = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+    custom: { P: 2, k: 0.5, n: 2, g: 1, s: 1, hs: 1 },
+  };
+  t.settings(base);
+  const n0 = t.calls.filter((c) => c.startsWith('setParams')).length;
+  t.settings({
+    ...base,
+    preset: 'custom',
+    custom: { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 },
+  });
+  const last = JSON.parse(
+    t.calls
+      .filter((c) => c.startsWith('setParams'))
+      .at(-1)
+      .slice(10),
+  );
+  assert.strictEqual(last.preset, 'custom');
+  assert.deepStrictEqual(last.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
+  assert.strictEqual(t.calls.filter((c) => c.startsWith('setParams')).length, n0 + 1);
+  assert.strictEqual(t.renderers.length, 1);
+  // custom만 바뀌어도(슬라이더 이동) 전달된다.
+  t.settings({
+    ...base,
+    preset: 'custom',
+    custom: { P: 3.1, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 },
+  });
+  const last2 = JSON.parse(
+    t.calls
+      .filter((c) => c.startsWith('setParams'))
+      .at(-1)
+      .slice(10),
+  );
+  assert.deepStrictEqual(Object.keys(last2), ['custom']);
+  assert.strictEqual(last2.custom.P, 3.1);
+});
+
+test('HUD: 설정이 켜져 있으면 attach 시 만들고 1초 주기로 갱신, 끄면 제거, detach 시 제거 (M5-3)', async () => {
+  const t = await setup();
+  const base = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+    custom: { P: 2, k: 0.5, n: 2, g: 1, s: 1, hs: 1 },
+  };
+  assert.strictEqual(t.huds.length, 0, '기본은 꺼짐(setup 설정에 hud 없음)');
+  t.settings({ ...base, hud: true });
+  assert.strictEqual(t.huds.length, 1);
+  assert.strictEqual(t.huds[0].container, t.dom.container);
+  assert.ok(Array.isArray(t.huds[0].lines) && t.huds[0].lines.length === 5);
+  assert.ok(t.huds[0].lines[0].startsWith('probing'));
+  assert.ok(t.huds[0].lines[1].startsWith('균형'));
+  t.huds[0].lines = null;
+  t.intervals.forEach((fn) => fn()); // 갱신 타이머
+  assert.strictEqual(t.huds[0].lines.length, 5);
+  t.settings({ ...base, hud: false });
+  assert.strictEqual(t.huds[0].destroyed, 1);
+  t.settings({ ...base, hud: true });
+  assert.strictEqual(t.huds.length, 2);
+  t.dom.video.fire('encrypted'); // detach
+  assert.strictEqual(t.huds[1].destroyed, 1);
+  t.intervals.forEach((fn) => fn()); // detach 후 갱신 시도는 예외 없이 무시
 });

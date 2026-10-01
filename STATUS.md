@@ -100,6 +100,17 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 
 - M4 1차 회신(2026-10-01, `results/result-M4-20261001-accurate-first.json`, 프리셋 accurate·강도 43%·선명도 0·채도 105%, 밝기 미기재): 사용자 보고 "잘됨". 새 셰이더(uniform·혼합·채도)가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, loopFps 71·displayMissRate 0·JS p95 1 ms·video 드롭 0, 30fps 소스). 체크리스트 M4 절의 나머지(프리셋 비교, 뭉개짐 시작 강도, 선명도 GPU 비용·끊김, 채도 선호)는 [미확인]. 확장 끄고 켜기를 반복한 이벤트 로그는 정상(중복 disable은 popup 모드 토글)
 
+## M5 진행 (브랜치 claude/m5-ui, 2026-10-01, Sonnet)
+
+- 1단계 완료(PLAN M5-5): `params.js` 기본값 갱신(정확·강도 0.53·채도 1.05), `RANGES.n` 하한 2.0(`sim/presets.py`·`sim/sweep.py` 격자 동일), 사용자 지정(`custom`·`normalizeCustom`·`curveOf`·`effectivePeak`·`DETAIL_STEPS`·키 `sdrhdr.custom`/`sdrhdr.hud`), renderer `setParams`가 custom 병합·getStats에 custom·effectivePeak, main이 custom 변경 전달·진단에 hud, 진단 schemaVersion 9(`render.custom`·`effectivePeak`, `flags.hud`, preset에 custom), 스키마·parse-result
+- → verify: lint 통과, npm test 181/181, test:dom 14/14, pytest sim 157/157 / (1) 로컬 Mac
+- 2단계 완료: W-A popup(프리셋 select 사용자 지정 포함, 상세 설정 슬라이더 6개 — min/max/step은 params에서, 이동 시 preset custom + custom 전체를 한 번에 저장, 유효 피크 표시와 2.0 초과 경고, 진단 영역 `<details>` 분리, HUD 체크박스, `tests/unit/extension-popup.test.js`), W-B 페이지 HUD(`hud.js`에 `hudLines(info)`·`createHud(container)` 추가, 단위·`tests/dom/m5-hud.spec.js`)
+- 본 세션 연결: main.js가 설정 `hud`가 켜진 동안 attach 때 HUD를 만들고 1초 주기로 `hudLines`(summarize·displayMissRate 재사용)로 갱신, 끄거나 detach하면 제거. 체크리스트 M5 절 추가
+- 해석(Opus 확인 요청): ① `hudLines`는 PLAN 문구(stats, lifecycle, settings)와 달리 main이 계산한 평탄한 `info` 객체 1개를 받는다. ② HUD 삽입 위치 함수를 `detect.js`가 아니라 `createHud(container)`가 `container.parentNode` 직접 사용(container는 detect.findMainVideo 결과라 셀렉터는 detect에만 남음). ③ 상세 슬라이더 표시 소수 자릿수는 `DETAIL_STEPS`에서 계산
+- → verify: lint 통과, npm test 200/200, test:dom 15/15, pytest sim 157/157 / (1) 로컬 Mac. **popup UI·HUD 표시·상세 슬라이더 반영은 미검증(사용자 Mac 필요)**
+
+- M5 1차 회신(2026-10-01, `results/result-M5-20261001-custom-hud.json`, 프리셋 custom·HUD 켬): 사용자 지정 곡선 {P2.6, k0.4, n2, g1.11, s1, hs1.03}, 강도 53%·채도 105%, 유효 피크 2.0(= 1 + 0.53 × (2.6×1.11 − 1))에서 errors 없음, path vf, 갱신 누락 6.9%·loopFps 57·JS p95 1 ms·드롭 0(HUD 켠 상태, 60fps 소스, 영상 일시정지 중 캡처). 체크리스트 M5 절의 개별 항목(반영 속도, 프리셋 전환, HUD 위치·갱신·끊김 판정 등)은 사용자 보고가 없어 [미확인]. 누락률 6.9%는 HUD 영향인지 페이지 부하인지 분리하지 않음(M2의 baseline 4.8%와 같은 규모)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

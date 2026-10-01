@@ -1027,3 +1027,36 @@ test('M4: 일시정지 상태에서 setParams는 1회 렌더를 요청한다', a
   assert.strictEqual(s.renders, before + 1);
   s.renderer.destroy();
 });
+
+test('M5: getStats는 custom일 때 곡선·유효 피크를 돌려준다, 프리셋이면 custom null', async () => {
+  const s = setup({
+    readyState: 4,
+    paused: false,
+    hooksSettings: { preset: 'balanced', strength: 0.5, sharpness: 0, saturation: 1 },
+  });
+  await s.renderer.start();
+  await s.settle();
+  let st = s.renderer.getStats();
+  assert.strictEqual(st.custom, null);
+  assert.strictEqual(st.effectivePeak, 2);
+  s.renderer.setParams({
+    preset: 'custom',
+    custom: { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 },
+  });
+  st = s.renderer.getStats();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(st.custom)), {
+    P: 2.6,
+    k: 0.5,
+    n: 2.5,
+    g: 1,
+    s: 1.1,
+    hs: 0.9,
+  });
+  assert.ok(Math.abs(st.effectivePeak - 1.8) < 1e-12);
+  // 유니폼에도 custom 값이 들어간다.
+  assert.deepStrictEqual(
+    s.uniforms[0].writes.at(-1),
+    [0.5, 2.6, 0.5, 2.5, 1, 1.1, 0.9, 0, 1, 0, 0, 0].map(Math.fround),
+  );
+  s.renderer.destroy();
+});
