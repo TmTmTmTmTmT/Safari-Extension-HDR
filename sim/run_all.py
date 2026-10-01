@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from sim import banding, budget, color, compare, headroom, refs, sweep
+from sim import banding, budget, color, compare, explore, headroom, refs, sweep
 from sim import tonecurve as tc
 from sim._md import md_table
 from sim.presets import PRESETS
@@ -35,7 +35,7 @@ def s1_report():
 
 def main():
     parts = [
-        "# 시뮬레이션 요약 (S1~S7, S10)",
+        "# 시뮬레이션 요약 (S1~S7, S10, S11)",
         "",
         "클라우드 numpy 결과이며 WebGPU/EDR/Safari 동작은 미검증(사용자 Mac 필요).",
         "",
@@ -54,6 +54,8 @@ def main():
         budget.report(),
         "",
         headroom.report(),
+        "",
+        explore.report(),
     ]
     print("\n".join(parts))
 

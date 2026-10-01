@@ -16,8 +16,8 @@ def test_steps_positive_and_finite(name):
 def test_exact_identity_below_knee():
     m = banding.measure("정확")
     v = (banding.CODES[1:]) / 255.0
-    lo = banding.tc.srgb_eotf(v) <= 0.75  # 스텝 끝점까지 항등 구간인 경우만 (EOTF/OETF 가 역함수이므로 1)
-    assert lo.sum() > 200 and np.allclose(m["amp_enc"][lo], 1.0, atol=1e-9)
+    lo = banding.tc.srgb_eotf(v) <= PRESETS["정확"].k  # 스텝 끝점까지 항등 구간인 경우만 (EOTF/OETF 가 역함수이므로 1)
+    assert lo.sum() > 150 and np.allclose(m["amp_enc"][lo], 1.0, atol=1e-9)
 
 
 def test_highlight_amplified_exact_gt_one():

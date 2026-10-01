@@ -118,15 +118,19 @@ def color_shift(rgb, params):
 
 
 def sat_hs_sweep(base="균형", s_list=(0.8, 1.0, 1.2, 1.5), hs_list=(0.5, 1.0, 1.5)):
-    """base 프리셋 곡선에서 s, hs 만 바꿔 색 패치 ΔE(채도조정 효과) 평균/최대와 최대 Δh 절대값."""
+    """base 프리셋 곡선에서 s, hs 만 바꿔 색 패치 ΔE(채도조정 효과) 평균/최대와 최대 Δh 절대값.
+    mid/hi 구분: 패치의 곡선 입력 휘도(게인 후)가 base 의 k 이하면 mid, 넘으면 hi (M4: k 가 0.45 로 내려가
+    L0.5 패치 일부도 확장 구간에 들어가므로 이름이 아니라 휘도로 나눈다)."""
     names, rgb = chroma_patches()
+    base_p = PRESETS[base].kwargs()
+    y = (tc.srgb_eotf(rgb) * base_p["g"]) @ tc.LUMA_709
+    hi = y > base_p["k"]
     rows = []
     for s in s_list:
         for hs in hs_list:
-            p = PRESETS[base].kwargs()
+            p = dict(base_p)
             p["s"], p["hs"] = s, hs
             de, dh, _ = color_shift(rgb, p)
-            hi = np.array(["L0.9" in n for n in names])
             rows.append(
                 dict(
                     s=s,

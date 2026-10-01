@@ -69,7 +69,14 @@ async function setup(mode = 'itm') {
     vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
   }
   const ns = ctx.__sdrhdr;
-  ns.params.readSettings = async () => ({ enabled: true, mode, strength: 0.5 });
+  ns.params.readSettings = async () => ({
+    enabled: true,
+    mode,
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+  });
   ns.params.subscribe = (cb) => (settingsCb = cb);
   const t = { intervals, diag: null };
   ns.params.writeDiag = async (d) => {
@@ -91,7 +98,7 @@ async function setup(mode = 'itm') {
       start: () => calls.push('start'),
       stop: () => calls.push('stop'),
       setMode: (m) => calls.push('setMode:' + m),
-      setStrength: (v) => calls.push('setStrength:' + v),
+      setParams: (v) => calls.push('setParams:' + JSON.stringify(v)),
       restartSource: () => calls.push('restartSource'),
       destroy: () => calls.push('destroy'),
       getStats: () => ({ mode, path: 'ext', frames: 0, api: {}, colorSpace: r.colorSpace }),
@@ -248,14 +255,29 @@ test('video가 사라지면 detach', async () => {
   assert.deepStrictEqual(plain(t.renderers.length), 1);
 });
 
-test('강도: attach 시 hooks.strength로 전달, 설정 변경은 setStrength만(재attach 없음)', async () => {
+test('셰이더 설정: attach 시 hooks.settings로 전달, 변경은 바뀐 값만 setParams로(재attach 없음)', async () => {
   const t = await setup();
-  assert.strictEqual(t.renderers[0].hooks.strength, 0.5);
-  t.settings({ enabled: true, mode: 'itm', strength: 0.8 });
-  assert.ok(t.calls.includes('setStrength:0.8'));
+  assert.strictEqual(t.renderers[0].hooks.settings.strength, 0.5);
+  const base = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+  };
+  t.settings({ ...base, strength: 0.8 });
+  assert.ok(t.calls.includes('setParams:{"strength":0.8}'));
   assert.strictEqual(t.renderers.length, 1);
   assert.ok(!t.calls.includes('destroy'));
-  const n = t.calls.filter((c) => c.startsWith('setStrength')).length;
-  t.settings({ enabled: true, mode: 'itm', strength: 0.8 }); // 같은 값은 무시
-  assert.strictEqual(t.calls.filter((c) => c.startsWith('setStrength')).length, n);
+  t.settings({ ...base, strength: 0.8, sharpness: 0.4, saturation: 1.2, preset: 'vivid' });
+  const last = t.calls.filter((c) => c.startsWith('setParams')).at(-1);
+  assert.deepStrictEqual(JSON.parse(last.slice('setParams:'.length)), {
+    preset: 'vivid',
+    sharpness: 0.4,
+    saturation: 1.2,
+  });
+  const n = t.calls.filter((c) => c.startsWith('setParams')).length;
+  t.settings({ ...base, strength: 0.8, sharpness: 0.4, saturation: 1.2, preset: 'vivid' }); // 같은 값은 무시
+  assert.strictEqual(t.calls.filter((c) => c.startsWith('setParams')).length, n);
 });

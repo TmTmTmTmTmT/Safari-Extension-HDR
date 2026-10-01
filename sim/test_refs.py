@@ -25,7 +25,8 @@ def test_ramp_white_equals_peak_times_gain(name):
 def test_exact_ramp_identity_below_knee():
     _, lin, _ = refs.expected(refs.ramp_rgb(), "정확")
     lin_in = tc.srgb_eotf(refs.ramp_rgb())
-    below = lin_in[:, 0] <= 0.75
+    below = lin_in[:, 0] <= PRESETS["정확"].k
+    assert below.sum() >= 4  # 램프 9점 중 항등 구간 점
     assert np.allclose(lin[below], lin_in[below], atol=1e-12)
 
 

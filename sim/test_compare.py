@@ -36,7 +36,15 @@ def test_own_matches_peak_and_midtone_preserved(name):
     p = PRESETS[name]
     m = compare.metrics(compare.own, p.P, p.k, p.n)
     assert m["peak"] == pytest.approx(p.P, rel=1e-9)
-    assert m["mid_dev_max_pct"] == 0.0  # k >= 0.55 > 0.5
+    # 지표 정의(Y<=0.5 전체)상 k<0.5 인 프리셋은 0.5 근처에서 편차가 생긴다. k 이하 구간은 항등이어야 한다.
+    _Y = compare._Y
+    f = compare.own(_Y, p.P, p.k, p.n)
+    below = _Y <= p.k
+    assert np.allclose(f[below], _Y[below], atol=1e-12)
+    if p.k >= 0.5:
+        assert m["mid_dev_max_pct"] == 0.0
+    else:
+        assert m["mid_dev_max_pct"] > 0.0  # Y in (k, 0.5] 에서 확장이 시작됨
 
 
 def test_report_marks_unconfirmed():

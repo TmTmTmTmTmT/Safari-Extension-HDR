@@ -75,6 +75,31 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - M4a 판정 통과(PLAN 게이트 기록, 2026-10-01): 슬라이더 1초 내 반영, WGSL 컴파일·동작 확인. 선호 강도 중간 40~60%/최대 40~50%, 뭉개짐 시작 중간 70~80%/최대 약 70%. 진단 JSON `results/result-M4a-20261001-strength68.json`(밝기 미기재). M4 입력(기본 강도 후보 0.45, 곡선 상단 압축·hs가 뭉개짐 주원인일 가능성 [추정])은 PLAN D-M4a M4a-6. 하이라이트(화이트포인트) 휘도 슬라이더는 M5로 이월
 - 다음 마일스톤 M4(알고리즘·프리셋 확정)는 Opus 계획부터. 이 브랜치(claude/m4-inputs)는 PLAN v1.12·v1.13 문서와 결과 JSON만 담는다
 
+## M4-A 결과 (브랜치 claude/m4-algorithm, 2026-10-01, Sonnet, sim만 변경)
+
+- 추가: `sim/explore.py`(S11, 격자 300개 × 클래스별 C1~C5 판정), `sim/test_explore.py`, `run_all`에 S11 포함. 확장 코드 변경 없음. 재현: `.venv/bin/python -m sim.explore`
+- 통과 수(S2 C¹ 검사 포함 기준): 정확 2/300, 균형 26/300, 선명 84/300. S2 C¹ 위반만 걸린 행(n=1.5 계열)을 허용하면 각각 +7, +28, +69
+- 가장 강한 통과 후보(피크 기준, 값만): 정확 P2·k0.45~0.5·n2·s1.0 amp_t1 3.09~3.33, 피크@0.45 1.45 / 균형 P3·k0.45·n2·s1.0 amp 4.35, 피크 1.9 / 선명 P4·k0.45·n2·s1.0 amp 5.29, 피크 2.35. 모두 격자 가장자리(k 최저 0.45, n 2.0)에 있어 격자가 탐색 한계를 건드린다
+- 관찰: ① amp_enc 최대는 항상 코드 254(꼭대기)이고 s와 무관, 꼭대기 기울기 f'(1)에 비례. ② P=3·k0.55 기준 n1.5 amp 4.04, n2.0 5.19, n2.5 6.34, n3.0 7.49 — n을 낮추는 것이 효과가 크다. ③ n=1.5는 S2 C¹ 검사에 걸리지만 STATUS "S2 C¹ 위반은 검사법 문제" 항목과 같은 현상으로 의심(미확인). ④ s=1.05는 음수 채널 1.33%, s=1.2는 11.34%(S4와 일치). ⑤ k≥0.45에서 미드톤(Y=0.18, 0.4)은 항상 항등(비 1.0)
+- → verify: pytest sim 149/149, lint 통과 / (1) 로컬 Mac. 수치 선택은 하지 않았다(Opus)
+
+## Opus 확인 필요 (M4-A)
+
+- n=1.5 계열을 후보로 인정할지(S2 C¹ 검사법 수정 또는 면제 결정). 인정하면 같은 피크에서 amp가 약 20% 낮다
+- 격자 확장 필요 여부: n ∈ (1.5, 2.0) 사이(예 1.75), 선명 쪽 P>4. k는 C3(≥0.45)가 하한이라 확장 불가
+- 프리셋 수치 확정(C절 표 개정)과 M4-B 착수 지시
+
+## M4-B·M4-E 구현 (브랜치 claude/m4-algorithm, 2026-10-01, Sonnet)
+
+- 프리셋 확정값 반영(PLAN M4-A2): `sim/presets.py`, `params.js` `PRESETS`(accurate/balanced/vivid), 기본 강도 0.45. sim 테스트 중 이전 초안 수치에 묶인 기대값 7곳은 임계값을 프리셋(k 등)에서 가져오게 바꿨다(성질은 약화하지 않음): test_banding·test_refs(항등 구간 = 프리셋 k), test_color(hs 무효 구간 = 휘도 ≤ k 패치, `sat_hs_sweep`의 mid/hi 구분을 이름이 아니라 휘도로), test_compare(k<0.5이면 Y∈(k,0.5]에서 편차 존재), test_headroom(g=1.05 복사본으로 게인 성질 확인)
+- 셰이더: ITM 파라미터 uniform `ItmParams`(f32 12개 = 필드 9 + 패딩 3, 48바이트, binding 2, 필드 순서 = `params.UNIFORM_ORDER`), `itm_lin`·`itm_mix`(선형 P3 혼합 → P3 휘도 채도 → OETF)·`sharpen`(4탭 언샤프, 유니폼 분기). 휘도 계수를 정밀값(0.2126390059…)으로 통일해 JS 미러·numpy와 일치
+- JS 미러 `content/tonecurve.js`(런타임 미사용, 테스트 전용), `sim/export_ref.py` → `tests/unit/fixtures/tonecurve-ref.json`(240 KB, `.prettierignore` 추가), `sim/test_export_ref.py`가 커밋된 참조의 최신성 검사, `extension-tonecurve.test.js`가 오차 < 1e-4 검사
+- renderer `setParams`(바뀐 값만 병합, writeBuffer만), main은 preset·strength·sharpness·saturation 변경 시 `setParams`만 호출, popup에 프리셋 select·선명도·채도 슬라이더, 진단 schemaVersion 8(`render.preset`·`sharpness`·`saturation`), 스키마·parse-result 갱신, checklist M4 절
+- → verify: lint 통과, npm test 176/176, test:dom 14/14, pytest sim 157/157, 과거 results parse-result 통과, v8 합성 진단 parse-result 확인 / (1) 로컬 Mac. **WGSL 컴파일·선명도 GPU 비용·체감은 미검증(사용자 Mac 필요)**
+- 해석(계획 문구 보강, Opus 확인 요청): ① 채도 슬라이더 표시 범위 50~150%(저장 0.5~1.5). ② `LUMA_709` 계수를 sim과 같은 유도값(0.2126390059, 0.7151686788, 0.0721923154)으로 통일해 기존 WGSL의 반올림 값(0.2126/0.7152/0.0722)과 약 4e-5 차이. ③ 선명도는 `texture_external`에도 `textureDimensions`를 쓰며 이 호출이 Safari 27.2에서 허용되는지는 미검증. ④ 프리셋 `선명`의 popup 문구는 "선명 (밝기 중간 이상 권장)"
+
+- M4 1차 회신(2026-10-01, `results/result-M4-20261001-accurate-first.json`, 프리셋 accurate·강도 43%·선명도 0·채도 105%, 밝기 미기재): 사용자 보고 "잘됨". 새 셰이더(uniform·혼합·채도)가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, loopFps 71·displayMissRate 0·JS p95 1 ms·video 드롭 0, 30fps 소스). 체크리스트 M4 절의 나머지(프리셋 비교, 뭉개짐 시작 강도, 선명도 GPU 비용·끊김, 채도 선호)는 [미확인]. 확장 끄고 켜기를 반복한 이벤트 로그는 정상(중복 disable은 popup 모드 토글)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

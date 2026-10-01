@@ -36,8 +36,24 @@
       </select>
     </label>
     <label
-      >HDR 강도 <span id="strength-value">50%</span>
-      <input type="range" id="strength" min="0" max="100" step="1" value="50" />
+      >프리셋
+      <select id="preset">
+        <option value="accurate">정확</option>
+        <option value="balanced">균형</option>
+        <option value="vivid">선명 (밝기 중간 이상 권장)</option>
+      </select>
+    </label>
+    <label
+      >HDR 강도 <span id="strength-value">45%</span>
+      <input type="range" id="strength" min="0" max="100" step="1" value="45" />
+    </label>
+    <label
+      >선명도 <span id="sharpness-value">0%</span>
+      <input type="range" id="sharpness" min="0" max="100" step="1" value="0" />
+    </label>
+    <label
+      >채도 <span id="saturation-value">100%</span>
+      <input type="range" id="saturation" min="50" max="150" step="1" value="100" />
     </label>
     <label
       >진단 JSON

@@ -236,7 +236,7 @@
       video,
       (e, at) => onRenderError(a, e, at),
       {
-        strength: settings.strength,
+        settings: settings,
         onFrame: () => {
           if (cur === a && checkDrm(video, a.sawEncrypted)) markDrm(video);
         },
@@ -392,8 +392,14 @@
       scheduleAttach();
       return;
     }
-    if (cur && typeof next.strength === 'number' && prev.strength !== next.strength)
-      cur.renderer.setStrength(next.strength);
+    if (cur) {
+      // 셰이더 값(프리셋·강도·선명도·채도)은 바뀐 것만 유니폼으로 보낸다. 재attach 금지.
+      const changed = {};
+      for (const key of ['preset', 'strength', 'sharpness', 'saturation']) {
+        if (next[key] !== undefined && prev[key] !== next[key]) changed[key] = next[key];
+      }
+      if (Object.keys(changed).length > 0) cur.renderer.setParams(changed);
+    }
     if (cur && prev.mode !== next.mode) {
       cur.renderer.setMode(next.mode);
       logEvent('mode:' + next.mode);
@@ -441,11 +447,17 @@
             copySkipped: last.render.copySkipped,
             videoDropped: last.render.videoDropped,
             videoTotal: last.render.videoTotal,
+            preset: last.render.preset,
             strength: last.render.strength,
+            sharpness: last.render.sharpness,
+            saturation: last.render.saturation,
           }
         : {
             mode: settings ? settings.mode : null,
+            preset: settings ? settings.preset : null,
             strength: settings ? settings.strength : null,
+            sharpness: settings ? settings.sharpness : null,
+            saturation: settings ? settings.saturation : null,
           },
       frameProbe: last.render ? last.render.frameProbe : null,
       flags: {
