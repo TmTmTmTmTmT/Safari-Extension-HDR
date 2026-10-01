@@ -230,7 +230,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 9);
+  assert.strictEqual(d.schemaVersion, 10);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -394,7 +394,20 @@ test('normalizeFrameProbe: 숫자 2자리 반올림, 예외는 name 문자열만
     extSyncMs: 1.23,
     copySyncMs: null,
     c2dSyncMs: null,
+    mode: null,
+    hdrEarly: null,
   });
+});
+
+test('normalizeFrameProbe: mode·hdrEarly 정규화 (M6-1, schemaVersion 10)', () => {
+  const n = (p) => plain(ns.hud.normalizeFrameProbe(p));
+  assert.deepStrictEqual(
+    [n({ mode: 'single', hdrEarly: false }).mode, n({ mode: 'single', hdrEarly: false }).hdrEarly],
+    ['single', false],
+  );
+  assert.strictEqual(n({ mode: 'full', hdrEarly: true }).hdrEarly, true);
+  assert.strictEqual(n({ mode: 'bogus', hdrEarly: 'x' }).mode, null);
+  assert.strictEqual(n({ mode: 'bogus', hdrEarly: 'x' }).hdrEarly, null);
 });
 
 test('isBlackOverlay: 경계값 (ext<2 이고 c2d 또는 copy>=8)', () => {
@@ -608,7 +621,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 9);
+  assert.strictEqual(d.schemaVersion, 10);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -958,7 +971,7 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
       flags: { hud: true },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 9);
+  assert.strictEqual(d.schemaVersion, 10);
   assert.strictEqual(d.render.preset, 'custom');
   assert.deepStrictEqual(d.render.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
   assert.strictEqual(d.render.effectivePeak, 1.8);

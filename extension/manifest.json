@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SDR HDR",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "DRM 없는 SDR 영상을 EDR로 확장 표시",
   "content_scripts": [
     {

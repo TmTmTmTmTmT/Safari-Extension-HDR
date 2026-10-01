@@ -118,6 +118,14 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - PLAN M5-0(기본값 정확·53%)과 달라진 사용자 지시라 Opus에 알림: 다음 PLAN 개정 때 M5-0 문구와 D-M6 soak 조건("정확 프리셋·기본값")을 새 기본값 기준으로 고친다
 - → verify: lint 통과, npm test 200/200 / (1) 로컬 Mac
 
+## M6 구현 (브랜치 claude/m6-stability, 2026-10-01, Sonnet)
+
+- W-A(renderer.js, M6-1): frameProbe 최적화. 결정 전·restartSource 직후 회차는 vf 먼저 측정(순서 vf → ext → copy → c2d)하고 vf의 colorSpace가 HDR이면 나머지를 건너뛰며(`hdrEarly`, `onProbe(…, 'pending')`) path·pendingCount·noneStreak 불변, 결정 후 회차는 선택 경로 하나만 측정해 값 ≥ 2이면 `mode:'single'`로 끝내고 아니면 같은 회차에서 전체 측정(`mode:'full'`)으로 현행 stepDownPath·onProbe 로직을 그대로 수행. 기존 테스트 2건의 호출 순서·colorSpace 기대값 갱신(성질 약화 없음), 새 테스트 5건
+- W-B: `docs/install.md`(신규, 8장 구성, 미확인 사항은 [확인 필요])
+- 본 세션: 진단 schemaVersion 10(`frameProbe.mode`·`hdrEarly`), 스키마·parse-result, manifest 1.0.0, popup.html 정적 초기값을 새 기본값(강도 43%)으로 정리, 체크리스트 M6 절
+- → verify: lint 통과, npm test 206/206, test:dom 15/15, pytest sim 157/157, 과거 results parse-result 통과 / (1) 로컬 Mac. **soak·전체화면·60Hz·비60fps·4K HDR 첫 attach 효과는 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① `SINGLE_OK_MIN = 2`를 renderer 로컬 상수로 둠(detect의 검정 기준과 같은 값, detect가 export하지 않음). ② `restartSource` 직후 첫 회차가 vf를 먼저 재서 `colorSpace`가 즉시 새 값으로 채워짐(이전 테스트의 "null로 비워짐" 기대를 "새 소스 값으로 교체"로 갱신). ③ install.md에서 [확인 필요]로 남긴 것: 안정판 Xcode 호환, "서명되지 않은 확장 허용"의 재시작 시 재설정 필요 여부, 7일 만료 정확한 기간·증상, 재서명 후 설정 유지 여부, 설정 초기화 방법, popup "JSON 저장" 링크 동작, blackFrame 재시도 방법
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

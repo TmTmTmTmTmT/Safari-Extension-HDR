@@ -237,7 +237,16 @@
         },
         "vfSyncMs": { "type": ["number", "null"], "description": "schemaVersion 4 이상." },
         "copySyncMs": { "type": ["number", "null"] },
-        "c2dSyncMs": { "type": ["number", "null"] }
+        "c2dSyncMs": { "type": ["number", "null"] },
+        "mode": {
+          "type": ["string", "null"],
+          "enum": ["full", "single", null],
+          "description": "schemaVersion 10 이상. full: 모든 경로 측정, single: 선택 경로 하나만 측정(정상 상태, PLAN D-M6 M6-1)."
+        },
+        "hdrEarly": {
+          "type": ["boolean", "null"],
+          "description": "schemaVersion 10 이상. true면 HDR 원본을 vf 측정만으로 판정하고 나머지 경로 측정을 건너뜀."
+        }
       }
     },
     "flags": {

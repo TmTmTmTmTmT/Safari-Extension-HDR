@@ -363,6 +363,8 @@ def summarize_m2(name, data):
             cols += ["ms", "extSyncMs", "copySyncMs", "c2dSyncMs"]
             if "vfSyncMs" in fp:
                 cols += ["vfSyncMs"]
+        if "mode" in fp:  # v10: 측정 방식과 HDR 조기 판정
+            cols += ["mode", "hdrEarly"]
         print(table(cols + ["blackFrame"], [[fmt(fp.get(c)) for c in cols] + [fmt(flags.get("blackFrame"))]]))
     v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "videoDropped", "videoTotal"]
     if any(k in render for k in ("vfMsP50", "vfMsP95")):  # schemaVersion 4 이상
