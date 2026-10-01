@@ -109,6 +109,8 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 해석(Opus 확인 요청): ① `hudLines`는 PLAN 문구(stats, lifecycle, settings)와 달리 main이 계산한 평탄한 `info` 객체 1개를 받는다. ② HUD 삽입 위치 함수를 `detect.js`가 아니라 `createHud(container)`가 `container.parentNode` 직접 사용(container는 detect.findMainVideo 결과라 셀렉터는 detect에만 남음). ③ 상세 슬라이더 표시 소수 자릿수는 `DETAIL_STEPS`에서 계산
 - → verify: lint 통과, npm test 200/200, test:dom 15/15, pytest sim 157/157 / (1) 로컬 Mac. **popup UI·HUD 표시·상세 슬라이더 반영은 미검증(사용자 Mac 필요)**
 
+- M5 1차 회신(2026-10-01, `results/result-M5-20261001-custom-hud.json`, 프리셋 custom·HUD 켬): 사용자 지정 곡선 {P2.6, k0.4, n2, g1.11, s1, hs1.03}, 강도 53%·채도 105%, 유효 피크 2.0(= 1 + 0.53 × (2.6×1.11 − 1))에서 errors 없음, path vf, 갱신 누락 6.9%·loopFps 57·JS p95 1 ms·드롭 0(HUD 켠 상태, 60fps 소스, 영상 일시정지 중 캡처). 체크리스트 M5 절의 개별 항목(반영 속도, 프리셋 전환, HUD 위치·갱신·끊김 판정 등)은 사용자 보고가 없어 [미확인]. 누락률 6.9%는 HUD 영향인지 페이지 부하인지 분리하지 않음(M2의 baseline 4.8%와 같은 규모)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
