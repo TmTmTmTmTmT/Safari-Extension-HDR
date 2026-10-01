@@ -981,3 +981,37 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
   assert.strictEqual(e.render.effectivePeak, null);
   assert.strictEqual(e.flags.hud, false);
 });
+
+test('진단 요청 키 (FIX_GUIDE T2): requestDiag는 시각을 쓰고, subscribeDiagRequest는 그 키 변경에만 반응한다', async () => {
+  const ctx = vm.createContext({});
+  const written = [];
+  let listener = null;
+  ctx.browser = {
+    storage: {
+      local: { set: async (o) => written.push(o) },
+      onChanged: {
+        addListener: (fn) => (listener = fn),
+        removeListener: (fn) => {
+          if (listener === fn) listener = null;
+        },
+      },
+    },
+  };
+  for (const f of manifest.content_scripts[0].js) {
+    vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+  }
+  const p = ctx.__sdrhdr.params;
+  assert.strictEqual(p.KEYS.diagRequest, 'sdrhdr.diagRequest');
+  await p.requestDiag();
+  assert.strictEqual(written.length, 1);
+  assert.ok(typeof written[0]['sdrhdr.diagRequest'] === 'number');
+  let n = 0;
+  const off = p.subscribeDiagRequest(() => n++);
+  listener({ 'sdrhdr.strength': {} }, 'local');
+  listener({ 'sdrhdr.diagRequest': {} }, 'sync');
+  assert.strictEqual(n, 0);
+  listener({ 'sdrhdr.diagRequest': {} }, 'local');
+  assert.strictEqual(n, 1);
+  off();
+  assert.strictEqual(listener, null);
+});

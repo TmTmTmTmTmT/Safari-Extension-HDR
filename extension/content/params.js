@@ -35,6 +35,7 @@
     sharpness: 'sdrhdr.sharpness',
     saturation: 'sdrhdr.saturation',
     diag: 'sdrhdr.diag',
+    diagRequest: 'sdrhdr.diagRequest',
   };
   // 슬라이더 범위·기본값 (PLAN D-M4a, M4-E). 강도 0 = 색 변환만, 1 = ITM 전체. 기본 0.45는 M4a 사용자 회신으로 확정.
   const STRENGTH = { min: 0, max: 1, step: 0.01, default: 0.43 };
@@ -165,6 +166,21 @@
     return browser.storage.local.set({ [KEYS.diag]: diag });
   }
 
+  // popup이 진단 영역을 연 동안만 요청 시각(ms)을 쓴다. content는 보이는 탭에서만 응답한다 (FIX_GUIDE T2).
+  function requestDiag() {
+    return browser.storage.local.set({ [KEYS.diagRequest]: Date.now() });
+  }
+
+  // 진단 요청 키가 바뀔 때 cb()를 호출한다. 반환값은 구독 해제 함수.
+  function subscribeDiagRequest(cb) {
+    const listener = (changes, area) => {
+      if (area !== 'local' || !(KEYS.diagRequest in changes)) return;
+      cb();
+    };
+    browser.storage.onChanged.addListener(listener);
+    return () => browser.storage.onChanged.removeListener(listener);
+  }
+
   globalThis.__sdrhdr.params = {
     PRESETS,
     PRESET_IDS,
@@ -191,5 +207,7 @@
     readSettings,
     subscribe,
     writeDiag,
+    requestDiag,
+    subscribeDiagRequest,
   };
 })();
