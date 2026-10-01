@@ -23,6 +23,7 @@ function setup({
   onWarn,
   videoSize,
   mode,
+  hooksSettings,
 }) {
   const vals = { ext, vf, copy, c2d };
   const state = {
@@ -207,6 +208,7 @@ function setup({
   const canvas = { style: {}, getContext: () => gpuCtx };
   state.canvas = canvas;
   state.renderer = ctx.__sdrhdr.renderer.createRenderer(canvas, video, () => {}, {
+    settings: hooksSettings,
     onUndecided,
     onWarn: (e, at) => {
       state.warns.push([at, e.name]);
@@ -976,32 +978,51 @@ test('M3: restartSource는 경로·frameProbe·colorSpace·측정을 비우고 G
   s.renderer.destroy();
 });
 
-test('M4a: 강도 유니폼은 init에서 1개 생성·초기값 기록, setStrength는 writeBuffer만(파이프라인·버퍼 재생성 없음)', async () => {
-  const s = setup({ readyState: 4, paused: false });
+// Float32Array 기록이라 기대값도 float32로 비교한다.
+const f32 = (a) => a.map(Math.fround);
+
+test('M4: ITM 유니폼 48바이트 1개를 init에서 만들고 초기값 기록, setParams는 writeBuffer만(파이프라인·버퍼 재생성 없음)', async () => {
+  const s = setup({
+    readyState: 4,
+    paused: false,
+    hooksSettings: { preset: 'balanced', strength: 0.5, sharpness: 0, saturation: 1 },
+  });
   await s.renderer.start();
   await s.settle();
   assert.strictEqual(s.uniforms.length, 1);
-  assert.strictEqual(s.uniforms[0].size, 16);
-  assert.deepStrictEqual(s.uniforms[0].writes, [[0.5, 0, 0, 0]]);
+  assert.strictEqual(s.uniforms[0].size, 48);
+  assert.deepStrictEqual(s.uniforms[0].writes, [f32([0.5, 3, 0.45, 2, 1, 1, 1, 0, 1, 0, 0, 0])]);
   const created = s.calls.filter((c) => c.startsWith('createTexture')).length;
-  s.renderer.setStrength(0.25);
-  s.renderer.setStrength(NaN); // 무시
-  s.renderer.setStrength('x'); // 무시
+  s.renderer.setParams({ strength: 0.25 });
+  s.renderer.setParams(null); // 무시
+  s.renderer.setParams('x'); // 무시
   assert.strictEqual(s.uniforms.length, 1);
-  assert.deepStrictEqual(s.uniforms[0].writes.at(-1), [0.25, 0, 0, 0]);
-  assert.strictEqual(s.uniforms[0].writes.length, 2);
+  assert.deepStrictEqual(
+    s.uniforms[0].writes.at(-1),
+    f32([0.25, 3, 0.45, 2, 1, 1, 1, 0, 1, 0, 0, 0]),
+  );
+  s.renderer.setParams({ preset: 'vivid', sharpness: 0.6, saturation: 1.1 }); // 나머지 값은 유지
+  assert.deepStrictEqual(
+    s.uniforms[0].writes.at(-1),
+    f32([0.25, 4, 0.45, 2, 1, 1.2, 1, 0.6, 1.1, 0, 0, 0]),
+  );
+  assert.strictEqual(s.uniforms[0].writes.length, 3);
   assert.strictEqual(s.calls.filter((c) => c.startsWith('createTexture')).length, created);
-  assert.strictEqual(s.renderer.getStats().strength, 0.25);
+  const st = s.renderer.getStats();
+  assert.deepStrictEqual(
+    [st.preset, st.strength, st.sharpness, st.saturation],
+    ['vivid', 0.25, 0.6, 1.1],
+  );
   s.renderer.destroy();
 });
 
-test('M4a: 일시정지 상태에서 setStrength는 1회 렌더를 요청한다', async () => {
+test('M4: 일시정지 상태에서 setParams는 1회 렌더를 요청한다', async () => {
   const s = setup({ readyState: 4, paused: true });
   await s.renderer.start();
   await s.settle();
   s.flush();
   const before = s.renders;
-  s.renderer.setStrength(0.8);
+  s.renderer.setParams({ sharpness: 0.8 });
   s.flush();
   assert.strictEqual(s.renders, before + 1);
   s.renderer.destroy();

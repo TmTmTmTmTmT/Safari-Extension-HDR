@@ -367,8 +367,8 @@ def summarize_m2(name, data):
     v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "videoDropped", "videoTotal"]
     if any(k in render for k in ("vfMsP50", "vfMsP95")):  # schemaVersion 4 이상
         v3_cols = v3_cols + ["vfMsP50", "vfMsP95"]
-    if "strength" in render:  # schemaVersion 7 이상 (HDR 강도)
-        v3_cols = ["strength"] + v3_cols
+    if "strength" in render:  # schemaVersion 7 이상 (HDR 강도), 8 이상은 preset·sharpness·saturation 추가
+        v3_cols = [c for c in ("preset", "strength", "sharpness", "saturation") if c in render] + v3_cols
     if any(k in render for k in v3_cols):  # schemaVersion 3 이상. v1/v2 파일은 건너뛴다.
         print("\nrender 비용 진단 (v3~v7, 값만)")
         print(table(v3_cols, [[fmt(render.get(c)) for c in v3_cols]]))

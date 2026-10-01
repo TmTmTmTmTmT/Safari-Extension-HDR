@@ -19,8 +19,11 @@ def test_over_count_matches_peak(nm, H):
 
 
 def test_gain_above_one_exceeds_p_at_equal_headroom():
-    # 선명: g=1.05 라서 코드 255 의 게인 후 Y>1 -> 곡선 연장으로 P=4 를 넘는다 (H=4 에서도 잘림).
-    p = PRESETS["선명"]
+    # M4 프리셋은 모두 g=1.0 이라 게인 효과를 프리셋 복사본(g=1.05)으로 확인한다:
+    # 코드 255 의 게인 후 Y>1 -> 곡선 연장으로 P 를 넘어 H=P 에서도 잘린다.
+    from dataclasses import replace
+
+    p = replace(PRESETS["선명"], g=1.05)
     assert headroom.output_luminance(p)[255] > p.P
     cnt, _, hi, _ = headroom.clip_stats(p, 4)
     assert cnt >= 1 and hi == 255

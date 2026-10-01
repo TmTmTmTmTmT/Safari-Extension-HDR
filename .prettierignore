@@ -8,3 +8,4 @@ PLAN.md
 GUIDELINES.md
 CLAUDE.md
 .venv
+tests/unit/fixtures

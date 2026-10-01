@@ -43,8 +43,10 @@ def test_exact_preset_no_saturation_effect():
 def test_hs_has_no_effect_below_knee():
     # 미드톤 패치(Y<k): hs 만 다른 두 설정의 출력이 동일해야 한다
     names, rgb = color.chroma_patches()
-    lo = np.array(["L0.5" in n for n in names])
     p1, p2 = PRESETS["균형"].kwargs(), PRESETS["균형"].kwargs()
+    y = (tc.srgb_eotf(rgb) * p1["g"]) @ tc.LUMA_709
+    lo = y <= p1["k"]
+    assert lo.sum() >= 3  # k 가 0.45 라 일부 패치만 항등 구간
     p1["hs"], p2["hs"] = 0.5, 1.5
     a = tc.itm_linear(rgb[lo], **p1)
     b = tc.itm_linear(rgb[lo], **p2)

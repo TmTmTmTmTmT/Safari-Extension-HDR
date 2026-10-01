@@ -6,6 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..', 'extension');
+const repo = path.join(__dirname, '..', '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 function load() {
@@ -78,18 +79,25 @@ test('canvasResolution: min(원본, 표시 x DPR) (probe와 같은 사례)', () 
 test('normalizeSettings: 잘못된 값은 기본값', () => {
   const { normalizeSettings, KEYS, MODES } = ns.params;
   assert.deepStrictEqual(plain(MODES), ['itm', 'identity', 'stripes', 'baseline']);
-  const def = { enabled: true, mode: 'itm', strength: 0.5 };
+  const def = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.45,
+    sharpness: 0,
+    saturation: 1,
+  };
   assert.deepStrictEqual(plain(normalizeSettings(undefined)), def);
   assert.deepStrictEqual(plain(normalizeSettings(null)), def);
   assert.deepStrictEqual(plain(normalizeSettings('x')), def);
   assert.deepStrictEqual(plain(normalizeSettings({})), def);
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: false, [KEYS.mode]: 'stripes' })),
-    { enabled: false, mode: 'stripes', strength: 0.5 },
+    { ...def, enabled: false, mode: 'stripes' },
   );
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: true, [KEYS.mode]: 'baseline' })),
-    { enabled: true, mode: 'baseline', strength: 0.5 },
+    { ...def, mode: 'baseline' },
   );
   assert.deepStrictEqual(
     plain(normalizeSettings({ [KEYS.enabled]: 'yes', [KEYS.mode]: 'bogus' })),
@@ -102,16 +110,16 @@ test('normalizeSettings: 잘못된 값은 기본값', () => {
   assert.strictEqual(KEYS.diag, 'sdrhdr.diag');
 });
 
-test('params: 균형 프리셋과 범위 (PLAN C절 표)', () => {
-  assert.deepStrictEqual(plain(ns.params.PRESET_BALANCED), {
-    P: 3.0,
-    k: 0.65,
-    n: 2.5,
-    g: 1.0,
-    s: 1.05,
-    hs: 0.95,
+test('params: 프리셋 3종 확정값과 범위 (PLAN C절 표, M4)', () => {
+  const P = ns.params;
+  assert.deepStrictEqual(plain(P.PRESETS), {
+    accurate: { P: 2.0, k: 0.5, n: 2.0, g: 1.0, s: 1.0, hs: 1.0 },
+    balanced: { P: 3.0, k: 0.45, n: 2.0, g: 1.0, s: 1.0, hs: 1.0 },
+    vivid: { P: 4.0, k: 0.45, n: 2.0, g: 1.0, s: 1.2, hs: 1.0 },
   });
-  assert.deepStrictEqual(plain(ns.params.RANGES), {
+  assert.deepStrictEqual(plain(P.PRESET_BALANCED), plain(P.PRESETS.balanced));
+  assert.strictEqual(P.DEFAULT_PRESET, 'balanced');
+  assert.deepStrictEqual(plain(P.RANGES), {
     P: [1.0, 8.0],
     k: [0.4, 0.9],
     n: [1.5, 4],
@@ -119,9 +127,24 @@ test('params: 균형 프리셋과 범위 (PLAN C절 표)', () => {
     s: [0.8, 1.5],
     hs: [0.5, 1.5],
   });
-  for (const [key, v] of Object.entries(ns.params.PRESET_BALANCED)) {
-    const [lo, hi] = ns.params.RANGES[key];
-    assert.ok(v >= lo && v <= hi, key);
+  for (const preset of Object.values(P.PRESETS)) {
+    for (const [key, v] of Object.entries(preset)) {
+      const [lo, hi] = P.RANGES[key];
+      assert.ok(v >= lo && v <= hi, key);
+    }
+  }
+  // sim/presets.py와 같은 값 (한 곳 정의 원칙, GUIDELINES 3-5).
+  const py = fs.readFileSync(path.join(repo, 'sim', 'presets.py'), 'utf8');
+  const ids = { 정확: 'accurate', 균형: 'balanced', 선명: 'vivid' };
+  for (const [ko, id] of Object.entries(ids)) {
+    const m = new RegExp('"' + ko + '":\\s*Preset\\("' + ko + '",\\s*([^)]*)\\)').exec(py);
+    assert.ok(m, ko);
+    const kv = {};
+    for (const part of m[1].split(',')) {
+      const [k, v] = part.split('=').map((x) => x.trim());
+      kv[k] = Number(v);
+    }
+    assert.deepStrictEqual(kv, plain(P.PRESETS[id]), ko);
   }
 });
 
@@ -197,7 +220,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 7);
+  assert.strictEqual(d.schemaVersion, 8);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -573,7 +596,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 7);
+  assert.strictEqual(d.schemaVersion, 8);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -795,19 +818,66 @@ test('buildDiag: lifecycle·colorSpace 정규화 (M3-4)', () => {
   );
 });
 
-test('normalizeStrength: 범위·타입·step 처리, 설정에 반영 (M4a)', () => {
-  const { normalizeStrength, normalizeSettings, KEYS, STRENGTH } = ns.params;
-  assert.deepStrictEqual(plain(STRENGTH), { min: 0, max: 1, step: 0.01, default: 0.5 });
+test('슬라이더 정규화: 강도·선명도·채도 범위·타입·step, 프리셋 id (M4a, M4-E)', () => {
+  const {
+    normalizeStrength,
+    normalizeRange,
+    normalizeSettings,
+    KEYS,
+    STRENGTH,
+    SHARPNESS,
+    SATURATION,
+  } = ns.params;
+  assert.deepStrictEqual(plain(STRENGTH), { min: 0, max: 1, step: 0.01, default: 0.45 });
+  assert.deepStrictEqual(plain(SHARPNESS), { min: 0, max: 1, step: 0.01, default: 0 });
+  assert.deepStrictEqual(plain(SATURATION), { min: 0.5, max: 1.5, step: 0.01, default: 1 });
   assert.strictEqual(normalizeStrength(0), 0);
   assert.strictEqual(normalizeStrength(1), 1);
   assert.strictEqual(normalizeStrength(0.337), 0.34);
   assert.strictEqual(normalizeStrength(-1), 0);
   assert.strictEqual(normalizeStrength(7), 1);
   for (const bad of [undefined, null, NaN, Infinity, '0.3', {}]) {
-    assert.strictEqual(normalizeStrength(bad), 0.5, String(bad));
+    assert.strictEqual(normalizeStrength(bad), 0.45, String(bad));
+    assert.strictEqual(normalizeRange(SHARPNESS, bad), 0);
+    assert.strictEqual(normalizeRange(SATURATION, bad), 1);
   }
-  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 0.8 }).strength, 0.8);
-  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 'x' }).strength, 0.5);
+  assert.strictEqual(normalizeRange(SATURATION, 0.1), 0.5);
+  assert.strictEqual(normalizeRange(SATURATION, 9), 1.5);
+  assert.strictEqual(normalizeRange(SATURATION, 1.234), 1.23);
+  const s = normalizeSettings({
+    [KEYS.strength]: 0.8,
+    [KEYS.sharpness]: 0.3,
+    [KEYS.saturation]: 1.2,
+    [KEYS.preset]: 'vivid',
+  });
+  assert.deepStrictEqual(
+    [s.strength, s.sharpness, s.saturation, s.preset],
+    [0.8, 0.3, 1.2, 'vivid'],
+  );
+  assert.strictEqual(normalizeSettings({ [KEYS.preset]: '선명' }).preset, 'balanced');
+  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 'x' }).strength, 0.45);
+});
+
+test('toUniformArray: UNIFORM_ORDER 순서·길이 12, 프리셋 값 반영, 잘못된 입력은 기본값 (M4-B)', () => {
+  const P = ns.params;
+  assert.deepStrictEqual(plain(P.UNIFORM_ORDER), [
+    'strength',
+    'P',
+    'k',
+    'n',
+    'g',
+    's',
+    'hs',
+    'sharp',
+    'csat',
+  ]);
+  assert.strictEqual(P.UNIFORM_FLOATS, 12);
+  const a = plain(
+    P.toUniformArray({ preset: 'vivid', strength: 0.3, sharpness: 0.6, saturation: 1.1 }),
+  );
+  assert.deepStrictEqual(a, [0.3, 4, 0.45, 2, 1, 1.2, 1, 0.6, 1.1, 0, 0, 0]);
+  const d = plain(P.toUniformArray(undefined));
+  assert.deepStrictEqual(d, [0.45, 3, 0.45, 2, 1, 1, 1, 0, 1, 0, 0, 0]);
 });
 
 test('buildDiag: render.strength는 소수 둘째 자리, 없으면 null (M4a)', () => {

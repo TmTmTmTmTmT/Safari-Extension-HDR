@@ -12,6 +12,7 @@
         "content/ns.js",
         "content/detect.js",
         "content/params.js",
+        "content/tonecurve.js",
         "content/itm.wgsl.js",
         "content/hud.js",
         "content/renderer.js",

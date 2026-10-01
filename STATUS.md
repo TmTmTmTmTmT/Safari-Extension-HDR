@@ -89,6 +89,15 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 격자 확장 필요 여부: n ∈ (1.5, 2.0) 사이(예 1.75), 선명 쪽 P>4. k는 C3(≥0.45)가 하한이라 확장 불가
 - 프리셋 수치 확정(C절 표 개정)과 M4-B 착수 지시
 
+## M4-B·M4-E 구현 (브랜치 claude/m4-algorithm, 2026-10-01, Sonnet)
+
+- 프리셋 확정값 반영(PLAN M4-A2): `sim/presets.py`, `params.js` `PRESETS`(accurate/balanced/vivid), 기본 강도 0.45. sim 테스트 중 이전 초안 수치에 묶인 기대값 7곳은 임계값을 프리셋(k 등)에서 가져오게 바꿨다(성질은 약화하지 않음): test_banding·test_refs(항등 구간 = 프리셋 k), test_color(hs 무효 구간 = 휘도 ≤ k 패치, `sat_hs_sweep`의 mid/hi 구분을 이름이 아니라 휘도로), test_compare(k<0.5이면 Y∈(k,0.5]에서 편차 존재), test_headroom(g=1.05 복사본으로 게인 성질 확인)
+- 셰이더: ITM 파라미터 uniform `ItmParams`(f32 12개 = 필드 9 + 패딩 3, 48바이트, binding 2, 필드 순서 = `params.UNIFORM_ORDER`), `itm_lin`·`itm_mix`(선형 P3 혼합 → P3 휘도 채도 → OETF)·`sharpen`(4탭 언샤프, 유니폼 분기). 휘도 계수를 정밀값(0.2126390059…)으로 통일해 JS 미러·numpy와 일치
+- JS 미러 `content/tonecurve.js`(런타임 미사용, 테스트 전용), `sim/export_ref.py` → `tests/unit/fixtures/tonecurve-ref.json`(240 KB, `.prettierignore` 추가), `sim/test_export_ref.py`가 커밋된 참조의 최신성 검사, `extension-tonecurve.test.js`가 오차 < 1e-4 검사
+- renderer `setParams`(바뀐 값만 병합, writeBuffer만), main은 preset·strength·sharpness·saturation 변경 시 `setParams`만 호출, popup에 프리셋 select·선명도·채도 슬라이더, 진단 schemaVersion 8(`render.preset`·`sharpness`·`saturation`), 스키마·parse-result 갱신, checklist M4 절
+- → verify: lint 통과, npm test 176/176, test:dom 14/14, pytest sim 157/157, 과거 results parse-result 통과, v8 합성 진단 parse-result 확인 / (1) 로컬 Mac. **WGSL 컴파일·선명도 GPU 비용·체감은 미검증(사용자 Mac 필요)**
+- 해석(계획 문구 보강, Opus 확인 요청): ① 채도 슬라이더 표시 범위 50~150%(저장 0.5~1.5). ② `LUMA_709` 계수를 sim과 같은 유도값(0.2126390059, 0.7151686788, 0.0721923154)으로 통일해 기존 WGSL의 반올림 값(0.2126/0.7152/0.0722)과 약 4e-5 차이. ③ 선명도는 `texture_external`에도 `textureDimensions`를 쓰며 이 호출이 Safari 27.2에서 허용되는지는 미검증. ④ 프리셋 `선명`의 popup 문구는 "선명 (밝기 중간 이상 권장)"
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

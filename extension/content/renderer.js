@@ -16,7 +16,7 @@
   const PENDING_MAX = 60; // 보류 결과가 이 횟수에 이르면 더 시도하지 않는다
   const VF_FAIL_LIMIT = 3; // VideoFrame 생성 실패가 연속 이 횟수에 이르면 errors에 기록하고 다음 경로로 전환 (FIX_GUIDE R3)
   const BUF_UNIFORM = 0x40;
-  const STRENGTH_BYTES = 16; // StrengthParams: f32 + 패딩 3개 (uniform 16바이트 정렬)
+  const UNIFORM_BYTES = 48; // ItmParams: f32 12개(필드 9 + 패딩 3), params.UNIFORM_FLOATS와 같다
   const TEX_COPY_SRC = 0x01;
   const TEX_COPY_DST = 0x02;
   const TEX_TEXTURE_BINDING = 0x04;
@@ -48,9 +48,10 @@
     let device = null;
     let ctx = null;
     let sampler = null;
-    let strengthBuf = null;
-    // HDR 강도 (PLAN D-M4a). hooks.strength는 attach 시 초기값, 이후 setStrength로 유니폼만 갱신한다.
-    let strength = hooks && typeof hooks.strength === 'number' ? hooks.strength : 0.5;
+    let uniformBuf = null;
+    // 사용자 설정 중 셰이더에 쓰는 값(preset, strength, sharpness, saturation). hooks.settings는 attach 시 초기값이고
+    // 이후 setParams로 유니폼만 갱신한다 (PLAN D-M4a·M4-E).
+    let shaderSettings = Object.assign({}, hooks && hooks.settings);
     let pipelines = null;
     let rafId = null;
     let frames = 0;
@@ -189,16 +190,14 @@
         itm: makePipeline(device.createShaderModule({ code: shaders.VIDEO_ITM })),
       };
       sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-      strengthBuf = device.createBuffer({
-        size: STRENGTH_BYTES,
-        usage: BUF_UNIFORM | BUF_COPY_DST,
-      });
-      writeStrength();
+      uniformBuf = device.createBuffer({ size: UNIFORM_BYTES, usage: BUF_UNIFORM | BUF_COPY_DST });
+      writeParams();
     }
 
-    function writeStrength() {
-      if (!device || !strengthBuf) return;
-      device.queue.writeBuffer(strengthBuf, 0, new Float32Array([strength, 0, 0, 0]));
+    function writeParams() {
+      if (!device || !uniformBuf) return;
+      const arr = globalThis.__sdrhdr.params.toUniformArray(shaderSettings);
+      device.queue.writeBuffer(uniformBuf, 0, new Float32Array(arr));
     }
 
     function copyPipeline() {
@@ -343,7 +342,7 @@
             { binding: 0, resource: sampler },
             { binding: 1, resource },
           ];
-          if (mode === 'itm') entries.push({ binding: 2, resource: { buffer: strengthBuf } });
+          if (mode === 'itm') entries.push({ binding: 2, resource: { buffer: uniformBuf } });
           const bind = device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
             entries,
@@ -699,7 +698,7 @@
       device = null;
       ctx = null;
       sampler = null;
-      strengthBuf = null;
+      uniformBuf = null;
       pipelines = null;
       probePipeline = null;
       for (const k of Object.keys(copyPipelines)) delete copyPipelines[k];
@@ -784,10 +783,11 @@
     }
 
     // 유니폼 값만 갱신한다(파이프라인 재생성 금지). 정지 상태에서도 반영되도록 1회 렌더를 요청한다.
-    function setStrength(next) {
-      if (typeof next !== 'number' || !Number.isFinite(next)) return;
-      strength = next;
-      writeStrength();
+    // next: { preset, strength, sharpness, saturation } 중 바뀐 값만 담아도 된다(나머지는 유지).
+    function setParams(next) {
+      if (!next || typeof next !== 'object') return;
+      shaderSettings = Object.assign({}, shaderSettings, next);
+      writeParams();
       if (device && mode === 'itm') kick();
     }
 
@@ -814,7 +814,11 @@
       }
       return {
         mode,
-        strength,
+        preset: shaderSettings.preset === undefined ? null : shaderSettings.preset,
+        strength: typeof shaderSettings.strength === 'number' ? shaderSettings.strength : null,
+        sharpness: typeof shaderSettings.sharpness === 'number' ? shaderSettings.sharpness : null,
+        saturation:
+          typeof shaderSettings.saturation === 'number' ? shaderSettings.saturation : null,
         path,
         frames,
         copyTimesMs: copyTimes.slice(),
@@ -833,7 +837,7 @@
       };
     }
 
-    return { start, stop, setMode, setStrength, restartSource, destroy, getStats };
+    return { start, stop, setMode, setParams, restartSource, destroy, getStats };
   }
 
   globalThis.__sdrhdr.renderer = { createRenderer };

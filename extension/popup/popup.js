@@ -3,10 +3,15 @@
   const params = globalThis.__sdrhdr.params;
   const K = params.KEYS;
   const $ = (id) => document.getElementById(id);
-  const STRENGTH_SAVE_MS = 100; // 드래그 중 저장 간격
+  const SAVE_MS = 100; // 슬라이더 드래그 중 저장 간격
   let blobUrl = null;
-  let strengthTimer = null;
-  let strengthPending = null;
+
+  // 슬라이더(강도·선명도·채도). 표시값은 %이고 저장값은 params 범위의 숫자다.
+  const SLIDERS = [
+    { id: 'strength', key: K.strength, spec: params.STRENGTH },
+    { id: 'sharpness', key: K.sharpness, spec: params.SHARPNESS },
+    { id: 'saturation', key: K.saturation, spec: params.SATURATION },
+  ];
 
   function showDiag(diag) {
     const text = diag
@@ -18,27 +23,47 @@
     $('save').href = blobUrl;
   }
 
-  function showStrength(v) {
-    $('strength').value = String(Math.round(v * 100));
-    $('strength-value').textContent = Math.round(v * 100) + '%';
+  function showSlider(sl, v) {
+    $(sl.id).value = String(Math.round(v * 100));
+    $(sl.id + '-value').textContent = Math.round(v * 100) + '%';
   }
 
-  function flushStrength() {
-    if (strengthTimer !== null) clearTimeout(strengthTimer);
-    strengthTimer = null;
-    if (strengthPending === null) return;
-    const v = strengthPending;
-    strengthPending = null;
-    browser.storage.local.set({ [K.strength]: v });
+  function bindSlider(sl) {
+    let timer = null;
+    let pending = null;
+    const flush = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (pending === null) return;
+      const v = pending;
+      pending = null;
+      browser.storage.local.set({ [sl.key]: v });
+    };
+    $(sl.id).addEventListener('input', () => {
+      const v = params.normalizeRange(sl.spec, Number($(sl.id).value) / 100);
+      $(sl.id + '-value').textContent = Math.round(v * 100) + '%';
+      pending = v;
+      if (timer !== null) return;
+      timer = setTimeout(flush, SAVE_MS);
+    });
+    // 드래그를 놓는 순간 마지막 값이 확실히 저장되게 한다.
+    $(sl.id).addEventListener('change', flush);
+  }
+
+  function setItmControlsEnabled(mode) {
+    const on = mode === 'itm';
+    $('preset').disabled = !on;
+    for (const sl of SLIDERS) $(sl.id).disabled = !on;
   }
 
   async function init() {
-    const raw = await browser.storage.local.get([K.enabled, K.mode, K.strength, K.diag]);
+    const raw = await browser.storage.local.get([...Object.values(K)]);
     const s = params.normalizeSettings(raw);
     $('enabled').checked = s.enabled;
     $('mode').value = s.mode;
-    showStrength(s.strength);
-    $('strength').disabled = s.mode !== 'itm';
+    $('preset').value = s.preset;
+    for (const sl of SLIDERS) showSlider(sl, s[sl.id]);
+    setItmControlsEnabled(s.mode);
     showDiag(raw[K.diag]);
 
     $('enabled').addEventListener('change', () => {
@@ -46,17 +71,12 @@
     });
     $('mode').addEventListener('change', () => {
       browser.storage.local.set({ [K.mode]: $('mode').value });
-      $('strength').disabled = $('mode').value !== 'itm';
+      setItmControlsEnabled($('mode').value);
     });
-    $('strength').addEventListener('input', () => {
-      const v = params.normalizeStrength(Number($('strength').value) / 100);
-      $('strength-value').textContent = Math.round(v * 100) + '%';
-      strengthPending = v;
-      if (strengthTimer !== null) return;
-      strengthTimer = setTimeout(flushStrength, STRENGTH_SAVE_MS);
+    $('preset').addEventListener('change', () => {
+      browser.storage.local.set({ [K.preset]: $('preset').value });
     });
-    // 드래그를 놓는 순간 마지막 값이 확실히 저장되게 한다.
-    $('strength').addEventListener('change', flushStrength);
+    for (const sl of SLIDERS) bindSlider(sl);
     $('copy').addEventListener('click', () => {
       $('diag').select();
       if (navigator.clipboard) navigator.clipboard.writeText($('diag').value).catch(() => {});

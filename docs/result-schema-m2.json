@@ -99,6 +99,19 @@
           "type": ["number", "null"],
           "description": "schemaVersion 7 이상. HDR 강도 0~1 (PLAN D-M4a)."
         },
+        "preset": {
+          "type": ["string", "null"],
+          "enum": ["accurate", "balanced", "vivid", null],
+          "description": "schemaVersion 8 이상. 프리셋 id (PLAN D-M4)."
+        },
+        "sharpness": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 8 이상. 선명도 0~1 (PLAN M4-E)."
+        },
+        "saturation": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 8 이상. 채도 배율 0.5~1.5 (PLAN M4-E)."
+        },
         "mode": {
           "type": ["string", "null"],
           "enum": ["itm", "identity", "stripes", "baseline", null],

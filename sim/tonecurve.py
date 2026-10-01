@@ -35,6 +35,7 @@ M_2020_TO_XYZ = rgb_to_xyz_matrix(_PRIM_2020)
 M709_TO_P3 = np.linalg.solve(M_P3_TO_XYZ, M709_TO_XYZ)  # 5단계 행렬
 M_P3_TO_2020 = np.linalg.solve(M_2020_TO_XYZ, M_P3_TO_XYZ)
 LUMA_709 = M709_TO_XYZ[1]  # BT.709 휘도 계수 (0.2126, 0.7152, 0.0722)
+LUMA_P3 = M_P3_TO_XYZ[1]  # Display P3 휘도 계수 (0.2290, 0.6917, 0.0793), 채도 슬라이더(PLAN D-M4 M4-E)에서 사용
 
 
 def srgb_eotf(v):
@@ -91,3 +92,10 @@ def itm_linear(rgb_enc, P, k, n, g, s, hs):
 def itm(rgb_enc, P, k, n, g, s, hs):
     """전체 파이프라인. 입력: sRGB 인코딩 RGB (..., 3), 출력: 확장 sRGB 인코딩 P3 (부호 보존)."""
     return srgb_oetf_ext(itm_linear(rgb_enc, P, k, n, g, s, hs))
+
+
+def saturate_p3(lin_p3, csat):
+    """PLAN D-M4 M4-E: 선형 Display P3 에서 휘도 기준 채도 배율. csat=1 이면 입력 그대로, csat=0 이면 회색(휘도)."""
+    lin_p3 = np.asarray(lin_p3, dtype=np.float64)
+    y = (lin_p3 @ LUMA_P3)[..., None]
+    return y + csat * (lin_p3 - y)

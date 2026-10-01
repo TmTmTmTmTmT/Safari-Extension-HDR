@@ -31,7 +31,16 @@ test('로드 시 document/navigator.gpu/browser 접근 없음, 네임스페이�
   const { ctx, hits } = loadAll();
   assert.strictEqual(hits.count, 0);
   const keys = Object.keys(ctx.__sdrhdr).sort();
-  assert.deepStrictEqual(keys, ['detect', 'hud', 'itm', 'main', 'overlay', 'params', 'renderer']);
+  assert.deepStrictEqual(keys, [
+    'detect',
+    'hud',
+    'itm',
+    'main',
+    'overlay',
+    'params',
+    'renderer',
+    'tonecurve',
+  ]);
   // main.start는 마이크로태스크로 미뤄지며 실패해도 예외를 밖으로 내지 않는다.
   await new Promise((r) => setImmediate(r));
 });
