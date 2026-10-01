@@ -398,6 +398,9 @@
       for (const key of ['preset', 'strength', 'sharpness', 'saturation']) {
         if (next[key] !== undefined && prev[key] !== next[key]) changed[key] = next[key];
       }
+      // custom은 객체라 값으로 비교한다.
+      if (next.custom && JSON.stringify(prev.custom) !== JSON.stringify(next.custom))
+        changed.custom = next.custom;
       if (Object.keys(changed).length > 0) cur.renderer.setParams(changed);
     }
     if (cur && prev.mode !== next.mode) {
@@ -451,6 +454,8 @@
             strength: last.render.strength,
             sharpness: last.render.sharpness,
             saturation: last.render.saturation,
+            custom: last.render.custom,
+            effectivePeak: last.render.effectivePeak,
           }
         : {
             mode: settings ? settings.mode : null,
@@ -458,6 +463,8 @@
             strength: settings ? settings.strength : null,
             sharpness: settings ? settings.sharpness : null,
             saturation: settings ? settings.saturation : null,
+            custom: settings && settings.preset === 'custom' ? ns.params.curveOf(settings) : null,
+            effectivePeak: settings ? ns.params.effectivePeak(settings) : null,
           },
       frameProbe: last.render ? last.render.frameProbe : null,
       flags: {
@@ -466,6 +473,7 @@
         fullscreen: !!document.fullscreenElement,
         blackFrame: blackFlag,
         hdrSource: lc.skip === 'hdrSource',
+        hud: !!(settings && settings.hud),
       },
       lifecycle: {
         state: lc.state,

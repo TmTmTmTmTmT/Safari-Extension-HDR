@@ -281,3 +281,47 @@ test('셰이더 설정: attach 시 hooks.settings로 전달, 변경은 바뀐 �
   t.settings({ ...base, strength: 0.8, sharpness: 0.4, saturation: 1.2, preset: 'vivid' }); // 같은 값은 무시
   assert.strictEqual(t.calls.filter((c) => c.startsWith('setParams')).length, n);
 });
+
+test('custom 곡선·프리셋 변경은 setParams로 custom을 함께 전달한다 (M5)', async () => {
+  const t = await setup();
+  const base = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+    custom: { P: 2, k: 0.5, n: 2, g: 1, s: 1, hs: 1 },
+  };
+  t.settings(base);
+  const n0 = t.calls.filter((c) => c.startsWith('setParams')).length;
+  t.settings({
+    ...base,
+    preset: 'custom',
+    custom: { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 },
+  });
+  const last = JSON.parse(
+    t.calls
+      .filter((c) => c.startsWith('setParams'))
+      .at(-1)
+      .slice(10),
+  );
+  assert.strictEqual(last.preset, 'custom');
+  assert.deepStrictEqual(last.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
+  assert.strictEqual(t.calls.filter((c) => c.startsWith('setParams')).length, n0 + 1);
+  assert.strictEqual(t.renderers.length, 1);
+  // custom만 바뀌어도(슬라이더 이동) 전달된다.
+  t.settings({
+    ...base,
+    preset: 'custom',
+    custom: { P: 3.1, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 },
+  });
+  const last2 = JSON.parse(
+    t.calls
+      .filter((c) => c.startsWith('setParams'))
+      .at(-1)
+      .slice(10),
+  );
+  assert.deepStrictEqual(Object.keys(last2), ['custom']);
+  assert.strictEqual(last2.custom.P, 3.1);
+});

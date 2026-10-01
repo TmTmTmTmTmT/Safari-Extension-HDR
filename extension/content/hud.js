@@ -235,6 +235,14 @@
     };
   }
 
+  // 순수: 사용자 지정 곡선 진단 {P,k,n,g,s,hs}. 없거나 형식이 다르면 null, 값은 소수 둘째 자리.
+  function normalizeCustomDiag(c) {
+    if (!c || typeof c !== 'object') return null;
+    const out = {};
+    for (const k of ['P', 'k', 'n', 'g', 's', 'hs']) out[k] = round2(numOrNull(c[k]));
+    return out;
+  }
+
   // 순수: M3-4 lifecycle 진단. 이벤트 로그는 최근 MAX_EVENTS개, 문자열은 짧게 자른다 (URL 등 미포함).
   function normalizeLifecycle(l) {
     const x = l && typeof l === 'object' ? l : {};
@@ -280,7 +288,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 8,
+      schemaVersion: 9,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -320,7 +328,11 @@
       },
       render: {
         mode: orNull(render.mode),
-        preset: ['accurate', 'balanced', 'vivid'].includes(render.preset) ? render.preset : null,
+        preset: ['accurate', 'balanced', 'vivid', 'custom'].includes(render.preset)
+          ? render.preset
+          : null,
+        custom: normalizeCustomDiag(render.custom),
+        effectivePeak: round2(numOrNull(render.effectivePeak)),
         strength: round2(numOrNull(render.strength)),
         sharpness: round2(numOrNull(render.sharpness)),
         saturation: round2(numOrNull(render.saturation)),
@@ -355,6 +367,7 @@
         fullscreen: !!flags.fullscreen,
         blackFrame: !!flags.blackFrame,
         hdrSource: !!flags.hdrSource,
+        hud: !!flags.hud,
       },
       lifecycle: normalizeLifecycle(s.lifecycle),
       errors: (Array.isArray(s.errors) ? s.errors : []).slice(0, MAX_ERRORS).map((e) => ({

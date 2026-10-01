@@ -82,10 +82,12 @@ test('normalizeSettings: 잘못된 값은 기본값', () => {
   const def = {
     enabled: true,
     mode: 'itm',
-    preset: 'balanced',
-    strength: 0.45,
+    preset: 'accurate',
+    strength: 0.53,
     sharpness: 0,
-    saturation: 1,
+    saturation: 1.05,
+    custom: { P: 2, k: 0.5, n: 2, g: 1, s: 1, hs: 1 },
+    hud: false,
   };
   assert.deepStrictEqual(plain(normalizeSettings(undefined)), def);
   assert.deepStrictEqual(plain(normalizeSettings(null)), def);
@@ -118,11 +120,11 @@ test('params: 프리셋 3종 확정값과 범위 (PLAN C절 표, M4)', () => {
     vivid: { P: 4.0, k: 0.45, n: 2.0, g: 1.0, s: 1.2, hs: 1.0 },
   });
   assert.deepStrictEqual(plain(P.PRESET_BALANCED), plain(P.PRESETS.balanced));
-  assert.strictEqual(P.DEFAULT_PRESET, 'balanced');
+  assert.strictEqual(P.DEFAULT_PRESET, 'accurate');
   assert.deepStrictEqual(plain(P.RANGES), {
     P: [1.0, 8.0],
     k: [0.4, 0.9],
-    n: [1.5, 4],
+    n: [2.0, 4],
     g: [0.8, 1.5],
     s: [0.8, 1.5],
     hs: [0.5, 1.5],
@@ -220,7 +222,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 8);
+  assert.strictEqual(d.schemaVersion, 9);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -261,6 +263,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     fullscreen: false,
     blackFrame: false,
     hdrSource: false,
+    hud: false,
   });
   assert.strictEqual(d.frameProbe, null);
   assert.strictEqual(d.errors.length, 20);
@@ -314,6 +317,7 @@ test('buildDiag: 빈 state에서도 모든 필드가 있고 값은 null/기본',
     fullscreen: false,
     blackFrame: false,
     hdrSource: false,
+    hud: false,
   });
   assert.strictEqual(d.video.colorSpace, null);
   assert.strictEqual(d.lifecycle.state, null);
@@ -596,7 +600,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 8);
+  assert.strictEqual(d.schemaVersion, 9);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -828,18 +832,18 @@ test('슬라이더 정규화: 강도·선명도·채도 범위·타입·step, �
     SHARPNESS,
     SATURATION,
   } = ns.params;
-  assert.deepStrictEqual(plain(STRENGTH), { min: 0, max: 1, step: 0.01, default: 0.45 });
+  assert.deepStrictEqual(plain(STRENGTH), { min: 0, max: 1, step: 0.01, default: 0.53 });
   assert.deepStrictEqual(plain(SHARPNESS), { min: 0, max: 1, step: 0.01, default: 0 });
-  assert.deepStrictEqual(plain(SATURATION), { min: 0.5, max: 1.5, step: 0.01, default: 1 });
+  assert.deepStrictEqual(plain(SATURATION), { min: 0.5, max: 1.5, step: 0.01, default: 1.05 });
   assert.strictEqual(normalizeStrength(0), 0);
   assert.strictEqual(normalizeStrength(1), 1);
   assert.strictEqual(normalizeStrength(0.337), 0.34);
   assert.strictEqual(normalizeStrength(-1), 0);
   assert.strictEqual(normalizeStrength(7), 1);
   for (const bad of [undefined, null, NaN, Infinity, '0.3', {}]) {
-    assert.strictEqual(normalizeStrength(bad), 0.45, String(bad));
+    assert.strictEqual(normalizeStrength(bad), 0.53, String(bad));
     assert.strictEqual(normalizeRange(SHARPNESS, bad), 0);
-    assert.strictEqual(normalizeRange(SATURATION, bad), 1);
+    assert.strictEqual(normalizeRange(SATURATION, bad), 1.05);
   }
   assert.strictEqual(normalizeRange(SATURATION, 0.1), 0.5);
   assert.strictEqual(normalizeRange(SATURATION, 9), 1.5);
@@ -854,8 +858,8 @@ test('슬라이더 정규화: 강도·선명도·채도 범위·타입·step, �
     [s.strength, s.sharpness, s.saturation, s.preset],
     [0.8, 0.3, 1.2, 'vivid'],
   );
-  assert.strictEqual(normalizeSettings({ [KEYS.preset]: '선명' }).preset, 'balanced');
-  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 'x' }).strength, 0.45);
+  assert.strictEqual(normalizeSettings({ [KEYS.preset]: '선명' }).preset, 'accurate');
+  assert.strictEqual(normalizeSettings({ [KEYS.strength]: 'x' }).strength, 0.53);
 });
 
 test('toUniformArray: UNIFORM_ORDER 순서·길이 12, 프리셋 값 반영, 잘못된 입력은 기본값 (M4-B)', () => {
@@ -877,7 +881,7 @@ test('toUniformArray: UNIFORM_ORDER 순서·길이 12, 프리셋 값 반영, 잘
   );
   assert.deepStrictEqual(a, [0.3, 4, 0.45, 2, 1, 1.2, 1, 0.6, 1.1, 0, 0, 0]);
   const d = plain(P.toUniformArray(undefined));
-  assert.deepStrictEqual(d, [0.45, 3, 0.45, 2, 1, 1, 1, 0, 1, 0, 0, 0]);
+  assert.deepStrictEqual(d, [0.53, 2, 0.5, 2, 1, 1, 1, 0, 1.05, 0, 0, 0]);
 });
 
 test('buildDiag: render.strength는 소수 둘째 자리, 없으면 null (M4a)', () => {
@@ -886,4 +890,72 @@ test('buildDiag: render.strength는 소수 둘째 자리, 없으면 null (M4a)',
     0.46,
   );
   assert.strictEqual(plain(ns.hud.buildDiag({})).render.strength, null);
+});
+
+test('normalizeCustom: 범위 클램프·step 반올림·누락은 정확 프리셋 값 (M5-1)', () => {
+  const { normalizeCustom, PRESETS, DETAIL_STEPS, RANGES } = ns.params;
+  assert.deepStrictEqual(plain(normalizeCustom(undefined)), plain(PRESETS.accurate));
+  assert.deepStrictEqual(plain(normalizeCustom('x')), plain(PRESETS.accurate));
+  const c = plain(
+    normalizeCustom({ P: 99, k: 0.1, n: 1.5, g: 1.234, s: 'x', hs: 0.777, extra: 1 }),
+  );
+  assert.deepStrictEqual(c, { P: 8, k: 0.4, n: 2, g: 1.23, s: 1, hs: 0.78 });
+  assert.deepStrictEqual(Object.keys(c), Object.keys(DETAIL_STEPS));
+  for (const key of Object.keys(RANGES)) assert.ok(key in DETAIL_STEPS, key);
+  assert.strictEqual(plain(normalizeCustom({ P: 3.04 })).P, 3);
+  assert.strictEqual(plain(normalizeCustom({ P: 3.06 })).P, 3.1);
+});
+
+test('커스텀 프리셋: normalizeSettings·toUniformArray·curveOf·effectivePeak (M5-1)', () => {
+  const P = ns.params;
+  assert.ok(P.PRESET_IDS.includes('custom'));
+  const raw = {
+    [P.KEYS.preset]: 'custom',
+    [P.KEYS.custom]: { P: 2.6, k: 0.5, n: 2.5, g: 1.0, s: 1.1, hs: 0.9 },
+    [P.KEYS.strength]: 0.5,
+    [P.KEYS.hud]: true,
+  };
+  const s = plain(P.normalizeSettings(raw));
+  assert.strictEqual(s.preset, 'custom');
+  assert.deepStrictEqual(s.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
+  assert.strictEqual(s.hud, true);
+  const u = plain(P.toUniformArray(s));
+  assert.deepStrictEqual(u.slice(0, 9), [0.5, 2.6, 0.5, 2.5, 1, 1.1, 0.9, 0, 1.05]);
+  assert.deepStrictEqual(plain(P.curveOf(s)), s.custom);
+  // 프리셋일 때는 custom 값이 무시된다.
+  const v = plain(P.toUniformArray({ ...s, preset: 'vivid' }));
+  assert.deepStrictEqual(v.slice(1, 7), [4, 0.45, 2, 1, 1.2, 1]);
+  // 유효 피크: 1 + t (P g - 1)
+  assert.ok(Math.abs(P.effectivePeak(s) - (1 + 0.5 * (2.6 - 1))) < 1e-12);
+  assert.ok(Math.abs(P.effectivePeak({ preset: 'accurate', strength: 0.53 }) - 1.53) < 1e-12);
+  assert.ok(Math.abs(P.effectivePeak({ preset: 'balanced', strength: 0.5 }) - 2) < 1e-12);
+  assert.ok(Math.abs(P.effectivePeak({ preset: 'balanced', strength: 0 }) - 1) < 1e-12);
+  assert.ok(
+    Math.abs(P.effectivePeak({ preset: 'custom', custom: { P: 2, g: 1.5 }, strength: 1 }) - 3) <
+      1e-12,
+  );
+  // 기본 설정
+  assert.ok(Math.abs(P.effectivePeak(P.normalizeSettings({})) - 1.53) < 1e-12);
+});
+
+test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
+  const d = plain(
+    ns.hud.buildDiag({
+      render: {
+        preset: 'custom',
+        custom: { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9, extra: 3 },
+        effectivePeak: 1.8049,
+      },
+      flags: { hud: true },
+    }),
+  );
+  assert.strictEqual(d.schemaVersion, 9);
+  assert.strictEqual(d.render.preset, 'custom');
+  assert.deepStrictEqual(d.render.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
+  assert.strictEqual(d.render.effectivePeak, 1.8);
+  assert.strictEqual(d.flags.hud, true);
+  const e = plain(ns.hud.buildDiag({}));
+  assert.strictEqual(e.render.custom, null);
+  assert.strictEqual(e.render.effectivePeak, null);
+  assert.strictEqual(e.flags.hud, false);
 });

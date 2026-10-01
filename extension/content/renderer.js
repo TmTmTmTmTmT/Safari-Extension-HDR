@@ -819,6 +819,14 @@
         sharpness: typeof shaderSettings.sharpness === 'number' ? shaderSettings.sharpness : null,
         saturation:
           typeof shaderSettings.saturation === 'number' ? shaderSettings.saturation : null,
+        custom:
+          shaderSettings.preset === 'custom'
+            ? Object.assign({}, globalThis.__sdrhdr.params.curveOf(shaderSettings))
+            : null,
+        effectivePeak:
+          typeof shaderSettings.strength === 'number'
+            ? globalThis.__sdrhdr.params.effectivePeak(shaderSettings)
+            : null,
         path,
         frames,
         copyTimesMs: copyTimes.slice(),

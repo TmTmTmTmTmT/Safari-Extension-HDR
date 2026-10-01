@@ -100,6 +100,12 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 
 - M4 1차 회신(2026-10-01, `results/result-M4-20261001-accurate-first.json`, 프리셋 accurate·강도 43%·선명도 0·채도 105%, 밝기 미기재): 사용자 보고 "잘됨". 새 셰이더(uniform·혼합·채도)가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, loopFps 71·displayMissRate 0·JS p95 1 ms·video 드롭 0, 30fps 소스). 체크리스트 M4 절의 나머지(프리셋 비교, 뭉개짐 시작 강도, 선명도 GPU 비용·끊김, 채도 선호)는 [미확인]. 확장 끄고 켜기를 반복한 이벤트 로그는 정상(중복 disable은 popup 모드 토글)
 
+## M5 진행 (브랜치 claude/m5-ui, 2026-10-01, Sonnet)
+
+- 1단계 완료(PLAN M5-5): `params.js` 기본값 갱신(정확·강도 0.53·채도 1.05), `RANGES.n` 하한 2.0(`sim/presets.py`·`sim/sweep.py` 격자 동일), 사용자 지정(`custom`·`normalizeCustom`·`curveOf`·`effectivePeak`·`DETAIL_STEPS`·키 `sdrhdr.custom`/`sdrhdr.hud`), renderer `setParams`가 custom 병합·getStats에 custom·effectivePeak, main이 custom 변경 전달·진단에 hud, 진단 schemaVersion 9(`render.custom`·`effectivePeak`, `flags.hud`, preset에 custom), 스키마·parse-result
+- → verify: lint 통과, npm test 181/181, test:dom 14/14, pytest sim 157/157 / (1) 로컬 Mac
+- 다음: 2단계(impl-worker W-A popup ↔ W-B HUD 병렬) → 본 세션 HUD 연결·체크리스트 M5 절
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
