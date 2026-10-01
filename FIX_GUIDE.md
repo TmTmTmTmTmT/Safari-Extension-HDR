@@ -13,6 +13,12 @@
 
 ---
 
+## R0. CI 수정: parse-result 테스트의 결과 파일 가정 (먼저 처리)
+
+- **원인**: `sim/test_parse_result.py::test_v1_to_v4_have_no_vp9_paths_section`이 `results/result-M1-*.json` 전부를 v1~v4로 가정한다. 사용자 회신 P0-6 결과(`result-M1-20261001-*-p06.json`, schemaVersion 5)를 `results/`에 넣자 실패했다(`75aa21a` CI ubuntu).
+- **수정 방향**: 이 테스트는 파일을 읽어 `schemaVersion < 5`인 것만 넘기도록 한다. 테스트 의도(v1~v4에는 P0-6 절이 없다)는 그대로 유지한다. 결과 파일은 옮기거나 지우지 않는다.
+- **검증(1)**: `python3 -m pytest sim` 전부 통과, CI ubuntu green.
+
 ## R1. frameProbe에 `vf` 경로 추가
 
 - **수정 방향**: frameProbe에 네 번째 경로 `vf`를 추가한다. `new VideoFrame(video)` → `importExternalTexture({source: frame})` → 기존 ext 진단용 64×36 rgba8unorm 렌더·되읽기 → submit 후 `frame.close()`. 평균 `vf`, 예외 `vfErr`(name), 동기 시간 `vfSyncMs`를 기록한다. `VideoFrame`이 content script에서 정의되지 않으면 `vfErr: 'ReferenceError'`로 기록한다(isolated world 지원 여부 확인용).
@@ -87,7 +93,7 @@
 
 ## 병렬 분할 (R 회차)
 
-- R1~R3는 모두 `renderer.js`·`detect.js`·`hud.js`·스키마를 건드린다. impl-worker 1개가 R1 → R2 → R3 → R4(체크리스트) 순서로 한다.
+- R1~R3는 모두 `renderer.js`·`detect.js`·`hud.js`·스키마를 건드린다. R0(CI 수정, 테스트 1개)는 본 세션이 먼저 처리해 push한다. 이후 impl-worker 1개가 R1 → R2 → R3 → R4(체크리스트) 순서로 한다.
 
 ## 병렬 분할 (K1)
 
