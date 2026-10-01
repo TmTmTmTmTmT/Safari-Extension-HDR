@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.13 (2026-10-01, M4a 판정, M4 입력 자료)
+> 버전: v1.14 (2026-10-01, D-M4 상세 계획)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -174,8 +174,8 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M2 | 최소 확장 + Xcode | extension 최소판(고정 균형 프리셋), scripts/make-xcode.sh, ci.yml macOS job | Sonnet(코드, 상세는 D-M2) → **사용자 Mac에서 make-xcode.sh 실행 후 push** | → verify: GH Actions macOS `xcodebuild CODE_SIGNING_ALLOWED=NO` 성공(A15/A16) → 사용자 설치 → 0b G4 판정(Opus) |
 | M3 | 감지·수명주기 (상세: D-M3) | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
 | M4a | HDR 강도 슬라이더 (상세: D-M4a) | ITM 출력과 원본 사이 선형 혼합 강도 1개, popup 슬라이더, 진단 v7 | Sonnet 본 세션(파일 간 결합이 커서 분할하지 않음) | → verify: 단위·pytest(혼합 성질) 통과 + 사용자 Mac 선호 강도 회신 |
-| M4 | 알고리즘·프리셋 확정 | 셰이더 최종, JS 미러, 프리셋 수치 | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
-| M5 | popup + HUD | 프리셋/상세 UI, **하이라이트(화이트포인트) 휘도 슬라이더**(D-M4a M4a-5), HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
+| M4 | 알고리즘·프리셋 확정 (상세: D-M4) | 셰이더 최종(파라미터 유니폼화), JS 미러, 프리셋 수치, 기본 강도, popup 프리셋 선택(M5에서 앞당김) | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
+| M5 | popup + HUD | 상세 슬라이더 UI, **하이라이트(화이트포인트) 휘도 슬라이더**(D-M4a M4a-5), HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 | 해상도 정책 튜닝, install.md(7일 재서명, "서명되지 않은 확장 허용" 재설정) | Sonnet | → verify: 사용자 Mac 2160p60 30분 soak에서 드롭 < 1%, HUD 메모리 추세 평탄 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
@@ -312,6 +312,51 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
 - 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
 - M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
+
+### D-M4. M4 상세 계획 (2026-10-01, Opus)
+
+목적: 사용자 회신(M4a-6)의 "강도 70% 부근부터 하이라이트가 뭉개짐"을 곡선으로 해결하고, 프리셋 3종 수치와 기본 강도를 확정한다. 세 곳(WGSL·JS 미러·numpy)의 수식 일치를 테스트로 묶는다.
+
+**M4-0. 근거와 가설**
+- 기존 S5: 하이라이트 인접 코드 스텝 증폭 `amp_enc` 최대 정확 8.51 / 균형 7.99 / 선명 6.67. 강도 t로 섞으면 대략 `1 + t(amp−1)`이라 균형 t=0.7에서 약 6, t=0.5에서 약 5다.
+- 가설 H1 [추정]: 뭉개짐의 주원인은 곡선 꼭대기 기울기(`f'(1) = 1 + n(P'−1)`, 균형 약 15)로 8bit 상단 코드 몇 개가 넓은 휘도 범위에 퍼지는 것(계단·번짐)과 하이라이트 채도 감소(hs<1)다. 헤드룸 클리핑은 밝기 최대에서만 추가 원인이다(밝기 중간에서도 같은 지점에서 뭉개짐).
+- 따라서 같은 피크를 유지하면서 꼭대기 기울기를 낮추는 방향(k를 낮춰 확장 구간을 넓히고 n을 낮춰 기울기를 분산)을 찾는다.
+
+**M4-1. 확정 사항 (지금 결정)**
+- 기본 강도 **0.45**(M4a-6). `params.STRENGTH.default`와 sim·테스트 기대값을 바꾼다.
+- 곡선 식(C절 ITM 3)은 유지한다. 1차 탐색은 파라미터만 바꾼다. M4-A에서 기준을 만족하는 조합이 없을 때만 Opus가 식 변경(꼭대기 기울기 상한이 있는 형태)을 별도로 정한다.
+- 판정 기준(M4-A 결과로 Opus가 수치를 고를 때 적용):
+  - C1 `amp_enc` 최대(회색 램프, t=1): 정확 ≤ 3.5, 균형 ≤ 4.5, 선명 ≤ 5.5. 근거: 사용자 허용 지점(균형 t≈0.5~0.6, 현재 amp 약 5)을 t=1까지 밀어낸다.
+  - C2 기본 강도 0.45에서 피크 `1 + 0.45(P·g−1)` ≤ 2.0(정확·균형, 밝기 최대 헤드룸). 선명은 ≤ 2.5 허용(밝기 중간 이상 사용 전제, 프리셋 설명에 표기).
+  - C3 미드톤 보존: k ≥ 0.45(피부·중간 밝기는 항등 구간에 남긴다).
+  - C4 S4 음수 채널: 정확 0% 유지, 균형 ≤ 2%, 선명 ≤ 12%(현재 수준 이하).
+  - C5 단조·C¹·NaN 없음(S1), 혼합 성질(test_strength) 유지.
+- hs(하이라이트 채도) 기본은 정확·균형 **1.0**으로 올린다(채도 감소로 하얗게 보이는 효과 제거, H1 후반). 선명 1.0 유지.
+
+**M4-A. sim 탐색 (Sonnet, 코드는 sim/만, 확장 코드 변경 없음)**
+- S11 신규 `sim/explore.py` + 테스트: 격자 k ∈ {0.45, 0.5, 0.55, 0.6, 0.65}, n ∈ {1.5, 2.0, 2.5, 3.0}, P ∈ {2.0, 2.5, 3.0, 3.5, 4.0}, g = 1.0, s ∈ {1.0, 1.05, 1.2}, hs = 1.0에서 열: `amp_enc` 최대(t=1, t=0.45), 꼭대기 기울기 f'(1), 기본 강도 피크, S4 음수 채널 %, 미드톤(Y=0.18, 0.4) 출력/입력 비, C1~C5 통과 여부. 통과 행만 모은 요약 표(프리셋별 후보 상위 5개, 정렬: amp_enc 최대 오름차순 → 피크 내림차순)를 출력한다.
+- 결과는 값만 STATUS.md에 요약하고 Opus에 반환한다. Sonnet은 수치를 고르지 않는다.
+- → Opus가 PLAN C절 프리셋 표를 개정한다(M4-A 결과 기록 포함).
+
+**M4-B. 구현 (Opus 표 개정 후, Sonnet)**
+| 파일 | 내용 |
+|---|---|
+| `content/params.js` | `PRESETS`(정확/균형/선명, C절 개정 표), 키 `sdrhdr.preset`(기본 `'균형'` 대신 ASCII id `'balanced'`, 나머지 `'accurate'`·`'vivid'`), `normalizeSettings`에 preset, `STRENGTH.default` 0.45 |
+| `content/tonecurve.js` (신규, manifest에서 params.js 다음) | JS 미러: `srgbEotf`, `srgbOetfExt`, `curveF`, `itmLinear`, `itmLinearStrength`(sim/tonecurve.py와 같은 식). DOM·GPU 의존 없음 |
+| `content/itm.wgsl.js` | ITM 상수(P,K,N,G,S,HS)를 uniform으로 옮긴다: `struct ItmParams { strength, P, k, n, g, s, hs, pad: f32 }`(32바이트), binding 2. 식 본문은 그대로. 이후 probe 셰이더와의 문자열 일치 검사는 종료한다(GUIDELINES 3-1 개정) |
+| `content/renderer.js` | 유니폼 버퍼 32바이트, `setStrength`→`setParams({strength, preset 값})`로 일반화(writeBuffer만). 파이프라인 재생성 없음 |
+| `content/main.js` | preset·strength 변경 시 `setParams`만 호출 |
+| `popup/` | 프리셋 select(정확/균형/선명) 추가. 강도 슬라이더 유지. 다른 UI 추가 금지(상세 슬라이더·하이라이트 슬라이더는 M5) |
+| `hud.js`·스키마·parse-result | schemaVersion 8: `render.preset` |
+| `sim/presets.py` | C절 개정 표와 같은 값 |
+| `tests/unit` | JS 미러 vs numpy 참조 오차 < 1e-4: `sim/`에 참조 생성 스크립트(`python -m sim.export_ref`)를 두고 `tests/unit/fixtures/tonecurve-ref.json`(램프 256, 9³ 격자, 프리셋 3종 × t ∈ {0, 0.45, 1}, 범위 경계값)을 커밋, JS 테스트가 비교. WGSL은 uniform 필드 순서·크기와 `params.js` 직렬화 순서가 같은지 문자열·바이트 검사 |
+
+**M4-C. 사용자 확인 (체크리스트 M4 절, Sonnet 작성)**
+- 밝기 최대·중간 각각, 하이라이트가 많은 SDR 영상 2개(하늘·조명·흰 옷 등)에서 프리셋 3종을 기본 강도 45%로 비교: 선호 프리셋, 뭉개짐이 시작하는 강도 %(프리셋별), 피부·중간톤이 원본과 달라 보이는지(예/아니오).
+- 판정: 균형 프리셋에서 뭉개짐 시작이 강도 85% 이상(또는 100%까지 없음)이고 미드톤 변화 "아니오"면 M4 완료. 아니면 Opus가 FIX_GUIDE로 곡선 식 변경을 지시한다.
+- 회신 JSON: `results/result-M4-<YYYYMMDD>-<밝기>-<프리셋>.json`.
+
+**M4-D. 범위 밖**: 상세 슬라이더 6개·하이라이트(화이트포인트) 슬라이더(M5), 헤드룸 자동 추정, HUD, BT.2446/2408 방식 채택(S6 비교는 참고만).
 
 **M3 판정 완료 (2026-10-01)**: 게이트 판정 기록 "M3 수명주기" 행 참조. M4a 착수 가능.
 
