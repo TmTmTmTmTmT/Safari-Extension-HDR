@@ -208,6 +208,8 @@
       vfErr: nameOrNull(p.vfErr),
       copyErr: nameOrNull(p.copyErr),
       c2dErr: nameOrNull(p.c2dErr),
+      mode: p.mode === 'full' || p.mode === 'single' ? p.mode : null,
+      hdrEarly: typeof p.hdrEarly === 'boolean' ? p.hdrEarly : null,
     };
   }
 
@@ -288,7 +290,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 9,
+      schemaVersion: 10,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),

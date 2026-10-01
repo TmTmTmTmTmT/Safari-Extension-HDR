@@ -180,7 +180,7 @@ JSON의 `render.path`, `render.displayMissRate`, `render.displayHz`, `render.cop
 
 ## M5 상세 슬라이더·HUD 확인 절차 (PLAN D-M5 M5-6)
 
-전제: 전원 연결, SDR 밝기 중간~최대. `git pull`(또는 이미 해당 브랜치) → Xcode Run → Safari 재시작 → 확장 켬. 기본값이 바뀌었다(정확·강도 53%·선명도 0·채도 105%). 이미 저장된 설정은 그대로이므로 예전 값이 보일 수 있다. popup 진단 JSON은 schemaVersion 9다. 확인하지 못한 항목은 [미확인]으로 적는다.
+전제: 전원 연결, SDR 밝기 중간~최대. `git pull`(또는 이미 해당 브랜치) → Xcode Run → Safari 재시작 → 확장 켬. 기본값이 바뀌었다(2026-10-01 지시: 사용자 지정 곡선 P2.0·k0.40·n2.0·밝기 1.22·곡선 채도 1.03·하이라이트 채도 1.03, 강도 43%·선명도 0·채도 105%). 이미 저장된 설정은 그대로이므로 예전 값이 보일 수 있다. popup 진단 JSON은 schemaVersion 9다. 확인하지 못한 항목은 [미확인]으로 적는다.
 
 1. popup 구성: 위에서부터 켜기, 프리셋(정확/균형/선명/사용자 지정), HDR 강도, 선명도, 채도, "유효 피크 ×N.NN", "상세 설정"(접힘), "페이지 HUD 표시" 체크박스, "진단"(접힘) 순서인가. 모드 select와 진단 JSON은 "진단" 안에만 있는가.
 2. 상세 슬라이더(상세 설정 펼침): 하이라이트 밝기·확장 시작·곡선 지수·밝기·곡선 채도·하이라이트 채도 6개. 각각 움직이면 (a) 1초 안에 화면에 반영되는가 (b) 프리셋 select가 "사용자 지정"으로 바뀌는가. 곡선 지수는 2.0 아래로 내려가지 않는가.
@@ -192,6 +192,23 @@ JSON의 `render.path`, `render.displayMissRate`, `render.displayHz`, `render.cop
 8. 사용자 지정 상태에서 진단 JSON 1개를 `results/result-M5-<YYYYMMDD>-custom.json`으로 저장한다(`render.preset` custom, `render.custom`, `render.effectivePeak` 확인).
 
 판정: 2(a)(b)·6(a)(b)(c)(d)가 모두 예(또는 없음)이면 M5 완료. 실패 항목은 FIX_GUIDE로 처리한다.
+
+## M6 성능·안정화 확인 절차 (PLAN D-M6 M6-2)
+
+전제: 전원 연결, 저전력 모드 끔, 확장 최신 빌드(manifest 1.0.0, 진단 schemaVersion 10). `git pull`(또는 해당 브랜치) → Xcode Run → Safari 재시작. 기본 설정(사용자 지정 곡선, 강도 43%, 채도 105%)과 페이지 HUD 켬 상태로 한다. 확인하지 못한 항목은 [미확인]으로 적는다.
+
+1. **30분 soak**: 2160p60 SDR 영상(재생목록 가능), 창 모드, 밝기 중간.
+   - (a) 시작 5분 시점과 30분 시점에 popup 진단 JSON을 각각 저장한다(`results/result-M6-<YYYYMMDD>-soak-5min.json`, `...-30min.json`). `videoDropped / videoTotal`을 본다.
+   - (b) 같은 두 시점에 활동 상태 보기(Activity Monitor)에서 youtube.com의 "Safari 웹 콘텐츠" 프로세스 메모리(MB)를 적는다. 어느 프로세스인지 모르겠으면 Safari 전체 합계도 좋다.
+   - (c) 두 시점의 HUD fps·누락%를 적고, 30분 동안 끊김이 눈에 띄었는지(없음/가끔/자주) 적는다.
+   - 기준: 드롭률 < 1%, 메모리 증가 < 15%(5분 → 30분), 끊김 없음.
+2. **전체화면 비용**: 같은 영상을 전체화면으로 2분씩, (i) 확장 켬(itm), (ii) popup "진단"의 모드 `baseline`으로 각각 진단 JSON 저장(`...-fullscreen-itm.json`, `...-fullscreen-baseline.json`). 기준: 누락률(`displayMissRate`) 차 itm − baseline < 1%p, `jsP95` ≤ 4 ms. 넘으면 Opus가 캔버스 해상도 상한(M6-4)을 지시한다.
+3. **60Hz 확인(A24)**: 시스템 설정 디스플레이 주사율을 60Hz로 바꾸고 HUD fps를 확장 켬(itm)과 `baseline`에서 각각 적는다. 둘 다 약 30이면 Safari·OS 쪽 현상으로 기록하고 종료, itm만 30이면 알려 준다. 끝나면 주사율을 되돌린다.
+4. **비60fps 소스(C-b/C-c)**: 24·25·30fps 영상 각 1개를 확장 켬과 확장 끔에서 보고 끊김을 비교한다(없음/가끔/자주). 확장 끔에서도 같으면 원본 cadence로 기록하고 종료.
+5. **4K HDR 첫 attach**: HDR 표시가 있는 4K 영상을 새로 열 때 첫 1초 안에 멈칫함이 있는지(없음/있음). 직후 진단 JSON에서 `frameProbe.hdrEarly`가 true이고 `lifecycle.skipReason`이 `hdrSource`인지 확인해 저장한다(`...-hdr-first.json`).
+6. **정상 상태 단일 측정**: 1번 영상 재생 중 진단 JSON에서 `frameProbe.mode`가 `single`인지, `frameProbe.ms`가 이전(수십 ms)보다 작은지(수 ms) 확인한다.
+
+판정: 1(드롭 < 1%·메모리 < 15% 증가·끊김 없음)과 5(멈칫함 없음)가 충족되면 M6 완료. 2·3·4는 기록용이며 2가 기준을 넘으면 M6-4를 Opus가 지시한다.
 
 ## 회신 방법
 

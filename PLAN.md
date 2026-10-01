@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.17 (2026-10-01, M4 판정, D-M5 상세 계획)
+> 버전: v1.18 (2026-10-01, M5 판정, D-M6 상세 계획)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -178,7 +178,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M4a | HDR 강도 슬라이더 (상세: D-M4a) | ITM 출력과 원본 사이 선형 혼합 강도 1개, popup 슬라이더, 진단 v7 | Sonnet 본 세션(파일 간 결합이 커서 분할하지 않음) | → verify: 단위·pytest(혼합 성질) 통과 + 사용자 Mac 선호 강도 회신 |
 | M4 | 알고리즘·프리셋 확정 (상세: D-M4) | 셰이더 최종(파라미터 유니폼화), JS 미러, 프리셋 수치, 기본 강도, popup 프리셋 선택·선명도 슬라이더·채도 슬라이더(M5에서 앞당김) | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
 | M5 | popup + HUD (상세: D-M5) | 기본값 갱신, 상세 슬라이더 6개("하이라이트 밝기" = P, 사용자 지정 프리셋), 진단 영역 정리, 페이지 HUD, 진단 v9 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
-| M6 | 성능·안정화·문서 | 해상도 정책 튜닝, install.md(7일 재서명, "서명되지 않은 확장 허용" 재설정) | Sonnet | → verify: 사용자 Mac 2160p60 30분 soak에서 드롭 < 1%, HUD 메모리 추세 평탄 |
+| M6 | 성능·안정화·문서 (상세: D-M6) | frameProbe 비용 절감(HDR 조기 판정·정상 상태 단일 경로), install.md, 측정 절차(soak·전체화면·60Hz·비60fps), 이월 항목 정리, 버전 1.0.0 | Sonnet 본 세션 + impl-worker(renderer ↔ docs 병렬) | → verify: 단위 테스트(프로브 순서), 사용자 Mac 2160p60 30분 soak 드롭 < 1%·메모리 증가 < 15%, 4K HDR 첫 attach 끊김 없음 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
@@ -314,6 +314,48 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
 - 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
 - M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
+
+### D-M6. M6 상세 계획 (2026-10-01, Opus)
+
+목적: 오래 켜 두고 써도 끊김·메모리 증가가 없게 하고, 다시 설치할 때 따라 할 문서를 남긴다. 기능 추가는 하지 않는다.
+
+**M6-1. frameProbe 비용 절감 (renderer.js)**
+근거: 4K HDR 첫 frameProbe에서 `c2dSyncMs` 608 ms(M3 회신), 정상 상태 30초마다 `copySyncMs` 12~22 ms·`c2dSyncMs` 22~31 ms(M4·M5 회신). 30초마다 프레임 1~2개를 놓칠 수 있는 메인 스레드 점유다.
+- (a) **HDR 조기 판정**: 경로 결정 전 첫 회차는 vf를 **먼저** 측정한다(현행 ext → vf → copy → c2d 순서를 vf → ext → copy → c2d로). vf 측정에서 얻은 `colorSpace`가 `detect.isHdrSource`로 HDR이면 나머지(ext·copy·c2d)를 측정하지 않고 바로 `onProbe`를 부른다(frameProbe의 ext/copy/c2d는 null, `hdrEarly: true`). main은 현행대로 skipped(hdrSource) 처리. 순서 변경이 경로 선택 결과(choosePath의 ext 우선)를 바꾸지 않음을 테스트로 고정한다.
+- (b) **정상 상태 단일 경로**: 경로가 결정된 뒤의 30초 주기 회차는 **선택 경로 하나만** 측정한다. 그 값이 검정 기준(< 2) 아래일 때만 같은 회차에서 나머지(아래 단계 경로와 c2d)를 추가 측정해 현행 `stepDownPath`·`nextBlackStreak` 판정을 그대로 한다. 밝으면 c2d·copy를 측정하지 않는다. frameProbe 진단 객체에 `mode: 'full' | 'single'`를 추가한다.
+- (c) 결정 전(pending 포함) 회차와 소스 변경 후 첫 회차는 (a) 규칙의 전체 측정을 유지한다(경로 선택 근거 보존).
+- 효과 기대 [추정]: 정상 상태에서 c2d·copy 동기 시간(약 35~50 ms/30초)이 사라지고, 4K HDR 첫 attach의 600 ms 점유가 vf 1회(약 1 ms)로 준다.
+- 진단: schemaVersion 10(`frameProbe.mode`, `frameProbe.hdrEarly`). 스키마·parse-result 갱신.
+
+**M6-2. 측정 절차 (체크리스트 M6 절, 코드 변경 없음)**
+- (1) **30분 soak**: 2160p60 SDR 영상, 창 모드, 정확 프리셋·기본값, HUD 켬. 시작 5분 시점과 30분 시점에 (a) 진단 JSON 저장(`videoDropped/videoTotal`), (b) 활성 상태 보기(Activity Monitor)에서 youtube.com 웹 콘텐츠 프로세스 메모리, (c) HUD의 fps·누락%. 기준: 드롭률 < 1%, 메모리 증가 < 15%(5분 → 30분), 끊김 육안 없음.
+- (2) **전체화면 비용**: 같은 영상 전체화면 2분, 확장 켬(itm) vs popup 진단 영역의 `baseline` 각각 진단 JSON. 기준: 누락률 차(itm − baseline) < 1%p, JS p95 ≤ 4 ms. 넘으면 M6-4로.
+- (3) **60Hz 확인(A24)**: 시스템 설정 디스플레이 주사율 60Hz, HUD fps를 확장 켬(itm)과 `baseline`에서 각각 본다. 둘 다 약 30이면 Safari·OS 쪽 현상으로 기록하고 종료(확장 범위 밖). itm만 30이면 FIX_GUIDE.
+- (4) **비60fps 소스(C-b/C-c)**: 24·25·30fps 영상 1개씩 itm과 확장 끔에서 끊김 육안 비교. 확장 끔에서도 같으면 원본 cadence(C-c)로 기록하고 종료.
+- (5) **4K HDR 첫 attach**: HDR 영상을 새로 열 때 첫 1초 안에 멈칫함이 있는지(없음/있음), 진단 `frameProbe.hdrEarly` true 확인.
+
+**M6-3. 문서**
+- `docs/install.md`(신규): 요구 환경(macOS·Safari 버전, Xcode), 빌드(`scripts/make-xcode.sh`는 최초 1회, 이후 Xcode Run만), 서명(개인 팀, `DEVELOPMENT_TEAM` 커밋 금지), Safari 설정(확장 켜기, youtube.com 허용, 개발자 메뉴 "서명되지 않은 확장 허용"은 Safari 재시작마다 [확인 필요]), 무료 개인 팀 서명의 7일 만료와 재빌드 방법, popup 사용법(프리셋·강도·선명도·채도·상세 설정·유효 피크·HUD), 문제 해결(영상이 원본 그대로일 때 진단 JSON의 `errors`·`lifecycle.skipReason` 읽는 법, HDR·DRM 영상은 의도적으로 건너뜀).
+- 확인하지 않은 내용은 [확인 필요]로 표기한다(GUIDELINES 1-5 정신).
+- manifest `version` 0.1.0 → **1.0.0**(M6 완료 시점, 이 PR에 포함).
+
+**M6-4. 조건부: 전체화면 해상도 상한 (M6-2 (2)가 기준을 넘을 때만)**
+- 캔버스 백킹 크기 상한을 표시×DPR의 0.75배로 낮추는 순수 함수 인자 추가(`canvasResolution`에 scaleCap). 기본은 1.0(현행)이고 측정 결과로 Opus가 값을 정한다. 이번 PR에서는 구현하지 않는다.
+
+**M6-5. 이월 항목 정리 (결정)**
+- K1(프로브 지표 정리, schemaVersion 6 예정): 프로브는 M1·M2 판정 도구였고 확장 진단이 대체했다 → **종료(불필요)**.
+- S2 C¹ 검사법: `RANGES.n` 하한 2.0으로 n<2를 쓰지 않으므로 → **종료**.
+- 같은 소스 프레임 재렌더 생략(ProMotion 2회 렌더, C절): rVFC가 Safari에서 표시 프레임보다 적게 호출(A20)되어 프레임 변화 신호로 쓸 수 없고 `currentTime`은 프레임 단위가 아니다 → **보류**(GPU 예산 내, 측정상 문제 없음).
+- M3 [미확인](광고, PiP 복귀, 미니플레이어, 극장 셀렉터): 진단·사용자 체감 영향 없음 → 보류, 회귀 시 FIX_GUIDE.
+- 진단 `milestone: 'M2'` 표기: 스키마 호환을 위해 유지.
+
+**M6-6. 작업 분할과 검증**
+- W-A(impl-worker): `renderer.js` M6-1 + 단위 테스트(첫 회차 vf 우선·HDR 조기 종료·정상 상태 단일 경로·검정 시 확장 측정·경로 선택 결과 불변).
+- W-B(impl-worker): `docs/install.md`.
+- 본 세션(Sonnet): hud.js·스키마·parse-result v10, manifest 버전, 체크리스트 M6 절, STATUS.
+- (1) lint·npm test·test:dom·pytest sim. (2) CI. (3) 사용자 체크리스트 M6 절. 판정: (1) soak 기준 충족, (5) 멈칫함 없음이면 M6 완료(2)(3)(4)는 기록, (2) 초과 시 M6-4 지시.
+
+**M5 판정 완료 (2026-10-01)**: 게이트 판정 기록 "M5 UI" 행 참조. M6 착수.
 
 ### D-M5. M5 상세 계획 (2026-10-01, Opus)
 
@@ -657,6 +699,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M3 수명주기 | 2026-10-01 | results/result-M3-20261001-1-6.json + 사용자 보고 | **통과(범위 조정)** | 체크리스트 1 SPA(navCount 4·srcChanges 3, 소스 변경 후 약 1.2초에 판정)·2 화면 모드(극장·전체화면·기본)·3 창 크기·5 HDR 원본 스킵(transfer pq, bt2020)·7 DRM 통과. 4 광고(프리미엄 계정), 6 PiP 복귀 후 재개, 미니플레이어, 극장·미니플레이어 셀렉터 확정은 **사용자 결정으로 생략**하고 [미확인]으로 남긴다(진단용 `playerMode`만 영향, 배치·스킵 로직과 무관). PiP 진입 시 Apple 네이티브 PiP로 넘어가 확장이 동작하지 않는 것은 예상 동작. 후속: 회귀 발견 시 FIX_GUIDE. M6 후보 추가: HDR 4K 첫 frameProbe에서 `c2dSyncMs` 608 ms(메인 스레드 점유, 소스 변경·attach마다 반복 가능, 체감 보고 없음). PR #5 머지 가능 |
 | M4a 강도 슬라이더 | 2026-10-01 | 사용자 회신(체크리스트 M4a) + 진단 JSON 1개(`results/result-M4a-20261001-strength68.json`로 저장 예정) | **통과** | (a) 드래그 후 1초 안 반영. WGSL 강도 혼합 셰이더가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, frames 1220, JS p95 1 ms). 선호·뭉개짐 강도는 D-M4a M4a-6에 M4 입력으로 기록. 측정 조건 중 진단 JSON의 밝기는 미기재 |
 | M4 알고리즘·프리셋 | 2026-10-01 | results/result-M4-20261001-accurate-first.json + 사용자 회신 | **통과(범위 조정)** | 새 셰이더(uniform 파라미터·강도 혼합·채도)가 Safari 27.2에서 컴파일·동작(errors 없음, path vf, 갱신 누락 0, JS p95 1 ms, 드롭 0). 사용자 선택: 정확 프리셋·강도 53%·선명도 0·채도 105% → M5-0에서 기본값으로 채택. 체크리스트 M4 절 중 뭉개짐 시작 강도(균형 85% 목표), 중간톤 비교, 선명도 GPU 비용·헤일로는 사용자가 원하는 설정을 찾아 측정하지 않음 → [미확인]. 선명도는 기본 0이라 비용 영향 없음, 사용자가 쓰기 시작하면 체크리스트 M4 4번으로 확인. M5 착수 |
+| M5 UI | 2026-10-01 | results/result-M5-20261001-custom-hud.json + 사용자 회신("체크리스트 제대로 나옴") | **통과** | 상세 슬라이더·사용자 지정 저장·유효 피크(2.0)·HUD(flags.hud true)가 Safari 27.2에서 동작, errors 없음, JS p95 1 ms, 드롭 0. 사용자 보고로 체크리스트 M5 절 항목 충족. 갱신 누락 6.9%(HUD 켬, 60fps 소스)는 M2 baseline 4.8%와 같은 규모라 M6-2 soak에서 다시 본다 |
 
 ---
 

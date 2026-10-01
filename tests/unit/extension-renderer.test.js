@@ -274,7 +274,7 @@ test('L5: renderer getStats api 타입 (boolean, toneMapping string)', async () 
 
 const has = (calls, prefix) => calls.some((c) => c.startsWith(prefix));
 
-test('N1/R1: 재생 중 readyState>=2이면 시작 직후 1회, 네 경로 값과 호출 순서', async () => {
+test('N1/R1: 재생 중 readyState>=2이면 시작 직후 1회, 네 경로 값과 호출 순서(vf 우선)', async () => {
   const s = setup({ readyState: 4, paused: false, ext: 10, vf: 30, copy: 50, c2d: 90 });
   await s.renderer.start();
   await s.settle();
@@ -290,9 +290,10 @@ test('N1/R1: 재생 중 readyState>=2이면 시작 직후 1회, 네 경로 값�
   const iVf = order.indexOf('importExternalTexture:vf');
   const iCopy = order.findIndex((c) => c.startsWith('copyExternalImageToTexture'));
   const iC2d = order.indexOf('drawImage');
-  assert.ok(iExt >= 0 && iExt < iVf && iVf < iCopy && iCopy < iC2d, order.join(','));
+  assert.ok(iVf >= 0 && iVf < iExt && iExt < iCopy && iCopy < iC2d, order.join(','));
   // vf: frame 생성 -> import -> 되읽기 전에 close (submit 후)
   assert.ok(order.indexOf('new VideoFrame') < iVf && iVf < order.indexOf('frame.close'));
+  assert.ok(order.indexOf('frame.close') < iExt, 'vf 측정이 끝난 뒤 ext');
   assert.ok(s.frames.length === 1 && s.frames[0].closed === 1);
   assert.ok(s.calls.includes('createTexture:rgba8unorm:64x36'));
   assert.ok(s.calls.includes('copyTextureToBuffer:256:64x36'));
@@ -957,6 +958,15 @@ test('M3: restartSource는 경로·frameProbe·colorSpace·측정을 비우고 G
   await s.settle();
   assert.strictEqual(s.renderer.getStats().path, 'ext');
   assert.ok(s.renderer.getStats().colorSpace);
+  // restartSource는 곧바로 첫 회차(vf 우선)를 시작해 vf 동기 구간에서 colorSpace를 다시 채운다.
+  // 이전 소스 값이 남지 않았음을 보려고 새 소스의 값을 다르게 둔다.
+  const nextCs = {
+    primaries: 'smpte170m',
+    transfer: 'smpte170m',
+    matrix: 'smpte170m',
+    fullRange: false,
+  };
+  s.vfColorSpace = nextCs;
   s.video.currentTime = 1;
   s.flush();
   assert.strictEqual(s.renders, 1);
@@ -965,7 +975,7 @@ test('M3: restartSource는 경로·frameProbe·colorSpace·측정을 비우고 G
   const st = s.renderer.getStats();
   assert.strictEqual(st.path, null);
   assert.strictEqual(st.frameProbe, null);
-  assert.strictEqual(st.colorSpace, null);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(st.colorSpace)), nextCs);
   assert.strictEqual(st.frames, 0);
   assert.strictEqual(s.canvas.style.visibility, 'hidden');
   assert.ok(st.api.device, 'device 재사용');
@@ -1058,5 +1068,131 @@ test('M5: getStats는 custom일 때 곡선·유효 피크를 돌려준다, 프�
     s.uniforms[0].writes.at(-1),
     [0.5, 2.6, 0.5, 2.5, 1, 1.1, 0.9, 0, 1, 0, 0, 0].map(Math.fround),
   );
+  s.renderer.destroy();
+});
+
+// ---- M6-1: frameProbe 비용 절감 ----
+const probeOrder = (calls) =>
+  calls
+    .map((c) =>
+      c === 'importExternalTexture:vf'
+        ? 'vf'
+        : c === 'importExternalTexture'
+          ? 'ext'
+          : c.startsWith('copyExternalImageToTexture:') &&
+              !c.startsWith('copyExternalImageToTexture:full')
+            ? 'copy'
+            : c === 'drawImage'
+              ? 'c2d'
+              : null,
+    )
+    .filter(Boolean);
+
+test('M6: 결정 전 첫 회차는 vf -> ext -> copy -> c2d 순서이고 경로 선택 결과는 측정 순서와 무관', async () => {
+  const a = setup({ readyState: 4, paused: false, ext: 100, vf: 100, copy: 100, c2d: 100 });
+  await a.renderer.start();
+  await a.settle();
+  assert.deepStrictEqual(probeOrder(a.calls), ['vf', 'ext', 'copy', 'c2d']);
+  assert.strictEqual(a.renderer.getStats().path, 'ext');
+  assert.strictEqual(a.probes[0].mode, 'full');
+  assert.strictEqual(a.probes[0].hdrEarly, false);
+  a.renderer.destroy();
+  const b = setup({ readyState: 4, paused: false, ext: 0, vf: 60, copy: 60, c2d: 60 });
+  await b.renderer.start();
+  await b.settle();
+  assert.deepStrictEqual(probeOrder(b.calls), ['vf', 'ext', 'copy', 'c2d']);
+  assert.strictEqual(b.renderer.getStats().path, 'vf');
+  b.renderer.destroy();
+});
+
+test('M6: vf colorSpace가 HDR이면 vf만 측정하고 조기 종료, 캔버스 숨김·pendingCount 불변', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  s.vfColorSpace = { primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl', fullRange: false };
+  await s.renderer.start();
+  await s.settle();
+  assert.deepStrictEqual(probeOrder(s.calls), ['vf']);
+  assert.strictEqual(s.probes.length, 1);
+  const p = s.probes[0];
+  assert.strictEqual(p.hdrEarly, true);
+  assert.strictEqual(p.mode, 'full');
+  assert.deepStrictEqual(
+    [p.ext, p.copy, p.c2d, p.extErr, p.copyErr, p.c2dErr, p.extSyncMs, p.copySyncMs, p.c2dSyncMs],
+    [null, null, null, null, null, null, null, null, null],
+  );
+  assert.strictEqual(p.vf, 100);
+  assert.strictEqual(p.colorSpace.transfer, 'pq');
+  assert.deepStrictEqual(s.paths, ['pending']);
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  assert.strictEqual(s.renders, 0);
+  // 조기 종료는 pendingCount·noneStreak를 바꾸지 않는다: 이후 일반 회차가 곧바로 경로를 결정한다.
+  s.vfColorSpace = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false };
+  s.now = 30001;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  assert.strictEqual(s.probes[1].hdrEarly, false);
+  assert.strictEqual(s.probes[1].mode, 'full');
+  assert.strictEqual(s.canvas.style.visibility, '');
+  s.renderer.destroy();
+});
+
+test('M6: 결정 후 회차는 선택 경로 하나만 측정(single), copy·c2d 호출 없음', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  s.calls.length = 0;
+  s.now = 30001;
+  s.intervals[0]();
+  await s.settle();
+  assert.deepStrictEqual(probeOrder(s.calls), ['ext']);
+  const p = s.probes[1];
+  assert.strictEqual(p.mode, 'single');
+  assert.strictEqual(p.hdrEarly, false);
+  assert.strictEqual(p.ext, 100);
+  assert.deepStrictEqual(
+    [p.vf, p.copy, p.c2d, p.vfErr, p.copyErr, p.c2dErr, p.vfSyncMs, p.copySyncMs, p.c2dSyncMs],
+    [null, null, null, null, null, null, null, null, null],
+  );
+  assert.deepStrictEqual(s.paths, ['ext', 'ext']);
+  s.renderer.destroy();
+});
+
+test('M6: 선택 경로가 검으면 같은 회차에서 전체 측정으로 vf 전환(모든 경로 1회씩)', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  Object.assign(s.vals, { ext: 0, vf: 100, copy: 60, c2d: 60 });
+  s.calls.length = 0;
+  s.now = 30001;
+  s.intervals[0]();
+  await s.settle();
+  const order = probeOrder(s.calls);
+  assert.deepStrictEqual([...order].sort(), ['c2d', 'copy', 'ext', 'vf']);
+  assert.strictEqual(order[0], 'ext');
+  const p = s.probes[1];
+  assert.strictEqual(p.mode, 'full');
+  assert.deepStrictEqual([p.ext, p.vf, p.copy, p.c2d], [0, 100, 60, 60]);
+  assert.strictEqual(s.renderer.getStats().path, 'vf');
+  s.renderer.destroy();
+});
+
+test('M6: 단일 측정 중 선택 경로 예외도 전체 측정으로 폴백, 경로는 유지', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  Object.assign(s.vals, { ext: new Error('x'), vf: 100, copy: 60, c2d: 60 });
+  s.calls.length = 0;
+  s.now = 30001;
+  s.intervals[0]();
+  await s.settle();
+  const order = probeOrder(s.calls);
+  assert.deepStrictEqual([...order].sort(), ['c2d', 'copy', 'ext', 'vf']);
+  const p = s.probes[1];
+  assert.strictEqual(p.mode, 'full');
+  assert.strictEqual(p.ext, null);
+  assert.strictEqual(p.extErr, 'Error');
+  assert.deepStrictEqual([p.vf, p.copy, p.c2d], [100, 60, 60]);
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
   s.renderer.destroy();
 });

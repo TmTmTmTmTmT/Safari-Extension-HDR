@@ -539,37 +539,87 @@
       }
     }
 
+    // 측정하지 않은 경로의 결과 자리. 진단에는 null로 남는다.
+    const NOT_MEASURED = { v: null, err: null, syncMs: null };
+    const PROBE_FNS = { ext: probeExt, vf: probeVf, copy: probeCopy, c2d: probeC2d };
+
+    // 정상 상태 단일 측정에서 선택 경로가 이 값 이상이면 검정이 아니다. detect의 BLACK_EXT_MAX/VF_MIN과 같은 값 (M6-1).
+    const SINGLE_OK_MIN = 2;
+
+    function buildFrameProbe(r, t0, probeMode, hdrEarly) {
+      probeN += 1;
+      return {
+        at: performance.now() - createdAt,
+        n: probeN,
+        ext: r.ext.v,
+        vf: r.vf.v,
+        copy: r.copy.v,
+        c2d: r.c2d.v,
+        extErr: r.ext.err,
+        vfErr: r.vf.err,
+        copyErr: r.copy.err,
+        c2dErr: r.c2d.err,
+        ms: performance.now() - t0,
+        extSyncMs: r.ext.syncMs,
+        vfSyncMs: r.vf.syncMs,
+        copySyncMs: r.copy.syncMs,
+        c2dSyncMs: r.c2d.syncMs,
+        colorSpace: colorSpace && Object.assign({}, colorSpace),
+        mode: probeMode,
+        hdrEarly,
+      };
+    }
+
+    // 메인 스레드 점유를 줄이기 위해 회차마다 필요한 경로만 잰다 (PLAN D-M6 M6-1).
+    // 결정 전: vf를 먼저 재서 HDR이면 나머지(4K에서 c2d 수백 ms)를 건너뛴다. 결정 후: 선택 경로만 재고 검을 때만 전체 측정.
     async function runProbe() {
       probeBusy = true;
       try {
         const t0 = performance.now();
-        const ext = await runPath(probeExt);
-        const vf = await runPath(probeVf);
-        const copy = await runPath(probeCopy);
-        const c2d = await runPath(probeC2d);
+        const detect = globalThis.__sdrhdr.detect;
+        const r = { ext: NOT_MEASURED, vf: NOT_MEASURED, copy: NOT_MEASURED, c2d: NOT_MEASURED };
+        const decided = path === 'ext' || path === 'vf' || path === 'copy';
+        let probeMode = 'full';
+        if (decided) {
+          r[path] = await runPath(PROBE_FNS[path]);
+          const v = r[path].v;
+          if (typeof v === 'number' && v >= SINGLE_OK_MIN) probeMode = 'single';
+        } else {
+          r.vf = await runPath(probeVf);
+          if (destroyed || mode === 'baseline') return; // 진단 중 baseline으로 바뀌면 결과를 버린다
+          if (detect.isHdrSource({ frameColorSpace: colorSpace })) {
+            // 경로 결정·표시·pendingCount는 건드리지 않는다. main이 hdrSource로 suspend한다.
+            frameProbe = buildFrameProbe(r, t0, 'full', true);
+            if (onProbe) {
+              try {
+                onProbe(Object.assign({}, frameProbe), 'pending');
+              } catch (e) {
+                // 콜백 오류가 재생을 방해하지 않게 한다.
+              }
+            }
+            return;
+          }
+        }
+        if (probeMode === 'full') {
+          for (const k of ['ext', 'vf', 'copy', 'c2d']) {
+            if (r[k] === NOT_MEASURED) r[k] = await runPath(PROBE_FNS[k]);
+          }
+        }
         if (destroyed || mode === 'baseline') return; // 진단 중 baseline으로 바뀌면 결과를 버린다
-        probeN += 1;
-        frameProbe = {
-          at: performance.now() - createdAt,
-          n: probeN,
-          ext: ext.v,
-          vf: vf.v,
-          copy: copy.v,
-          c2d: c2d.v,
-          extErr: ext.err,
-          vfErr: vf.err,
-          copyErr: copy.err,
-          c2dErr: c2d.err,
-          ms: performance.now() - t0,
-          extSyncMs: ext.syncMs,
-          vfSyncMs: vf.syncMs,
-          copySyncMs: copy.syncMs,
-          c2dSyncMs: c2d.syncMs,
-          colorSpace: colorSpace && Object.assign({}, colorSpace),
-        };
+        frameProbe = buildFrameProbe(r, t0, probeMode, false);
+        if (probeMode === 'single') {
+          // 선택 경로가 검지 않으므로 전환 조건이 아니다. 경로·noneStreak 불변.
+          if (onProbe) {
+            try {
+              onProbe(Object.assign({}, frameProbe), path);
+            } catch (e) {
+              // 콜백 오류가 재생을 방해하지 않게 한다.
+            }
+          }
+          return;
+        }
         // 경로가 정해지기 전(null/pending)에는 결과를 따른다. none은 2회 연속일 때만 확정(detach 대상)하고 그 전에는 보류로 재시도한다.
         // 결정 후에는 선택 경로가 검고 다음 단계가 밝을 때 한 단계 아래로만 전환한다 (FIX_GUIDE R2).
-        const detect = globalThis.__sdrhdr.detect;
         const chosen = detect.choosePath(frameProbe);
         noneStreak = detect.nextNoneStreak(noneStreak, chosen);
         if (path === null || path === 'pending') {
