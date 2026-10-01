@@ -377,6 +377,20 @@ def summarize_m2(name, data):
         row = [fmt(cad.get(c)) for c in cols[:4]] + [fmt(hist.get(k)) for k in ("1", "2", "3", "4", "5+")]
         print("\nrender cadence (v5, 값만)")
         print(table(cols, [row]))
+    lc = data.get("lifecycle")
+    if isinstance(lc, dict):  # schemaVersion 6 이상. 값만 출력하고 판정하지 않는다.
+        cols = ["state", "skipReason", "navCount", "srcChanges", "videoSwaps", "playerMode", "adShowing", "pip", "lastEvent"]
+        cs = video.get("colorSpace") if isinstance(video.get("colorSpace"), dict) else {}
+        print("\nlifecycle (v6, 값만)")
+        print(
+            table(
+                cols + ["hdrSource", "cs.primaries", "cs.transfer", "cs.matrix", "cs.fullRange"],
+                [[fmt(lc.get(c)) for c in cols] + [fmt(flags.get("hdrSource"))] + [fmt(cs.get(k)) for k in ("primaries", "transfer", "matrix", "fullRange")]],
+            )
+        )
+        evs = lc.get("events") if isinstance(lc.get("events"), list) else []
+        if evs:
+            print("events (최근 %d): %s" % (len(evs), ", ".join("%s@%s" % (fmt(e.get("ev")), fmt(e.get("t"))) for e in evs if isinstance(e, dict))))
     errs = data.get("errors") or []
     print("errors (%d)" % len(errs))
     if errs:

@@ -69,7 +69,17 @@
         "videoWidth": { "type": ["number", "null"] },
         "videoHeight": { "type": ["number", "null"] },
         "srcIsBlob": { "type": ["boolean", "null"] },
-        "paused": { "type": ["boolean", "null"] }
+        "paused": { "type": ["boolean", "null"] },
+        "colorSpace": {
+          "type": ["object", "null"],
+          "description": "schemaVersion 6 이상. frameProbe vf 측정에서 얻은 마지막 VideoFrame.colorSpace.",
+          "properties": {
+            "primaries": { "type": ["string", "null"] },
+            "transfer": { "type": ["string", "null"] },
+            "matrix": { "type": ["string", "null"] },
+            "fullRange": { "type": ["boolean", "null"] }
+          }
+        }
       }
     },
     "canvas": {
@@ -204,7 +214,38 @@
         "drm": { "type": ["boolean", "null"] },
         "attached": { "type": ["boolean", "null"] },
         "fullscreen": { "type": ["boolean", "null"] },
-        "blackFrame": { "type": ["boolean", "null"], "description": "schemaVersion 2 이상" }
+        "blackFrame": { "type": ["boolean", "null"], "description": "schemaVersion 2 이상" },
+        "hdrSource": { "type": ["boolean", "null"], "description": "schemaVersion 6 이상" }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "description": "schemaVersion 6 이상. PLAN D-M3 M3-4.",
+      "properties": {
+        "state": {
+          "type": ["string", "null"],
+          "enum": ["idle", "probing", "active", "skipped", null]
+        },
+        "skipReason": { "type": ["string", "null"] },
+        "navCount": { "type": ["integer", "null"] },
+        "srcChanges": { "type": ["integer", "null"] },
+        "videoSwaps": { "type": ["integer", "null"] },
+        "playerMode": { "type": ["string", "null"] },
+        "adShowing": { "type": ["boolean", "null"] },
+        "pip": { "type": ["boolean", "null"] },
+        "lastEvent": { "type": ["string", "null"] },
+        "lastEventAt": { "type": ["number", "null"] },
+        "events": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "properties": {
+              "t": { "type": ["number", "null"] },
+              "ev": { "type": ["string", "null"] }
+            }
+          }
+        }
       }
     },
     "errors": {

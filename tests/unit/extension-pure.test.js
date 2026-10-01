@@ -193,9 +193,10 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'render',
     'frameProbe',
     'flags',
+    'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 5);
+  assert.strictEqual(d.schemaVersion, 6);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -219,6 +220,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'videoHeight',
     'srcIsBlob',
     'paused',
+    'colorSpace',
   ]);
   assert.strictEqual(typeof d.video.videoWidth, 'number');
   assert.strictEqual(typeof d.video.srcIsBlob, 'boolean');
@@ -234,6 +236,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     attached: true,
     fullscreen: false,
     blackFrame: false,
+    hdrSource: false,
   });
   assert.strictEqual(d.frameProbe, null);
   assert.strictEqual(d.errors.length, 20);
@@ -286,7 +289,11 @@ test('buildDiag: 빈 state에서도 모든 필드가 있고 값은 null/기본',
     attached: false,
     fullscreen: false,
     blackFrame: false,
+    hdrSource: false,
   });
+  assert.strictEqual(d.video.colorSpace, null);
+  assert.strictEqual(d.lifecycle.state, null);
+  assert.deepStrictEqual(d.lifecycle.events, []);
   assert.strictEqual(d.frameProbe, null);
   assert.deepStrictEqual(d.errors, []);
   assert.strictEqual(plain(ns.hud.buildDiag()).milestone, 'M2');
@@ -565,7 +572,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 5);
+  assert.strictEqual(d.schemaVersion, 6);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -738,4 +745,51 @@ test('buildDiag v5: render.cadence와 baseline 모드, 스키마 선언 일치',
   assert.strictEqual(b.render.mode, 'baseline');
   near(b.render.loopFps, 60, 0.01);
   assert.strictEqual(plain(ns.hud.buildDiag({})).render.cadence, null);
+});
+
+test('buildDiag: lifecycle·colorSpace 정규화 (M3-4)', () => {
+  const events = Array.from({ length: 40 }, (_, i) => ({ t: i + 0.123, ev: 'srcChange' }));
+  const d = plain(
+    ns.hud.buildDiag({
+      video: {
+        colorSpace: {
+          primaries: 'bt2020',
+          transfer: 'pq',
+          matrix: 'bt2020-ncl',
+          fullRange: false,
+          x: 1,
+        },
+      },
+      flags: { hdrSource: true },
+      lifecycle: {
+        state: 'skipped',
+        skipReason: 'hdrSource',
+        navCount: 2,
+        srcChanges: 3.7,
+        videoSwaps: 1,
+        playerMode: 'theater',
+        adShowing: false,
+        pip: false,
+        lastEvent: 'skip',
+        lastEventAt: 12.345,
+        events,
+      },
+    }),
+  );
+  assert.deepStrictEqual(d.video.colorSpace, {
+    primaries: 'bt2020',
+    transfer: 'pq',
+    matrix: 'bt2020-ncl',
+    fullRange: false,
+  });
+  assert.strictEqual(d.flags.hdrSource, true);
+  assert.strictEqual(d.lifecycle.state, 'skipped');
+  assert.strictEqual(d.lifecycle.srcChanges, 3);
+  assert.strictEqual(d.lifecycle.lastEventAt, 12.35);
+  assert.strictEqual(d.lifecycle.events.length, 30);
+  assert.strictEqual(d.lifecycle.events[29].t, 39.12);
+  assert.strictEqual(
+    plain(ns.hud.buildDiag({ lifecycle: { state: 'bogus' } })).lifecycle.state,
+    null,
+  );
 });

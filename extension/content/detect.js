@@ -112,6 +112,15 @@
     return isBlackSelected(probe, path) ? (streak || 0) + 1 : 0;
   }
 
+  // DOM: 플레이어 루트. MutationObserver 범위를 #movie_player로 한정하는 데 쓴다 (GUIDELINES 2.7-3). 실패 시 null.
+  function findPlayer(doc) {
+    try {
+      return doc.querySelector(SELECTORS.player) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // DOM: 메인 플레이어 video와 container. 실패 시 예외 없이 null (GUIDELINES 2.3-2).
   function findMainVideo(doc) {
     try {
@@ -121,7 +130,7 @@
       if (!container) return null;
       const video = container.querySelector(SELECTORS.video);
       if (!video) return null;
-      return { video, container };
+      return { video, container, player };
     } catch (e) {
       return null;
     }
@@ -193,6 +202,45 @@
     };
   }
 
+  // 순수: 수명주기 상태 전이 표 (PLAN D-M3 M3-1). st={state, skip}, ev는 문자열. 입력 st는 바꾸지 않는다.
+  // drm은 요소 단위로 영구: srcChange로 풀리지 않는다. blackFrame·hdrSource는 srcChange로 풀리고 pip은 pipLeave로 풀린다.
+  const STICKY_SKIPS = ['drm', 'noGpu', 'disabled'];
+  function nextLifecycle(st, ev) {
+    const cur = { state: (st && st.state) || 'idle', skip: (st && st.skip) || null };
+    const next = (state, skip) => ({ state, skip: skip || null });
+    const sticky = cur.state === 'skipped' && STICKY_SKIPS.includes(cur.skip);
+    const live = cur.state === 'probing' || cur.state === 'active';
+    switch (ev) {
+      case 'attach':
+        return sticky ? cur : next('probing');
+      case 'srcChange':
+        if (sticky || (cur.state === 'skipped' && cur.skip === 'pip')) return cur;
+        return cur.state === 'idle' ? cur : next('probing');
+      case 'decided':
+        return cur.state === 'probing' ? next('active') : cur;
+      case 'drm':
+        return next('skipped', 'drm');
+      case 'error':
+        return cur.skip === 'drm' ? cur : next('skipped', 'noGpu');
+      case 'black':
+        return live ? next('skipped', 'blackFrame') : cur;
+      case 'hdr':
+        return live ? next('skipped', 'hdrSource') : cur;
+      case 'pipEnter':
+        return sticky ? cur : next('skipped', 'pip');
+      case 'pipLeave':
+        return cur.state === 'skipped' && cur.skip === 'pip' ? next('probing') : cur;
+      case 'disable':
+        return cur.skip === 'drm' ? cur : next('skipped', 'disabled');
+      case 'enable':
+        return cur.skip === 'disabled' ? next('idle') : cur;
+      case 'videoGone':
+        return next('idle');
+      default:
+        return cur;
+    }
+  }
+
   globalThis.__sdrhdr.detect = {
     SELECTORS,
     MODE_SELECTORS,
@@ -216,5 +264,7 @@
     contentRect,
     canvasResolution,
     findMainVideo,
+    findPlayer,
+    nextLifecycle,
   };
 })();

@@ -68,6 +68,8 @@
     let probeN = 0;
     let probePipeline = null;
     let frameProbe = null;
+    // vf 경로에서 얻은 마지막 VideoFrame.colorSpace (HDR 원본 판정용, PLAN D-M3 M3-2). 소스가 바뀌면 비운다.
+    let colorSpace = null;
     // 입력 경로: null(첫 frameProbe 전) | 'pending'(판단 불가, 재시도 중) | 'none'(2회 연속, detach 대상) | 'ext' | 'vf' | 'copy'.
     // 결정 후에는 ext->vf, vf->copy로 한 단계씩만 내려가고 되돌리지 않는다 (FIX_GUIDE R2).
     let path = null;
@@ -244,6 +246,18 @@
       if (typeof VF !== 'function')
         throw Object.assign(new Error('VideoFrame 미정의'), { name: 'ReferenceError' });
       return new VF(video);
+    }
+
+    function readColorSpace(frame) {
+      const cs = frame && frame.colorSpace;
+      if (!cs) return null;
+      const str = (v) => (typeof v === 'string' ? v : null);
+      return {
+        primaries: str(cs.primaries),
+        transfer: str(cs.transfer),
+        matrix: str(cs.matrix),
+        fullRange: typeof cs.fullRange === 'boolean' ? cs.fullRange : null,
+      };
     }
 
     function closeFrame(frame) {
@@ -457,6 +471,7 @@
       try {
         const frame = createVideoFrame();
         try {
+          colorSpace = readColorSpace(frame);
           drawProbe(target, frame);
         } finally {
           closeFrame(frame);
@@ -533,6 +548,7 @@
           vfSyncMs: vf.syncMs,
           copySyncMs: copy.syncMs,
           c2dSyncMs: c2d.syncMs,
+          colorSpace: colorSpace && Object.assign({}, colorSpace),
         };
         // 경로가 정해지기 전(null/pending)에는 결과를 따른다. none은 2회 연속일 때만 확정(detach 대상)하고 그 전에는 보류로 재시도한다.
         // 결정 후에는 선택 경로가 검고 다음 단계가 밝을 때 한 단계 아래로만 전환한다 (FIX_GUIDE R2).
@@ -696,6 +712,27 @@
       clearRings();
     }
 
+    // 같은 video에서 소스가 바뀐 뒤 경로 결정부터 다시 한다 (PLAN D-M3 M3-1). GPU device·파이프라인은 재사용한다.
+    function restartSource() {
+      if (destroyed) return;
+      destroyCopyTexture();
+      path = null;
+      frameProbe = null;
+      colorSpace = null;
+      pendingCount = 0;
+      noneStreak = 0;
+      vfCreateFails = 0;
+      undecided = false;
+      probeDue = 0;
+      frames = 0;
+      copySkipped = 0;
+      lastSrc = null;
+      lastCopyTime = null;
+      clearRings();
+      updateVisibility();
+      probePoll();
+    }
+
     function removeListeners() {
       video.removeEventListener('play', onWake);
       video.removeEventListener('seeked', onWake);
@@ -764,10 +801,11 @@
         loopTimestamps: loopTs.slice(),
         srcTimes: srcTs.slice(),
         frameProbe: frameProbe && Object.assign({}, frameProbe),
+        colorSpace: colorSpace && Object.assign({}, colorSpace),
       };
     }
 
-    return { start, stop, setMode, destroy, getStats };
+    return { start, stop, setMode, restartSource, destroy, getStats };
   }
 
   globalThis.__sdrhdr.renderer = { createRenderer };
