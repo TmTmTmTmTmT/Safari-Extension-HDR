@@ -91,6 +91,22 @@ fn itm(rgb: vec3f) -> vec3f {
 }
 `;
 
+  // 강도 혼합 (PLAN D-M4a): 선형 P3에서 identity(색 변환만)와 ITM 결과를 섞고 OETF로 인코딩한다.
+  // ITM_FN 본문은 probe/shaders.js와 같게 두고, 혼합에 필요한 선형 값은 itm() 결과를 역변환해 얻는다.
+  const STRENGTH_FN = `
+struct StrengthParams { strength: f32, pad0: f32, pad1: f32, pad2: f32 };
+@group(0) @binding(2) var<uniform> params: StrengthParams;
+
+fn ext_eotf(v: vec3f) -> vec3f {
+  return sign(v) * srgb_eotf(abs(v));
+}
+fn itm_mix(rgb: vec3f, strength: f32) -> vec3f {
+  let idLin = M709_TO_P3 * srgb_eotf(clamp(rgb, vec3f(0.0), vec3f(1.0)));
+  let itmLin = ext_eotf(itm(rgb));
+  return ext_oetf(mix(idLin, itmLin, strength));
+}
+`;
+
   // 복사 경로(FIX_GUIDE P2): 바인딩 타입과 샘플 함수만 외부 텍스처용과 다르고 수식 본문은 공유한다.
   const COPY_COMMON =
     VERTEX +
@@ -110,19 +126,21 @@ fn itm(rgb: vec3f) -> vec3f {
   const fsItm = (sample) => `
 @fragment fn fs(in: VSOut) -> @location(0) vec4f {
   let c = ${sample};
-  return vec4f(itm(c.rgb), 1.0);
+  return vec4f(itm_mix(c.rgb, params.strength), 1.0);
 }
 `;
 
   const VIDEO_IDENTITY = VIDEO_COMMON + fsIdentity(SAMPLE_EXT);
-  const VIDEO_ITM = VIDEO_COMMON + ITM_FN + fsItm(SAMPLE_EXT);
+  const VIDEO_ITM = VIDEO_COMMON + ITM_FN + STRENGTH_FN + fsItm(SAMPLE_EXT);
   const VIDEO_IDENTITY_COPY = COPY_COMMON + fsIdentity(SAMPLE_COPY);
-  const VIDEO_ITM_COPY = COPY_COMMON + ITM_FN + fsItm(SAMPLE_COPY);
+  const VIDEO_ITM_COPY = COPY_COMMON + ITM_FN + STRENGTH_FN + fsItm(SAMPLE_COPY);
 
   globalThis.__sdrhdr.itm = {
     STEPS,
     VERTEX,
     STRIPES,
+    ITM_FN,
+    STRENGTH_FN,
     VIDEO_IDENTITY,
     VIDEO_ITM,
     VIDEO_IDENTITY_COPY,

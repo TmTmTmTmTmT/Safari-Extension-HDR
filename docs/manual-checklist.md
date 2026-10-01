@@ -146,6 +146,22 @@ JSON의 `render.path`, `render.displayMissRate`, `render.displayHz`, `render.cop
 2. 상태를 만든 뒤 Safari Web Inspector 콘솔에 붙여 넣고 실행한다. 출력이 클립보드에도 복사되므로 채팅이나 에디터에 붙여 넣는다.
 3. 수집할 상태와 파일명(`tests/dom/fixtures/`): `yt-theater-full.html`(극장), `yt-miniplayer.html`(영상 재생 중 홈으로 이동해 미니플레이어가 뜬 상태), `yt-ad.html`(광고 재생 중), `yt-fullscreen.html`(전체화면, Web Inspector를 별도 창으로 분리해야 콘솔 사용 가능). 채팅에 상태 이름과 함께 붙여 주면 파일로 저장해 커밋한다.
 
+## M4a HDR 강도 슬라이더 확인 절차 (PLAN D-M4a)
+
+전제: 전원 연결. `git pull` → `scripts/make-xcode.sh` → Xcode Run → Safari 재시작, 확장 켬, popup 모드 `itm`. WGSL 컴파일은 이 단계가 처음이다(클라우드·로컬 모두 미검증). 컴파일 오류가 나면 영상이 원본 그대로이고 진단 `errors`에 `uncapturederror`가 남는다. popup 진단 JSON(schemaVersion 7)에 `render.strength`가 들어간다.
+
+밝기 **최대**와 **중간** 각각에서 같은 SDR 영상으로 아래를 한다.
+
+1. popup의 "HDR 강도" 슬라이더를 0 ↔ 100으로 드래그한다.
+   - (a) 드래그 후 1초 안에 화면에 반영되는가(예/아니오). 일시정지 상태에서도 반영되는가.
+   - 0%는 색 변환만 한 SDR(확장 off와 거의 같은 밝기), 100%는 이전 itm과 같은 느낌이어야 한다.
+2. (b) 가장 마음에 드는 강도 %를 적는다.
+3. (c) 하이라이트가 하얗게 뭉개지기 시작하는 강도 %를 적는다.
+4. 선호 강도로 맞춘 상태에서 popup의 진단 JSON을 "복사"해 `results/result-M4a-<YYYYMMDD>-<밝기: max|mid>.json`으로 저장한다.
+5. popup 모드를 `identity`·`stripes`로 바꾸면 슬라이더가 비활성화되는가, 다시 `itm`이면 활성화되는가. 브라우저를 다시 열었을 때 슬라이더 값이 유지되는가.
+
+판정: (a) 예면 M4a 완료. (b)(c)는 M4 기본 강도·프리셋 결정 자료(Opus). 확인하지 못한 항목은 [미확인]으로 적는다.
+
 ## 회신 방법
 
 1. export한 JSON을 저장소 `results/result-<M>-<YYYYMMDD>[-조건].json`으로 두고 브랜치에 push한다. (M1 프로브는 `<M>`이 `M1`)

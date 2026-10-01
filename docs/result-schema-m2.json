@@ -95,6 +95,10 @@
       "type": "object",
       "required": ["mode", "frames", "loopFps", "jsP50", "jsP95"],
       "properties": {
+        "strength": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 7 이상. HDR 강도 0~1 (PLAN D-M4a)."
+        },
         "mode": {
           "type": ["string", "null"],
           "enum": ["itm", "identity", "stripes", "baseline", null],

@@ -66,6 +66,12 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 사용자 요청(M4/M5 계획 반영): HDR 강도를 itm 기준으로 드래그(슬라이더)로 조절. 어떤 파라미터를 "강도"에 대응시킬지(헤드룸·k·s 등)와 프리셋 관계는 설계 결정이라 구현하지 않았다. M5 popup 상세 UI와 겹친다
 - 관찰: HDR 4K 소스 첫 frameProbe에서 `c2dSyncMs` 608 ms(메인 스레드 동기 점유), 전체 644 ms. 소스 변경·attach마다 반복될 수 있다. 체감 끊김 보고는 없었다. M6 후보로 기록하고 처리 여부는 Opus 결정
 
+## M4a 진행 (브랜치 claude/m4a-strength, PR #5 머지 후 main에서 분기)
+
+- 구현 완료: WGSL 강도 혼합(`itm_mix`, uniform binding 2, ITM_FN 본문은 probe와 동일 유지, 혼합은 `ext_eotf(itm())` 역변환으로 선형 값을 얻어 `mix(idLin, itmLin, t)` 후 OETF), renderer `setStrength`(writeBuffer만, 파이프라인 재생성 없음, 정지 상태 1회 렌더), params `sdrhdr.strength`·`STRENGTH`·`normalizeStrength`, main `onSettings`에서 `setStrength`만 호출, popup 슬라이더(100 ms 저장 throttle, itm 외 비활성), hud·스키마·parse-result v7(`render.strength`), sim `itm_linear_strength`·S10b(t 축)·`test_strength.py`, manual-checklist M4a 절
+- 해석(계획 문구 보강, Opus 확인 요청): ① 계획은 "t=0이면 identity 출력과 같다"고 했으나 식(`idP3 = 709→P3(sRGB EOTF)`)대로 구현해 t=0은 **색역 변환을 한 SDR**이며 identity 모드(변환 없이 그대로 기록)와 약간 다르다. 식과 문구 중 식을 따랐다. ② `idLin`에는 밝기 게인 g를 적용하지 않는다(균형 g=1이라 현재 영향 없음)
+- → verify: lint 통과, npm test 167/167, test:dom 14/14, pytest sim 140/140, parse-result 과거 results rc=0 / (1) 로컬 Mac. **WGSL 컴파일·슬라이더 반영 속도·체감은 미검증(사용자 Mac 필요)**. naga/tint 없고 Playwright WebKit에 WebGPU 없음
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
