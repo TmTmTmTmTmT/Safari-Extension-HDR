@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.9 (2026-10-01, D-M3 상세 계획)
+> 버전: v1.10 (2026-10-01, D-M3 M3-8 스냅샷 1차 분석·3단계 지침)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -241,6 +241,36 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
   6. PiP 진입 시 원본 PiP 정상, 복귀 시 오버레이 재개
   7. DRM 콘텐츠(YouTube 영화·TV 무료 영화 등 EME 사용 페이지)에서 오버레이 없음, `skipReason: drm`. 이후 같은 탭에서 일반 영상으로 이동 시 skipped(drm) 유지(새로고침 시 해제)가 정상
 - 판정: 1~6 모두 예, 7은 오버레이 없음이면 M3 완료. 실패 항목은 FIX_GUIDE로 처리.
+
+**M3-8. 스냅샷 1차 분석과 3단계 지침 (2026-10-01, Opus)**
+
+사용자가 5개 스냅샷(창 모드, 극장 모드, 확장 끔, 설정 메뉴 열림, HDR 영상+확장 켬+설정 메뉴)을 회신했다. 스냅샷 원문은 이 대화에서 받았으며 커밋은 Sonnet이 3단계에서 한다.
+
+관찰(사실):
+- O1 `#movie_player > .html5-video-container > video.video-stream.html5-main-video` 구조는 5개 모두 같다. 현행 `SELECTORS`(player/container/video)는 **확정**한다.
+- O2 조상 3단계(`div#container` → `ytd-player#ytd-player` → `div#player-container.ytd-watch-flexy`)는 창·극장에서 같다. `ytd-watch-flexy`가 4단계 이상 위에 있어 스냅샷에 들어오지 않았다. 따라서 **극장 판정 근거(`ytd-watch-flexy[theater]` 등)는 이번 스냅샷으로 확인할 수 없다**.
+- O3 `#movie_player` 클래스 차이(창 ↔ 극장): 창에만 `ytp-fit-cover-video`, 극장에 `ytp-autohide`·`ytp-progress-bar-snap`(마우스 상태에 따라 변함). 레이아웃 판정에 쓸 안정 신호가 아니다. **`#movie_player` 클래스로 극장을 판정하지 않는다.**
+- O4 "확장 끔"과 "확장 켬"의 골격에 차이가 없다(캔버스는 스크립트가 `canvas`를 건너뛰어 원래 보이지 않음). 확장이 YouTube DOM 구조를 바꾸지 않는다는 근거로만 쓴다(캔버스 위치 검증 아님).
+- O5 설정 버튼은 `button.ytp-settings-button.ytp-4k-quality-badge`. HDR 영상 스냅샷에서도 같은 `ytp-4k-quality-badge`였다. 메뉴 항목 텍스트는 스크립트가 지우므로 "2160p60 HDR" 같은 표기를 볼 수 없다. **DOM 기반 HDR 배지(2순위)는 근거가 없다**(현행 추측값 `.ytp-hdr-badge`는 스냅샷에 없음).
+- O6 광고(`ad-showing`), 미니플레이어, 전체화면 스냅샷은 아직 없다.
+
+결정:
+- D1 HDR 원본 판정은 **M3에서 1순위(`VideoFrame.colorSpace.transfer`)만** 쓴다. 2순위(DOM 배지)는 M3 범위에서 뺀다. `MODE_SELECTORS.hdrBadge`와 `readPlayerFlags().hdrBadge`는 진단용으로 남기되 판정(`main.js`)에 연결하지 않는다(현행 유지). 추측 셀렉터는 `.ytp-settings-button.ytp-hdr-quality-badge`로 바꾸고 [미확인] 주석을 유지한다(O5의 `ytp-<품질>-quality-badge` 패턴에 맞춘 추정). 체크리스트 5번은 `video.colorSpace.transfer`와 `skipReason`으로 판정한다.
+- D2 극장·미니플레이어 판정은 진단용(`playerMode`)이며 배치에 쓰지 않으므로(M3-2) 셀렉터 미확정 상태로 M3 완료를 막지 않는다. 확정은 D3 재수집 결과가 오면 하고, 오지 않으면 [미확인]으로 M3를 닫는다.
+- D3 `scripts/dom-skeleton.js` 수정(사용자 재수집용):
+  1. 조상 수집을 고정 3단계가 아니라 `ytd-watch-flexy`, `ytd-miniplayer`, `ytd-app` 중 먼저 만나는 요소까지(상한 10단계)로 바꾼다.
+  2. 속성 이름 수집 대상 태그에 `ytd-app`, `ytd-watch-flexy`, `ytd-miniplayer`, `ytd-player`를 넣고, 이름 목록을 `theater`, `fullscreen`, `full-bleed-player`, `active`, `miniplayer-is-active`, `hidden`으로 한다(값은 버리고 이름만, 현행 규칙 유지).
+  3. `#movie_player` 하위는 출력이 1,500줄을 넘어 붙여 넣기 부담이 크다. 하위 전개를 `.html5-video-container`, `.ytp-chrome-bottom .ytp-right-controls`, `.ytp-settings-menu`, `.ytp-ad-module`, `.video-ads`(존재 시)로 한정하는 옵션 상수 `FULL = false`를 둔다(기본은 한정 출력). 텍스트·URL 제거 규칙은 그대로.
+- D4 픽스처: 이번 5개 중 **창 모드 → `tests/dom/fixtures/yt-default.html`, 극장 → `yt-theater.html`, HDR+설정 → `yt-hdr-settings.html`** 3개만 커밋한다. GUIDELINES 2.3-4에 따라 D3-3과 같은 범위(조상, `#movie_player` 태그·클래스, video 컨테이너, 오른쪽 컨트롤, 설정 메뉴)로 잘라서 넣는다. "확장 끔"·"설정 띄움"은 O4·O5 근거로만 쓰고 커밋하지 않는다.
+- D5 3단계 테스트(Playwright WebKit, 위 픽스처): `findMainVideo`가 video·container·player를 찾음, `isAdShowing` false, `readPlayerFlags().hdrBadge` false(3개 모두, O5), `playerMode`는 `yt-theater.html`에서도 **`default`가 나오는 것을 현재 한계로 고정**하는 테스트를 두고 이름에 "[미확인] 조상 미포함"을 적는다(D3 재수집 후 바꾼다). 기존 `m3-*.html` 최소 픽스처 테스트는 로직 검사로 유지한다.
+- D6 2단계 설계 해석(STATUS.md 기록) 승인: renderer 오류를 모두 `skipped(noGpu)`로 요소 단위 처리, `milestone` 'M2' 유지, 이벤트 로그 `lifecycle.events`, 설정 토글 시 noGpu 요소 재시도. 문서상 추가 변경 없음.
+
+3단계 작업 순서(Sonnet):
+1. D3 `dom-skeleton.js` 수정 → lint.
+2. D1 `detect.js` hdrBadge 추측값 교체(주석 유지), D4 픽스처 3개, D5 테스트 → `npm test`, `npm run test:dom`.
+3. `docs/manual-checklist.md`에 M3 절(M3-7 (3)의 7개 항목, 회신 JSON 파일명 `results/result-M3-<YYYYMMDD>-<항목>.json`, 재수집 절차: 미니플레이어·광고·전체화면 스냅샷을 D3 스크립트로)을 쓴다.
+4. STATUS.md·PR #5 갱신, push.
+→ verify: lint·unit·test:dom 통과 / 픽스처 3개 커밋 / (3) 사용자 M3 체크리스트와 D3 재수집은 미검증
 
 **M2 판정 완료 (2026-10-01)**: G4 통과, G3c 통과(ProMotion·창 모드, 60fps 소스). M3 착수 가능. 렌더러 입력 경로는 C절 "비디오 입력 경로"(ext → vf → copy)로 확정. M6 이월: 비60fps 소스 끊김(샘플링 위상 C-b 대 원본 cadence C-c 분리), 60Hz rAF 30회/s(A24), 전체화면 비용 측정, K1.
 

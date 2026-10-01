@@ -17,11 +17,13 @@
   const AD_CLASS = 'ad-showing';
   const PIP_PRESENTATION_MODE = 'picture-in-picture';
   const HDR_TRANSFERS = ['pq', 'hlg'];
-  // [미확인] 아래 셀렉터는 추측값이다. M3-5 DOM 스냅샷 커밋 후 확정한다 (GUIDELINES 2.7-4).
+  // [미확인] 아래 셀렉터는 추측값이다 (GUIDELINES 2.7-4). 2026-10-01 스냅샷(PLAN M3-8)에는 조상에 ytd-watch-flexy가
+  // 없어 theater·miniplayer를 확인하지 못했고, HDR 영상의 설정 버튼도 ytp-4k-quality-badge였다.
+  // hdrBadge는 ytp-<품질>-quality-badge 패턴에 맞춘 추정이며 판정(main.js)에는 쓰지 않고 진단에만 쓴다.
   const MODE_SELECTORS = {
     theater: 'ytd-watch-flexy[theater]',
     miniplayer: 'ytd-miniplayer[active]',
-    hdrBadge: '.ytp-hdr-badge',
+    hdrBadge: '.ytp-settings-button.ytp-hdr-quality-badge',
   };
 
   // 순수: DRM 신호가 하나라도 있으면 true (GUIDELINES 2.4).

@@ -53,8 +53,11 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 미검증(사용자 Mac): 실제 Safari에서 SPA 이동·소스 교체·PiP·미니플레이어 캔버스 이동·HDR/DRM 스킵 동작. M3 체크리스트(docs/manual-checklist.md M3 절)는 3단계에서 작성
 - 로컬 환경: Homebrew Python은 PEP 668로 `pip --user` 불가 → `.venv`(프로젝트 루트, 커밋 안 함)에서 `.venv/bin/python -m pytest sim`. docs/local-session.md 11행은 아직 `pip --user` 안내
 
+- 3단계 완료(PLAN M3-8): dom-skeleton.js 개선(조상은 ytd-watch-flexy/miniplayer/app까지, 하위 한정 출력, FULL=false), 실제 스냅샷 픽스처 3개(yt-default·yt-theater·yt-hdr-settings, 극장 속성·HDR 배지는 미확인으로 고정), detect hdrBadge 추측 셀렉터 교체(판정 미사용), tests/dom 실제 스냅샷 테스트, manual-checklist M3 절·재수집 절차
+- → verify: lint 통과, npm test 161/161, test:dom 14/14(WebKit), 스크립트를 WebKit에서 실제 픽스처로 실행해 출력 확인 / (1) 로컬 Mac. 사용자 Mac 체크리스트·셀렉터 확정(극장·미니플레이어·광고·전체화면 재수집)은 미검증
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
-2. (완료) M3-6 1·2단계. push·draft PR 후 사용자 확장 재빌드·설치 가능
-3. 사용자: `scripts/dom-skeleton.js`로 상태별 DOM 스냅샷 수집·커밋(D-M3 M3-5) → 3단계 셀렉터 확정 → M3 체크리스트
+2. (완료) M3-6 1~3단계
+3. 사용자: 개선된 `scripts/dom-skeleton.js`로 극장·미니플레이어·광고·전체화면 재수집(docs/manual-checklist.md M3 절) → 셀렉터 확정(Sonnet) → M3 체크리스트 7항목
