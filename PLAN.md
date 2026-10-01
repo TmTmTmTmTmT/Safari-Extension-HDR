@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.14 (2026-10-01, D-M4 상세 계획)
+> 버전: v1.15 (2026-10-01, D-M4에 선명도·채도 슬라이더 추가)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -174,7 +174,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M2 | 최소 확장 + Xcode | extension 최소판(고정 균형 프리셋), scripts/make-xcode.sh, ci.yml macOS job | Sonnet(코드, 상세는 D-M2) → **사용자 Mac에서 make-xcode.sh 실행 후 push** | → verify: GH Actions macOS `xcodebuild CODE_SIGNING_ALLOWED=NO` 성공(A15/A16) → 사용자 설치 → 0b G4 판정(Opus) |
 | M3 | 감지·수명주기 (상세: D-M3) | SPA 내비, DRM no-op, HDR 원본 스킵, 극장/전체화면/미니플레이어, 리사이즈, PiP 스킵, 광고 전환 | impl-worker(detect.js ↔ overlay.js 병렬), Sonnet 통합 | → verify: tests/dom 통과(sim-runner 실행) + 수동 체크리스트 M3 |
 | M4a | HDR 강도 슬라이더 (상세: D-M4a) | ITM 출력과 원본 사이 선형 혼합 강도 1개, popup 슬라이더, 진단 v7 | Sonnet 본 세션(파일 간 결합이 커서 분할하지 않음) | → verify: 단위·pytest(혼합 성질) 통과 + 사용자 Mac 선호 강도 회신 |
-| M4 | 알고리즘·프리셋 확정 (상세: D-M4) | 셰이더 최종(파라미터 유니폼화), JS 미러, 프리셋 수치, 기본 강도, popup 프리셋 선택(M5에서 앞당김) | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
+| M4 | 알고리즘·프리셋 확정 (상세: D-M4) | 셰이더 최종(파라미터 유니폼화), JS 미러, 프리셋 수치, 기본 강도, popup 프리셋 선택·선명도 슬라이더·채도 슬라이더(M5에서 앞당김) | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
 | M5 | popup + HUD | 상세 슬라이더 UI, **하이라이트(화이트포인트) 휘도 슬라이더**(D-M4a M4a-5), HUD, export 스키마 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 | 해상도 정책 튜닝, install.md(7일 재서명, "서명되지 않은 확장 허용" 재설정) | Sonnet | → verify: 사용자 Mac 2160p60 30분 soak에서 드롭 < 1%, HUD 메모리 추세 평탄 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
@@ -341,22 +341,31 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 **M4-B. 구현 (Opus 표 개정 후, Sonnet)**
 | 파일 | 내용 |
 |---|---|
-| `content/params.js` | `PRESETS`(정확/균형/선명, C절 개정 표), 키 `sdrhdr.preset`(기본 `'균형'` 대신 ASCII id `'balanced'`, 나머지 `'accurate'`·`'vivid'`), `normalizeSettings`에 preset, `STRENGTH.default` 0.45 |
-| `content/tonecurve.js` (신규, manifest에서 params.js 다음) | JS 미러: `srgbEotf`, `srgbOetfExt`, `curveF`, `itmLinear`, `itmLinearStrength`(sim/tonecurve.py와 같은 식). DOM·GPU 의존 없음 |
-| `content/itm.wgsl.js` | ITM 상수(P,K,N,G,S,HS)를 uniform으로 옮긴다: `struct ItmParams { strength, P, k, n, g, s, hs, pad: f32 }`(32바이트), binding 2. 식 본문은 그대로. 이후 probe 셰이더와의 문자열 일치 검사는 종료한다(GUIDELINES 3-1 개정) |
-| `content/renderer.js` | 유니폼 버퍼 32바이트, `setStrength`→`setParams({strength, preset 값})`로 일반화(writeBuffer만). 파이프라인 재생성 없음 |
-| `content/main.js` | preset·strength 변경 시 `setParams`만 호출 |
-| `popup/` | 프리셋 select(정확/균형/선명) 추가. 강도 슬라이더 유지. 다른 UI 추가 금지(상세 슬라이더·하이라이트 슬라이더는 M5) |
-| `hud.js`·스키마·parse-result | schemaVersion 8: `render.preset` |
-| `sim/presets.py` | C절 개정 표와 같은 값 |
-| `tests/unit` | JS 미러 vs numpy 참조 오차 < 1e-4: `sim/`에 참조 생성 스크립트(`python -m sim.export_ref`)를 두고 `tests/unit/fixtures/tonecurve-ref.json`(램프 256, 9³ 격자, 프리셋 3종 × t ∈ {0, 0.45, 1}, 범위 경계값)을 커밋, JS 테스트가 비교. WGSL은 uniform 필드 순서·크기와 `params.js` 직렬화 순서가 같은지 문자열·바이트 검사 |
+| `content/params.js` | `PRESETS`(정확/균형/선명, C절 개정 표), 키 `sdrhdr.preset`(기본 `'균형'` 대신 ASCII id `'balanced'`, 나머지 `'accurate'`·`'vivid'`), 키 `sdrhdr.sharpness`·`sdrhdr.saturation`, 상수 `SHARPNESS`·`SATURATION`(M4-E), `normalizeSettings`에 preset·sharpness·saturation, `STRENGTH.default` 0.45 |
+| `content/tonecurve.js` (신규, manifest에서 params.js 다음) | JS 미러: `srgbEotf`, `srgbOetfExt`, `curveF`, `itmLinear`, `itmLinearStrength`, `saturateP3`, `sharpenPixel`(sim/tonecurve.py·sim/sharpen.py와 같은 식). DOM·GPU 의존 없음 |
+| `content/itm.wgsl.js` | ITM 상수(P,K,N,G,S,HS)를 uniform으로 옮긴다: `struct ItmParams { strength, P, k, n, g, s, hs, sharp, csat, pad0, pad1, pad2: f32 }`(48바이트), binding 2. 곡선 식 본문은 그대로. 선명도·채도는 M4-E. 이후 probe 셰이더와의 문자열 일치 검사는 종료한다(GUIDELINES 3-1 개정) |
+| `content/renderer.js` | 유니폼 버퍼 48바이트, `setStrength`→`setParams({strength, preset 값, sharp, csat})`로 일반화(writeBuffer만). 파이프라인 재생성 없음 |
+| `content/main.js` | preset·strength·sharpness·saturation 변경 시 `setParams`만 호출 |
+| `popup/` | 프리셋 select(정확/균형/선명), 강도 슬라이더 유지, **선명도 슬라이더·채도 슬라이더** 추가(M4-E). 다른 UI 추가 금지(상세 슬라이더 6개·하이라이트 슬라이더는 M5) |
+| `hud.js`·스키마·parse-result | schemaVersion 8: `render.preset`, `render.sharpness`, `render.saturation` |
+| `sim/presets.py`, `sim/sharpen.py`(신규) | presets는 C절 개정 표와 같은 값. sharpen은 M4-E 참조 구현 |
+| `tests/unit` | JS 미러 vs numpy 참조 오차 < 1e-4: `sim/`에 참조 생성 스크립트(`python -m sim.export_ref`)를 두고 `tests/unit/fixtures/tonecurve-ref.json`(램프 256, 9³ 격자, 프리셋 3종 × t ∈ {0, 0.45, 1} × 채도 csat ∈ {0.5, 1.0, 1.5}, 선명 3×3 이웃 샘플 × sharp ∈ {0, 0.5, 1}, 범위 경계값)을 커밋, JS 테스트가 비교. WGSL은 uniform 필드 순서·크기와 `params.js` 직렬화 순서가 같은지 문자열·바이트 검사 |
 
 **M4-C. 사용자 확인 (체크리스트 M4 절, Sonnet 작성)**
 - 밝기 최대·중간 각각, 하이라이트가 많은 SDR 영상 2개(하늘·조명·흰 옷 등)에서 프리셋 3종을 기본 강도 45%로 비교: 선호 프리셋, 뭉개짐이 시작하는 강도 %(프리셋별), 피부·중간톤이 원본과 달라 보이는지(예/아니오).
-- 판정: 균형 프리셋에서 뭉개짐 시작이 강도 85% 이상(또는 100%까지 없음)이고 미드톤 변화 "아니오"면 M4 완료. 아니면 Opus가 FIX_GUIDE로 곡선 식 변경을 지시한다.
+- 선명도·채도 슬라이더: 각각 0 ↔ 최대로 드래그해 (a) 1초 안 반영 (b) 선명도 100%에서 윤곽에 흰 테두리(헤일로)나 거친 노이즈가 보이기 시작하는 % (c) 채도 슬라이더로 마음에 드는 %와 색이 과하게 느껴지는 % (d) 선명도를 올렸을 때 끊김이 늘었는지(없음/가끔/자주), 진단 `render.loopFps`·`jsP95`·`displayMissRate`를 선명도 0과 100에서 각각 기록. 기본값(선명도 0, 채도 100%)이 이전 화면과 같은지.
+- 판정: 균형 프리셋에서 뭉개짐 시작이 강도 85% 이상(또는 100%까지 없음)이고 미드톤 변화 "아니오"이며 선명도·채도 (a) 예, (d) "없음"이면 M4 완료. 아니면 Opus가 FIX_GUIDE로 곡선 식 변경을 지시한다.
 - 회신 JSON: `results/result-M4-<YYYYMMDD>-<밝기>-<프리셋>.json`.
 
-**M4-D. 범위 밖**: 상세 슬라이더 6개·하이라이트(화이트포인트) 슬라이더(M5), 헤드룸 자동 추정, HUD, BT.2446/2408 방식 채택(S6 비교는 참고만).
+**M4-E. 선명도·채도 슬라이더 (사용자 요청, M4에 포함)**
+- 둘 다 `itm` 모드에서만 동작한다(identity·stripes·baseline은 진단용이라 제외). 프리셋·강도와 독립이고 프리셋을 바꿔도 값을 유지한다.
+- **채도** `csat` ∈ [0.5, 1.5], step 0.01, 기본 1.0, popup은 "채도 NN%"(50~150). 위치: 강도 혼합 **뒤**의 선형 Display P3에서 `Y' = dot(c, LUMA_P3)`, `c' = Y' + csat·(c − Y')`, 이후 확장 sRGB OETF. 프리셋의 `s`(곡선 쪽 채도)와 별개이며 강도 t에 영향받지 않는다. `LUMA_P3`는 P3 원색에서 유도한 휘도 계수(0.2290, 0.6917, 0.0793, sim에서 계산해 테스트로 고정). csat=1이면 출력이 기존과 같다.
+- **선명도** `sharp` ∈ [0, 1], step 0.01, 기본 0, popup은 "선명도 NN%". 위치: ITM 전, 입력 sRGB 인코딩 값에서 **휘도만** 언샤프 마스크. 이웃 4탭(상·하·좌·우, 소스 텍셀 1칸, 소스 크기는 `textureDimensions(tex)`): `blur = (n+s+e+w)/4`, `d = dot(center − blur, LUMA709)`, `d = clamp(d, −0.10, 0.10)`(헤일로 제한), `out = clamp(center + sharp·SHARP_GAIN·d, 0, 1)`(RGB 모두에 같은 d를 더함), `SHARP_GAIN = 2.0`. `sharp == 0`이면 추가 샘플링 없이(유니폼 분기) 기존 경로와 같다. 나머지 ITM 단계는 그대로.
+- 비용 가정 [추정]: 4탭 추가는 캔버스 해상도(표시×DPR 이하)에서 GPU 약 4~5배 샘플링이지만 현재 2160p ITM GPU 약 2.4~5.3 ms에 비해 예산 내일 것으로 본다. 사용자 Mac 측정(M4-C (d))으로 확인하고, 초과하면 Opus가 4탭을 2탭(가로·세로 대각 제외) 또는 반해상도 블러로 줄이는 지침을 낸다.
+- 테스트: numpy `sim/sharpen.py`(평탄 입력 불변, sharp=0 항등, 계단 입력에서 오버슈트가 `SHARP_GAIN·0.10·sharp` 이하, 출력 [0,1]), `test_saturation`(csat=1 항등, csat=0 → 회색 `Y'` 일치, 회색 입력 불변, 휘도 보존), JS 미러 vs numpy 오차 < 1e-4, WGSL 문자열 검사(uniform 필드 순서·분기·`textureDimensions`).
+- 스키마 v8: `render.sharpness`(0~1), `render.saturation`(0.5~1.5).
+
+**M4-D. 범위 밖**: 상세 슬라이더 6개·하이라이트(화이트포인트) 슬라이더(M5), 선명도 알고리즘 고도화(CAS 등, 4탭 언샤프로 부족하면 M5), 헤드룸 자동 추정, HUD, BT.2446/2408 방식 채택(S6 비교는 참고만).
 
 **M3 판정 완료 (2026-10-01)**: 게이트 판정 기록 "M3 수명주기" 행 참조. M4a 착수 가능.
 
