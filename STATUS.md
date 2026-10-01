@@ -128,6 +128,15 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 
 - M6 사용자 회신(2026-10-01, 수치 JSON 없음, 사용자 보고): 재빌드·실행 후 30분 soak "문제없음", 4K HDR 첫 attach "문제없음, `frameProbe.hdrEarly` true 확인", 전체화면·60Hz·비60fps "문제없음". 드롭률·메모리 수치와 진단 JSON은 제출되지 않아 PLAN D-M6 기준(드롭 < 1%, 메모리 증가 < 15%)의 수치 검증은 [미확인]이며 사용자 판단으로 통과로 본다. M6 판정은 Opus가 게이트 판정 기록에 한다
 
+## T 회차 구현 (브랜치 claude/review-fixes, 2026-10-01, Sonnet)
+
+- FIX_GUIDE T 회차 전 항목 구현. `params.js` 진단 요청 키 `sdrhdr.diagRequest`(`requestDiag`·`subscribeDiagRequest`) 먼저 커밋 후 W-A(renderer)·W-B(popup) 병렬
+- W-A `renderer.js`: T1 소스 세대 번호로 진행 중 frameProbe 결과 폐기(`restartSource`·`enterBaseline`에서 증가, `probeVf`의 colorSpace 쓰기도 확인), T3 `probePoll` hidden이면 반환, TA 상수 `SKIP_SAME_FRAME=true` + dirty 플래그(vf: `VideoFrame.timestamp` 동일, copy: `updateCopyTexture`가 'same', ext는 항상 렌더), 생략 tick도 loopTs·srcTs·frameTimes 기록, `sameFrameSkipped` 통계. 기존 테스트 1건(P2)의 `renders` 기대를 TA(e)에 맞게 3→2로 변경(+`sameFrameSkipped` 1 단언), 새 테스트 13건
+- W-B `popup`: T2 진단 영역을 열 때 1회 + 2초마다 요청, 닫으면 중단, T4 닫힌 동안 textarea 불변·scrollTop 보존·Blob은 "JSON 저장" 클릭 시 생성, T5(a) `DEFAULT_CUSTOM` 폴백, 안내 문구 한 줄. 새 테스트 6건
+- 본 세션: `main.js` 2초 주기 진단 저장 제거·요청 시 보이는 탭만 응답(T2), HUD 갱신 hidden 건너뜀(T3), 진단 schemaVersion 11(`render.sameFrameSkipped`)·스키마·parse-result, manifest 1.0.1·`tonecurve.js` 제거(T5b, 테스트가 직접 로드), 체크리스트 "T 회차 확인", install.md 문구
+- → verify: lint 통과, npm test 228/228, test:dom 15/15, pytest sim 157/157, results parse-result 통과 / (1) 로컬 Mac. **TA의 "그리지 않아도 캔버스가 마지막 화면을 유지"(깜박임 없음), popup 진단 영역 동작, 두 탭 응답은 미검증(사용자 Mac 필요)**
+- 해석: ① 경로 변경 dirty는 단위 테스트가 약함(vf→copy 폴백만 렌더 확인). ② T2로 popup을 처음 열 때 저장된 진단이 없으면(요청 전) 진단 상자가 비어 있다 — 진단 영역을 펼치면 채워진다
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

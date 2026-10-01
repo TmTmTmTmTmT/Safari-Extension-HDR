@@ -230,7 +230,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 10);
+  assert.strictEqual(d.schemaVersion, 11);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -615,13 +615,15 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
         copyTimesMs: [1, 2, 3, 4, 5],
         vfTimesMs: [0.5, 1, 1.5, 2, 2.5],
         copySkipped: 7,
+        sameFrameSkipped: 12,
         videoDropped: 3,
         videoTotal: 100,
       },
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 10);
+  assert.strictEqual(d.schemaVersion, 11);
+  assert.strictEqual(d.render.sameFrameSkipped, 12);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
@@ -971,7 +973,7 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
       flags: { hud: true },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 10);
+  assert.strictEqual(d.schemaVersion, 11);
   assert.strictEqual(d.render.preset, 'custom');
   assert.deepStrictEqual(d.render.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
   assert.strictEqual(d.render.effectivePeak, 1.8);

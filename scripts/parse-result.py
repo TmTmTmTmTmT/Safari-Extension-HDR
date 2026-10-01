@@ -366,7 +366,7 @@ def summarize_m2(name, data):
         if "mode" in fp:  # v10: 측정 방식과 HDR 조기 판정
             cols += ["mode", "hdrEarly"]
         print(table(cols + ["blackFrame"], [[fmt(fp.get(c)) for c in cols] + [fmt(flags.get("blackFrame"))]]))
-    v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "videoDropped", "videoTotal"]
+    v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "sameFrameSkipped", "videoDropped", "videoTotal"]
     if any(k in render for k in ("vfMsP50", "vfMsP95")):  # schemaVersion 4 이상
         v3_cols = v3_cols + ["vfMsP50", "vfMsP95"]
     if "strength" in render:  # schemaVersion 7 이상 (HDR 강도), 8 이상은 preset·sharpness·saturation 추가

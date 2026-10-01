@@ -42,6 +42,9 @@ function setup({
     vfNewErr: null,
     warns: [],
     now: 0,
+    // 각 mapAsync가 차례로 기다릴 promise (없거나 undefined면 즉시). T1 테스트에서 측정 중간 상태를 만든다.
+    mapGates: [],
+    docListeners: {},
   };
   let lastFill = 0;
   const device = {
@@ -85,6 +88,8 @@ function setup({
         destroyed: false,
         async mapAsync() {
           state.calls.push('mapAsync');
+          const gate = state.mapGates.shift();
+          if (gate) await gate;
         },
         getMappedRange: () => new Uint8Array(d.size).fill(lastFill).buffer,
         unmap() {
@@ -155,6 +160,7 @@ function setup({
     },
   };
   state.listeners = listeners;
+  state.docFire = (t) => [...(state.docListeners[t] || [])].forEach((fn) => fn());
   state.video = video;
   state.fire = (t) => [...(listeners[t] || [])].forEach((fn) => fn());
   state.settle = () => new Promise((r) => setImmediate(r));
@@ -164,7 +170,15 @@ function setup({
   };
   const ctx = vm.createContext({
     navigator: { gpu: { requestAdapter: async () => ({ requestDevice: async () => device }) } },
-    document: { hidden: false, addEventListener() {}, removeEventListener() {} },
+    document: {
+      hidden: false,
+      addEventListener(t, fn) {
+        (state.docListeners[t] = state.docListeners[t] || new Set()).add(fn);
+      },
+      removeEventListener(t, fn) {
+        if (state.docListeners[t]) state.docListeners[t].delete(fn);
+      },
+    },
     performance: { now: () => state.now },
     setInterval: (fn) => state.intervals.push(fn),
     clearInterval: (id) => state.intervals.splice(id - 1, 1, null),
@@ -205,6 +219,7 @@ function setup({
     if (f === 'content/main.js' || f === 'content/overlay.js') continue; // main은 로드 시 start를 예약한다
     vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
   }
+  state.document = ctx.document;
   const canvas = { style: {}, getContext: () => gpuCtx };
   state.canvas = canvas;
   state.renderer = ctx.__sdrhdr.renderer.createRenderer(canvas, video, () => {}, {
@@ -458,7 +473,9 @@ test('P2: 같은 currentTime이면 재복사 생략, 바뀌면 복사. copySkipp
   const st = s.renderer.getStats();
   assert.strictEqual(st.copySkipped, 1);
   assert.strictEqual(st.copyTimesMs.length, 2);
-  assert.strictEqual(s.renders, 3);
+  // TA: 같은 currentTime의 두 번째 tick은 복사뿐 아니라 렌더·submit도 생략한다.
+  assert.strictEqual(s.renders, 2);
+  assert.strictEqual(st.sameFrameSkipped, 1);
   s.renderer.destroy();
 });
 
@@ -1194,5 +1211,251 @@ test('M6: 단일 측정 중 선택 경로 예외도 전체 측정으로 폴백, 
   assert.strictEqual(p.extErr, 'Error');
   assert.deepStrictEqual([p.vf, p.copy, p.c2d], [100, 60, 60]);
   assert.strictEqual(s.renderer.getStats().path, 'ext');
+  s.renderer.destroy();
+});
+
+// ---- FIX_GUIDE T1: 소스 세대 번호 ----
+test('T1: 측정 중간(ext await)에 restartSource하면 이전 회차 결과를 폐기한다', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  s.vfColorSpace = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false };
+  let release;
+  const gate = new Promise((r) => (release = r));
+  s.mapGates.push(undefined, gate); // vf는 즉시, ext에서 멈춤
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 0, '측정 진행 중');
+  s.renderer.restartSource();
+  release();
+  await s.settle();
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.path, null);
+  assert.strictEqual(st.frameProbe, null);
+  assert.strictEqual(st.colorSpace, null);
+  assert.strictEqual(s.probes.length, 0, 'onProbe 호출 없음');
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  assert.strictEqual(
+    s.calls.filter((c) => c === 'mapAsync').length,
+    2,
+    '폐기 후 나머지 경로(copy 등)를 더 재지 않는다',
+  );
+  s.renderer.destroy();
+});
+
+test('T1: 폐기 뒤 다음 poll에서 새 회차가 vf부터 다시 측정하고 HDR이면 hdrEarly', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  let release;
+  const gate = new Promise((r) => (release = r));
+  s.mapGates.push(undefined, gate);
+  await s.renderer.start();
+  await s.settle();
+  s.renderer.restartSource();
+  release();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 0);
+  s.vfColorSpace = { primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl', fullRange: false };
+  s.calls.length = 0;
+  s.intervals[0](); // 폐기한 회차가 probeDue를 바꾸지 않았으므로 즉시 돈다
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1);
+  assert.strictEqual(s.probes[0].hdrEarly, true);
+  assert.strictEqual(probeOrder(s.calls)[0], 'vf');
+  assert.deepStrictEqual(s.paths, ['pending']);
+  assert.strictEqual(s.renderer.getStats().path, null);
+  s.renderer.destroy();
+});
+
+test('T1: baseline 전환도 세대를 올려 진행 중 회차를 폐기한다', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  let release;
+  const gate = new Promise((r) => (release = r));
+  s.mapGates.push(gate);
+  await s.renderer.start();
+  await s.settle();
+  s.renderer.setMode('baseline');
+  s.renderer.setMode('itm');
+  release();
+  await s.settle();
+  // baseline에서 돌아오며 시작한 새 회차의 결과만 남는다(이전 회차가 살아 있으면 2건).
+  assert.strictEqual(s.probes.length, 1);
+  s.renderer.destroy();
+});
+
+// ---- FIX_GUIDE T3: 숨긴 탭의 probePoll ----
+test('T3: document.hidden이면 probePoll이 측정하지 않고(타이머는 유지), 복귀 후 다음 poll에서 측정한다', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  s.document.hidden = true;
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 0);
+  assert.strictEqual(s.intervals.length, 1, '타이머는 유지');
+  s.now = 40000;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 0);
+  s.document.hidden = false;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.probes.length, 1);
+  s.renderer.destroy();
+});
+
+// ---- FIX_GUIDE TA: 같은 소스 프레임 재렌더 생략 ----
+// vf 경로로 결정하고 timestamp 1e6인 프레임을 1회 그린 상태(dirty 해제)를 만든다.
+async function vfSteady() {
+  const s = await vfSetup({});
+  assert.strictEqual(s.renderer.getStats().path, 'vf');
+  s.vfTs = 1000000;
+  s.flush();
+  assert.strictEqual(s.renderer.getStats().frames, 1);
+  return s;
+}
+
+test('TA(a): vf 같은 timestamp 두 번째 tick은 import·submit 없이 frame을 닫고 통계는 기록한다', async () => {
+  const s = await vfSteady();
+  s.calls.length = 0;
+  s.frames.length = 0;
+  const submits = s.submits;
+  const renders = s.renders;
+  s.flush();
+  assert.strictEqual(s.frames.length, 1);
+  assert.strictEqual(s.frames[0].closed, 1);
+  assert.deepStrictEqual(s.calls, ['new VideoFrame', 'frame.close']);
+  assert.strictEqual(s.submits, submits);
+  assert.strictEqual(s.renders, renders);
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.loopTimestamps.length, 2);
+  assert.strictEqual(st.srcTimes.length, 2);
+  assert.strictEqual(st.frameTimesMs.length, 2);
+  assert.strictEqual(st.frames, 1);
+  assert.strictEqual(st.sameFrameSkipped, 1);
+  assert.strictEqual(st.vfTimesMs.length, 1);
+  assert.deepStrictEqual([...st.srcTimes], [1, 1]);
+  s.renderer.destroy();
+});
+
+test('TA(b): vf timestamp가 바뀌면 렌더한다', async () => {
+  const s = await vfSteady();
+  s.flush(); // skip
+  s.vfTs = 1016667;
+  s.flush();
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.frames, 2);
+  assert.strictEqual(st.sameFrameSkipped, 1);
+  s.renderer.destroy();
+});
+
+test('TA(c): dirty 조건(setParams, 캔버스 크기, play·seeked, setMode, 가시 복귀, restartSource) 후에는 같은 timestamp여도 렌더한다', async () => {
+  const triggers = {
+    setParams: (s) => s.renderer.setParams({ strength: 1.2 }),
+    canvasSize: (s) => (s.canvas.width = 3840),
+    seeked: (s) => s.fire('seeked'),
+    play: (s) => s.fire('play'),
+    setMode: (s) => s.renderer.setMode('identity'),
+    visibility: (s) => s.docFire('visibilitychange'),
+  };
+  for (const [name, fire] of Object.entries(triggers)) {
+    const s = await vfSteady();
+    s.flush(); // 같은 frame: skip
+    assert.strictEqual(s.renderer.getStats().sameFrameSkipped, 1, name);
+    fire(s);
+    s.flush();
+    // play·seeked·visibility는 clearRings가 있어 frames(렌더 수)로만 확인한다.
+    assert.strictEqual(s.renderer.getStats().frames, 2, name + ': 렌더');
+    s.flush();
+    assert.strictEqual(s.renderer.getStats().frames, 2, name + ': 이후 다시 생략');
+    s.renderer.destroy();
+  }
+});
+
+test('TA(c): 캔버스 백킹 크기는 첫 렌더 이후 같으면 생략, 달라지면 렌더', async () => {
+  const s = await vfSetup({});
+  s.canvas.width = 1920;
+  s.canvas.height = 1080;
+  s.vfTs = 5;
+  s.flush(); // 렌더
+  s.flush(); // 생략
+  s.canvas.height = 1081;
+  s.flush(); // 렌더
+  s.flush(); // 생략
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.frames, 2);
+  assert.strictEqual(st.sameFrameSkipped, 2);
+  s.renderer.destroy();
+});
+
+test('TA(c): vf -> copy 폴백 후 첫 tick은 생략 없이 렌더한다', async () => {
+  const s = await vfSteady();
+  s.vals.vf = Object.assign(new Error('boom'), { name: 'TypeError' });
+  s.vfTs = 2000000; // 새 프레임이어야 import까지 가서 예외가 난다
+  s.flush(); // import 예외 -> copy 전환 (dirty)
+  assert.strictEqual(s.renderer.getStats().path, 'copy');
+  s.video.currentTime = 1;
+  const before = s.renderer.getStats().frames;
+  s.flush();
+  assert.strictEqual(s.renderer.getStats().frames, before + 1);
+  s.renderer.destroy();
+});
+
+test('TA(c): restartSource 후 경로 재결정 뒤 첫 tick은 렌더한다', async () => {
+  const s = await vfSteady();
+  s.renderer.restartSource();
+  s.now = 1;
+  s.intervals[0]();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'vf');
+  const st0 = s.renderer.getStats();
+  assert.strictEqual(st0.sameFrameSkipped, 0, 'restartSource가 카운터를 비운다');
+  s.flush();
+  assert.strictEqual(s.renderer.getStats().frames, 1);
+  s.renderer.destroy();
+});
+
+test('TA(d): vf timestamp가 없으면(undefined) 항상 렌더한다', async () => {
+  const s = await vfSetup({});
+  s.flush();
+  s.flush();
+  s.flush();
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.frames, 3);
+  assert.strictEqual(st.sameFrameSkipped, 0);
+  s.renderer.destroy();
+});
+
+test('TA(e): copy 경로 같은 currentTime은 복사·렌더·submit 모두 생략하고 통계는 기록한다', async () => {
+  const s = setup({ readyState: 4, paused: false, ext: 0, vf: 0, copy: 60, c2d: 60 });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'copy');
+  s.video.currentTime = 2;
+  s.flush(); // 렌더
+  const submits = s.submits;
+  const renders = s.renders;
+  s.flush(); // 같은 프레임
+  assert.strictEqual(s.submits, submits);
+  assert.strictEqual(s.renders, renders);
+  let st = s.renderer.getStats();
+  assert.strictEqual(st.frames, 1);
+  assert.strictEqual(st.sameFrameSkipped, 1);
+  assert.strictEqual(st.loopTimestamps.length, 2);
+  assert.strictEqual(st.srcTimes.length, 2);
+  s.video.currentTime = 2.0167;
+  s.flush();
+  st = s.renderer.getStats();
+  assert.strictEqual(st.frames, 2);
+  assert.strictEqual(st.sameFrameSkipped, 1);
+  s.renderer.destroy();
+});
+
+test('TA(f): ext 경로는 항상 렌더한다', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().path, 'ext');
+  s.flush();
+  s.flush();
+  s.flush();
+  const st = s.renderer.getStats();
+  assert.strictEqual(st.frames, 3);
+  assert.strictEqual(st.sameFrameSkipped, 0);
   s.renderer.destroy();
 });

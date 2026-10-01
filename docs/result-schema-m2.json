@@ -197,6 +197,10 @@
           "type": ["number", "null"],
           "description": "schemaVersion 3 이상. 같은 프레임 재복사 생략 횟수."
         },
+        "sameFrameSkipped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 11 이상. 같은 소스 프레임이라 렌더·제출을 생략한 횟수(vf·copy 경로, FIX_GUIDE TA)."
+        },
         "videoDropped": {
           "type": ["number", "null"],
           "description": "schemaVersion 3 이상. getVideoPlaybackQuality().droppedVideoFrames"

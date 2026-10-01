@@ -13,6 +13,12 @@ const ctx = vm.createContext({});
 for (const f of manifest.content_scripts[0].js) {
   vm.runInContext(fs.readFileSync(path.join(repo, 'extension', f), 'utf8'), ctx, { filename: f });
 }
+// tonecurve.js는 테스트 전용이라 manifest에 없다 (FIX_GUIDE T5b). 계수 비교용으로 직접 로드한다.
+vm.runInContext(
+  fs.readFileSync(path.join(repo, 'extension', 'content', 'tonecurve.js'), 'utf8'),
+  ctx,
+  { filename: 'content/tonecurve.js' },
+);
 const ext = ctx.__sdrhdr;
 const probeCtx = vm.createContext({});
 vm.runInContext(fs.readFileSync(path.join(repo, 'probe', 'shaders.js'), 'utf8'), probeCtx);

@@ -5,7 +5,10 @@
   const $ = (id) => document.getElementById(id);
   const SAVE_MS = 100; // 슬라이더 드래그 중 저장 간격
   const PEAK_WARN = 2.0; // 밝기 최대 헤드룸(약 2), PLAN M5-1
+  const DIAG_REQUEST_MS = 2000; // 진단 영역이 열린 동안 요청 주기
   let blobUrl = null;
+  let latestText = '';
+  let diagTimer = null;
   // 현재 UI 값. 유효 피크와 상세 슬라이더 시작값을 저장소 재조회 없이 계산하는 데 쓴다.
   let cur = null;
 
@@ -17,14 +20,39 @@
   ];
   const DETAIL_KEYS = Object.keys(params.DETAIL_STEPS);
 
+  // 진단 영역이 닫혀 있으면 textarea를 건드리지 않고 최신 텍스트만 보관한다 (FIX_GUIDE T4).
+  function diagText(diag) {
+    return diag ? JSON.stringify(diag, null, 2) : '(진단 없음: youtube.com 탭을 연 뒤 다시 열기)';
+  }
+  function applyDiag() {
+    const box = $('diag');
+    const top = box.scrollTop;
+    box.value = latestText;
+    box.scrollTop = top;
+  }
   function showDiag(diag) {
-    const text = diag
-      ? JSON.stringify(diag, null, 2)
-      : '(진단 없음: youtube.com 탭을 연 뒤 다시 열기)';
-    $('diag').value = text;
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
-    blobUrl = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-    $('save').href = blobUrl;
+    latestText = diagText(diag);
+    if ($('diag-section').open) applyDiag();
+  }
+
+  // 진단 영역이 열려 있는 동안만 요청을 쓴다: 열 때 1회, 이후 2초마다 (FIX_GUIDE T2).
+  function startDiagRequests() {
+    if (diagTimer !== null) return;
+    params.requestDiag();
+    diagTimer = setInterval(() => params.requestDiag(), DIAG_REQUEST_MS);
+  }
+  function stopDiagRequests() {
+    if (diagTimer === null) return;
+    clearInterval(diagTimer);
+    diagTimer = null;
+  }
+  function onDiagToggle() {
+    if ($('diag-section').open) {
+      applyDiag();
+      startDiagRequests();
+    } else {
+      stopDiagRequests();
+    }
   }
 
   function showSlider(sl, v) {
@@ -89,7 +117,7 @@
       min,
       max,
       step: params.DETAIL_STEPS[key],
-      default: params.PRESETS.accurate[key],
+      default: params.DEFAULT_CUSTOM[key],
     };
     const el = $('d-' + key);
     el.min = String(min);
@@ -158,6 +186,14 @@
       $('diag').select();
       if (navigator.clipboard) navigator.clipboard.writeText($('diag').value).catch(() => {});
     });
+    $('save').addEventListener('click', () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      blobUrl = URL.createObjectURL(new Blob([latestText], { type: 'application/json' }));
+      $('save').href = blobUrl;
+    });
+    $('diag-section').addEventListener('toggle', onDiagToggle);
+    globalThis.addEventListener?.('pagehide', stopDiagRequests);
+    if ($('diag-section').open) startDiagRequests();
     browser.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && K.diag in changes) showDiag(changes[K.diag].newValue);
     });

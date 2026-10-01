@@ -28,9 +28,12 @@ function makeEl() {
 }
 
 async function setup(stored = {}) {
-  const els = {};
+  const els = { 'diag-section': Object.assign(makeEl(), { open: false }) };
   const sets = [];
   const timers = [];
+  const intervals = [];
+  const blobs = [];
+  const listeners = [];
   const document = { getElementById: (id) => (els[id] = els[id] || makeEl()) };
   const browser = {
     storage: {
@@ -38,15 +41,26 @@ async function setup(stored = {}) {
         get: async () => stored,
         set: (o) => sets.push(plain(o)),
       },
-      onChanged: { addListener() {} },
+      onChanged: { addListener: (fn) => listeners.push(fn) },
     },
   };
   const ctx = vm.createContext({
     document,
     browser,
     navigator: {},
-    URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
-    Blob: class {},
+    URL: {
+      createObjectURL: () => 'blob:' + blobs.length,
+      revokeObjectURL() {},
+    },
+    Blob: class {
+      constructor(parts) {
+        blobs.push(parts.join(''));
+      }
+    },
+    setInterval: (fn, ms) => intervals.push({ fn, ms, on: true }) - 1,
+    clearInterval: (i) => {
+      intervals[i].on = false;
+    },
     setTimeout: (fn) => timers.push(fn) - 1,
     clearTimeout: (i) => {
       timers[i] = null;
@@ -60,7 +74,18 @@ async function setup(stored = {}) {
     const t = timers.splice(0);
     t.forEach((fn) => fn && fn());
   };
-  return { els, sets, timers, runTimers, params: ctx.__sdrhdr.params };
+  const tick = () => intervals.forEach((i) => i.on && i.fn());
+  return {
+    els,
+    sets,
+    timers,
+    runTimers,
+    intervals,
+    blobs,
+    listeners,
+    tick,
+    params: ctx.__sdrhdr.params,
+  };
 }
 
 test('초기 표시값: 사용자 지정·43·0·105, 상세=기본 곡선, 유효 피크 1.62', async () => {
@@ -196,4 +221,75 @@ test('throttle: 연속 입력은 타이머 1회에 마지막 값, change는 즉�
   assert.deepStrictEqual(sets[1], { 'sdrhdr.sharpness': 0.2 });
   runTimers();
   assert.strictEqual(sets.length, 2);
+});
+
+const reqs = (sets) => sets.filter((o) => 'sdrhdr.diagRequest' in o).length;
+const openDiag = (els, open) => {
+  els['diag-section'].open = open;
+  els['diag-section'].fire('toggle');
+};
+
+test('진단 영역이 닫혀 있으면 요청 0회, 타이머 없음', async () => {
+  const { sets, intervals } = await setup();
+  assert.strictEqual(reqs(sets), 0);
+  assert.strictEqual(intervals.length, 0);
+});
+
+test('진단 영역 열기: 즉시 1회 + 2초마다 1회, 닫으면 중단', async () => {
+  const { els, sets, intervals, tick } = await setup();
+  openDiag(els, true);
+  assert.strictEqual(reqs(sets), 1);
+  assert.strictEqual(intervals.length, 1);
+  assert.strictEqual(intervals[0].ms, 2000);
+  tick();
+  tick();
+  assert.strictEqual(reqs(sets), 3);
+  openDiag(els, false);
+  tick();
+  assert.strictEqual(reqs(sets), 3);
+  openDiag(els, true);
+  assert.strictEqual(reqs(sets), 4);
+});
+
+test('진단 영역이 닫혀 있으면 textarea 불변, 열면 최신 진단 반영', async () => {
+  const { els, listeners } = await setup({ 'sdrhdr.diag': { a: 1 } });
+  assert.strictEqual(els.diag, undefined); // 닫힌 동안 textarea에 접근하지 않음
+  listeners.forEach((fn) => fn({ 'sdrhdr.diag': { newValue: { a: 2 } } }, 'local'));
+  assert.strictEqual(els.diag, undefined);
+  openDiag(els, true);
+  assert.strictEqual(els.diag.value, JSON.stringify({ a: 2 }, null, 2));
+});
+
+test('열린 상태 갱신은 scrollTop 보존', async () => {
+  const { els, listeners } = await setup();
+  openDiag(els, true);
+  els.diag.scrollTop = 120;
+  const fresh = { b: 1 };
+  Object.defineProperty(els.diag, 'value', {
+    set() {
+      els.diag.scrollTop = 0; // 브라우저가 값 교체 시 맨 위로 되돌리는 동작 모사
+    },
+    get: () => '',
+    configurable: true,
+  });
+  listeners.forEach((fn) => fn({ 'sdrhdr.diag': { newValue: fresh } }, 'local'));
+  assert.strictEqual(els.diag.scrollTop, 120);
+});
+
+test('Blob은 JSON 저장 클릭 시에만 1회 생성, 최신 진단 포함', async () => {
+  const { els, blobs, listeners } = await setup({ 'sdrhdr.diag': { a: 1 } });
+  openDiag(els, true);
+  listeners.forEach((fn) => fn({ 'sdrhdr.diag': { newValue: { a: 2 } } }, 'local'));
+  assert.strictEqual(blobs.length, 0);
+  els.save.fire('click');
+  assert.strictEqual(blobs.length, 1);
+  assert.strictEqual(blobs[0], JSON.stringify({ a: 2 }, null, 2));
+  assert.strictEqual(els.save.href, 'blob:1');
+});
+
+test('상세 슬라이더 범위 밖 입력(NaN) 폴백은 DEFAULT_CUSTOM', async () => {
+  const { els, params } = await setup();
+  els['d-P'].value = 'abc';
+  els['d-P'].fire('input');
+  assert.strictEqual(Number(els['d-P'].value), params.DEFAULT_CUSTOM.P);
 });

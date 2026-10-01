@@ -34,7 +34,11 @@ function makeVideo(src) {
 async function setup(mode = 'itm') {
   const calls = [];
   const intervals = [];
-  const doc = Object.assign(emitter(), { fullscreenElement: null });
+  const doc = Object.assign(emitter(), {
+    fullscreenElement: null,
+    hidden: false,
+    visibilityState: 'visible',
+  });
   const dom = { video: makeVideo('blob:a'), container: { id: 'c' }, player: { id: 'p' } };
   doc.querySelector = (sel) => {
     if (!dom.player) return null;
@@ -78,9 +82,12 @@ async function setup(mode = 'itm') {
     saturation: 1,
   });
   ns.params.subscribe = (cb) => (settingsCb = cb);
-  const t = { intervals, diag: null };
+  let diagReqCb = null;
+  ns.params.subscribeDiagRequest = (cb) => (diagReqCb = cb);
+  const t = { intervals, diag: null, diagWrites: 0 };
   ns.params.writeDiag = async (d) => {
     t.diag = d;
+    t.diagWrites += 1;
   };
   const renderers = [];
   // 페이지 HUD는 DOM이 없는 vm 환경이라 스텁으로 바꾼다 (PLAN M5-3).
@@ -136,12 +143,21 @@ async function setup(mode = 'itm') {
     filename: 'content/main.js',
   });
   await ns.main.start();
-  return Object.assign(t, { ctx, ns, doc, dom, calls, renderers, settings: (s) => settingsCb(s) });
+  return Object.assign(t, {
+    ctx,
+    ns,
+    doc,
+    dom,
+    calls,
+    renderers,
+    settings: (s) => settingsCb(s),
+    diagRequest: () => diagReqCb(),
+  });
 }
 
-// 진단 타이머를 수동으로 돌려 lifecycle 상태를 읽는다.
+// popup 진단 요청을 흉내 내 lifecycle 상태를 읽는다 (FIX_GUIDE T2).
 async function diagOf(t) {
-  t.intervals.forEach((fn) => fn());
+  t.diagRequest();
   await Promise.resolve();
   return plain(t.diag);
 }
@@ -380,4 +396,42 @@ test('HUD: 설정이 켜져 있으면 attach 시 만들고 1초 주기로 갱신
   t.dom.video.fire('encrypted'); // detach
   assert.strictEqual(t.huds[1].destroyed, 1);
   t.intervals.forEach((fn) => fn()); // detach 후 갱신 시도는 예외 없이 무시
+});
+
+test('진단은 popup 요청 때만 쓴다: 타이머 주기 저장 없음, 숨긴 탭은 무시 (FIX_GUIDE T2)', async () => {
+  const t = await setup();
+  t.intervals.forEach((fn) => fn());
+  await Promise.resolve();
+  assert.strictEqual(t.diagWrites, 0, '요청 없이는 0회');
+  t.doc.hidden = true;
+  t.doc.visibilityState = 'hidden';
+  t.diagRequest();
+  await Promise.resolve();
+  assert.strictEqual(t.diagWrites, 0, '숨긴 탭은 응답하지 않는다');
+  t.doc.hidden = false;
+  t.doc.visibilityState = 'visible';
+  t.diagRequest();
+  await Promise.resolve();
+  assert.strictEqual(t.diagWrites, 1);
+});
+
+test('HUD 갱신은 숨긴 탭에서 건너뛴다 (FIX_GUIDE T3)', async () => {
+  const t = await setup();
+  const base = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+    custom: { P: 2, k: 0.5, n: 2, g: 1, s: 1, hs: 1 },
+  };
+  t.settings({ ...base, hud: true });
+  t.huds[0].lines = null;
+  t.doc.hidden = true;
+  t.intervals.forEach((fn) => fn());
+  assert.strictEqual(t.huds[0].lines, null, 'hidden이면 update 없음');
+  t.doc.hidden = false;
+  t.intervals.forEach((fn) => fn());
+  assert.strictEqual(t.huds[0].lines.length, 5);
 });

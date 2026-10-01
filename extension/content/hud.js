@@ -290,7 +290,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 10,
+      schemaVersion: 11,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -357,6 +357,7 @@
         copyMsP50: round2(percentile(copyTimes, 50)),
         copyMsP95: round2(percentile(copyTimes, 95)),
         copySkipped: numOrNull(render.copySkipped),
+        sameFrameSkipped: numOrNull(render.sameFrameSkipped),
         vfMsP50: round2(percentile(vfTimes, 50)),
         vfMsP95: round2(percentile(vfTimes, 95)),
         videoDropped: numOrNull(render.videoDropped),
