@@ -111,6 +111,13 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 
 - M5 1차 회신(2026-10-01, `results/result-M5-20261001-custom-hud.json`, 프리셋 custom·HUD 켬): 사용자 지정 곡선 {P2.6, k0.4, n2, g1.11, s1, hs1.03}, 강도 53%·채도 105%, 유효 피크 2.0(= 1 + 0.53 × (2.6×1.11 − 1))에서 errors 없음, path vf, 갱신 누락 6.9%·loopFps 57·JS p95 1 ms·드롭 0(HUD 켠 상태, 60fps 소스, 영상 일시정지 중 캡처). 체크리스트 M5 절의 개별 항목(반영 속도, 프리셋 전환, HUD 위치·갱신·끊김 판정 등)은 사용자 보고가 없어 [미확인]. 누락률 6.9%는 HUD 영향인지 페이지 부하인지 분리하지 않음(M2의 baseline 4.8%와 같은 규모)
 
+## 기본값 변경 (2026-10-01, 사용자 지시, 브랜치 claude/m6-stability)
+
+- popup 스크린샷의 설정을 기본값으로: 프리셋 `custom`, 곡선 {P2.0, k0.40, n2.0, g1.22, s1.03, hs1.03}(`params.DEFAULT_CUSTOM`), 강도 0.43, 선명도 0, 채도 1.05, HUD 꺼짐. 유효 피크 1.6192. 저장된 설정이 있으면 그대로 유지되며 기본값은 저장값이 없는 키에만 쓰인다
+- 변경: `params.js`(`DEFAULT_PRESET='custom'`, `DEFAULT_CUSTOM`, `normalizeCustom` 누락 기본값 = `DEFAULT_CUSTOM`, `curveOf`가 프리셋 id가 아니면 custom 사용), 관련 단위·popup 테스트 기대값, 체크리스트 M5 문구
+- PLAN M5-0(기본값 정확·53%)과 달라진 사용자 지시라 Opus에 알림: 다음 PLAN 개정 때 M5-0 문구와 D-M6 soak 조건("정확 프리셋·기본값")을 새 기본값 기준으로 고친다
+- → verify: lint 통과, npm test 200/200 / (1) 로컬 Mac
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

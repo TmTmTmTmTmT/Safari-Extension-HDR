@@ -8,7 +8,9 @@
   };
   // 'custom'은 상세 슬라이더로 만든 값(sdrhdr.custom)을 쓰는 가상 프리셋이다 (PLAN D-M5 M5-1).
   const PRESET_IDS = Object.keys(PRESETS).concat('custom');
-  const DEFAULT_PRESET = 'accurate'; // 사용자 선택 (PLAN M5-0)
+  // 기본 설정은 사용자가 popup에서 맞춘 값이다(2026-10-01 지시): 사용자 지정 프리셋 + 아래 곡선, 강도 43%, 채도 105%.
+  const DEFAULT_CUSTOM = { P: 2.0, k: 0.4, n: 2.0, g: 1.22, s: 1.03, hs: 1.03 };
+  const DEFAULT_PRESET = 'custom';
   const PRESET_BALANCED = PRESETS.balanced;
 
   // PLAN C절 파라미터 범위 [min, max]. 범위 정의는 이 한 곳 (GUIDELINES 3-5).
@@ -35,7 +37,7 @@
     diag: 'sdrhdr.diag',
   };
   // 슬라이더 범위·기본값 (PLAN D-M4a, M4-E). 강도 0 = 색 변환만, 1 = ITM 전체. 기본 0.45는 M4a 사용자 회신으로 확정.
-  const STRENGTH = { min: 0, max: 1, step: 0.01, default: 0.53 };
+  const STRENGTH = { min: 0, max: 1, step: 0.01, default: 0.43 };
   const SHARPNESS = { min: 0, max: 1, step: 0.01, default: 0 };
   const SATURATION = { min: 0.5, max: 1.5, step: 0.01, default: 1.05 };
   // 상세 슬라이더 step (PLAN M5-1). 범위는 RANGES 한 곳.
@@ -47,7 +49,7 @@
     strength: STRENGTH.default,
     sharpness: SHARPNESS.default,
     saturation: SATURATION.default,
-    custom: Object.assign({}, PRESETS.accurate),
+    custom: Object.assign({}, DEFAULT_CUSTOM),
     hud: false,
   };
 
@@ -64,14 +66,14 @@
   }
   const normalizeStrength = (v) => normalizeRange(STRENGTH, v);
 
-  // 순수: 사용자 지정 곡선 값 {P,k,n,g,s,hs}. 각 값은 RANGES로 클램프하고 step으로 반올림, 누락·비숫자는 정확 프리셋 값.
+  // 순수: 사용자 지정 곡선 값 {P,k,n,g,s,hs}. 각 값은 RANGES로 클램프하고 step으로 반올림, 누락·비숫자는 DEFAULT_CUSTOM 값.
   function normalizeCustom(raw) {
     const r = raw && typeof raw === 'object' ? raw : {};
     const out = {};
     for (const key of Object.keys(DETAIL_STEPS)) {
       const [min, max] = RANGES[key];
       out[key] = normalizeRange(
-        { min, max, step: DETAIL_STEPS[key], default: PRESETS.accurate[key] },
+        { min, max, step: DETAIL_STEPS[key], default: DEFAULT_CUSTOM[key] },
         r[key],
       );
     }
@@ -81,8 +83,8 @@
   // 순수: 설정 -> 곡선 파라미터. custom이면 사용자 지정 값, 아니면 프리셋 값.
   function curveOf(settings) {
     const s = settings || {};
-    if (s.preset === 'custom') return normalizeCustom(s.custom);
-    return PRESETS[s.preset] || PRESETS[DEFAULT_PRESET];
+    if (Object.prototype.hasOwnProperty.call(PRESETS, s.preset)) return PRESETS[s.preset];
+    return normalizeCustom(s.custom);
   }
 
   // 순수: 유효 피크 = 1 + t (P g - 1) (PLAN M5-1). 밝기 최대 헤드룸(약 2)을 넘으면 하이라이트가 잘릴 수 있다.
@@ -167,6 +169,7 @@
     PRESETS,
     PRESET_IDS,
     DEFAULT_PRESET,
+    DEFAULT_CUSTOM,
     PRESET_BALANCED,
     RANGES,
     MODES,
