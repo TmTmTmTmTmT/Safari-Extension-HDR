@@ -56,6 +56,16 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 3단계 완료(PLAN M3-8): dom-skeleton.js 개선(조상은 ytd-watch-flexy/miniplayer/app까지, 하위 한정 출력, FULL=false), 실제 스냅샷 픽스처 3개(yt-default·yt-theater·yt-hdr-settings, 극장 속성·HDR 배지는 미확인으로 고정), detect hdrBadge 추측 셀렉터 교체(판정 미사용), tests/dom 실제 스냅샷 테스트, manual-checklist M3 절·재수집 절차
 - → verify: lint 통과, npm test 161/161, test:dom 14/14(WebKit), 스크립트를 WebKit에서 실제 픽스처로 실행해 출력 확인 / (1) 로컬 Mac. 사용자 Mac 체크리스트·셀렉터 확정(극장·미니플레이어·광고·전체화면 재수집)은 미검증
 
+- M3 체크리스트 1차 회신(2026-10-01, `results/result-M3-20261001-1-6.json`, parse-result rc=0): 1 SPA 이동 통과(navCount 4·srcChanges 3, 소스 변경 후 약 1.2초에 hdrSource 판정), 2 화면 모드(극장·전체화면·기본) 위치·조작 문제 없음, 3 창 크기 문제 없음, 5 HDR 영상 오버레이 해제(transfer pq, bt2020, 3840x2160), 7 DRM 오버레이 없음(JSON 미첨부, 사용자 보고). 4 광고는 프리미엄 계정이라 [미확인]. 6 PiP는 Apple 네이티브 UI로 들어가 확장 동작 없음(예상, pipEnter→skip:pip→pipLeave 이벤트 확인), 복귀 후 오버레이 재개는 사용자 응답에 명시 없음 [미확인]. 미니플레이어는 이벤트 로그에 없음 [미확인]
+- 이 회신의 `render`·`loopFps` null은 마지막 상태가 skipped(hdrSource)라 restartSource가 측정 버퍼를 비웠기 때문(정상)
+- 사용자 스냅샷 2차(ytd-watch-flexy 조상 포함, 라벨 없음): `ytd-watch-flexy`에 theater 속성 없음, 설정 버튼 클래스 `ytp-hd-quality-badge`. 극장 상태 스냅샷이 아니라 theater 속성명 확정에는 쓰지 않았고 커밋하지 않음
+
+## Opus 확인 필요 (M3)
+
+- M3 판정 요청: 1·2·3·5·7 통과, 4·6(복귀 재개)·미니플레이어 [미확인]. 광고는 비프리미엄 계정·광고 있는 영상이 필요하다. 판정은 Opus가 PLAN.md 게이트 판정 기록에 한다
+- 사용자 요청(M4/M5 계획 반영): HDR 강도를 itm 기준으로 드래그(슬라이더)로 조절. 어떤 파라미터를 "강도"에 대응시킬지(헤드룸·k·s 등)와 프리셋 관계는 설계 결정이라 구현하지 않았다. M5 popup 상세 UI와 겹친다
+- 관찰: HDR 4K 소스 첫 frameProbe에서 `c2dSyncMs` 608 ms(메인 스레드 동기 점유), 전체 644 ms. 소스 변경·attach마다 반복될 수 있다. 체감 끊김 보고는 없었다. M6 후보로 기록하고 처리 여부는 Opus 결정
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
