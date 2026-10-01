@@ -1,0 +1,83 @@
+{
+  "extVersion": "0.1.0",
+  "milestone": "M2",
+  "schemaVersion": 4,
+  "flags": {
+    "fullscreen": false,
+    "drm": false,
+    "attached": true,
+    "blackFrame": false
+  },
+  "errors": [],
+  "env": {
+    "dpr": 2,
+    "screen": {
+      "w": 1800,
+      "h": 1169
+    },
+    "dynamicRangeHigh": true,
+    "colorGamutP3": true,
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15"
+  },
+  "api": {
+    "configRead": {
+      "toneMapping": "extended",
+      "format": "rgba16float",
+      "colorSpace": "display-p3"
+    },
+    "gpu": true,
+    "adapter": true,
+    "device": true,
+    "configure": true
+  },
+  "canvas": {
+    "cssWidth": 1214,
+    "cssHeight": 682.875,
+    "width": 1920,
+    "height": 1080
+  },
+  "render": {
+    "displayMissRate": 0.51091,
+    "copyMsP50": null,
+    "videoDropped": 0,
+    "vfMsP95": 3,
+    "loopFps": 29.37708783651012,
+    "videoTotal": 1347,
+    "path": "vf",
+    "vfMsP50": 1,
+    "copyMsP95": null,
+    "mode": "itm",
+    "jsP50": 1,
+    "copySkipped": 0,
+    "frames": 1163,
+    "jsP95": 3,
+    "displayHz": 60
+  },
+  "frameProbe": {
+    "copySyncMs": 12,
+    "copyErr": null,
+    "c2d": 79.24,
+    "c2dSyncMs": 14,
+    "c2dErr": null,
+    "extSyncMs": 1,
+    "at": 32013,
+    "vfSyncMs": 0,
+    "extErr": null,
+    "ext": 0,
+    "vf": 73.64,
+    "copy": 150.79,
+    "ms": 37,
+    "n": 3,
+    "vfErr": null
+  },
+  "page": {
+    "url": "/watch?v=vF5oXa1cVEg"
+  },
+  "video": {
+    "srcIsBlob": true,
+    "videoHeight": 1080,
+    "paused": false,
+    "videoWidth": 1920
+  },
+  "createdAt": "2026-10-01T01:15:14.172Z"
+}

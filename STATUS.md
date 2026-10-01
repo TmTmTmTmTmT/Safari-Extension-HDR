@@ -51,6 +51,26 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
 - Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
 
+## M2 0b 4차 회신 (2026-10-01, R4 절차, 사용자 Mac)
+
+- vf 경로 동작: 영상 2개(vF5oXa1cVEg 3840×2160, MR_53SGVXXc 3840×1920) 모두 `render.path: vf`, errors 없음, vfErr 없음(content script에서 VideoFrame 사용 가능 → A23의 isolated world 항목 확인). 오버레이가 "거의 바로" 뜸(Q1 결함 해소) / (3)
+- 비용(ProMotion 설정, 창 모드, 추정 displayHz 60): JS p95 2 ms, vfMs p95 1~2 ms, video 드롭 0. 디스플레이 갱신 누락 3.1~4.4%(loopFps 58.1~58.9) → G3c 누락 기준(1%) 초과
+- 끊김 육안: 창·전체화면 모두 "조금 있는 편", 1080p도 비슷. 사용자 메모: vF5oXa1cVEg는 4K60 영상이 아님(소스 fps 미확인), "네이티브 헬퍼 필요할지도?"
+- ITM 체감: "하이라이트가 원본보다 밝기는 한데 자막 같은 부분만 밝고 영상은 차이가 크지 않음"(균형 초안 k=0.65 → M4 프리셋 결정 자료)
+- 60Hz 설정: 확장 loopFps 29.4·누락 51%, 프로브 P0-6 재측정도 H.264 대조군 포함 전 변형 loopFps 30 → **R5 현상 재현**(60Hz 설정에서 rAF 30Hz 구동, 저전력 모드 끔 상태). 0a 4차(2026-09-30)에서는 60Hz rAF 600/600이었음. 원인 미확인
+- 결과: `results/result-M2-20261001-ac-mid-{promotion-2160p-itm-vf-vF5,promotion-2160p-itm-vf-MR5,promotion-1080p-itm-vf-vF5,60hz-1080p-itm-vf-vF5}.json`, `results/result-M1-20261001-ac-mid-60hz-p06-rerun.json`. 2160p 전체화면 JSON, 60Hz 2160p, 확장 off 드롭 수는 미수신
+- Opus 확인 필요: G3c 판정(누락 3~4%, 육안 끊김 조금), 60Hz rAF 30Hz 현상(R5), 끊김 원인(소스 fps와 rAF 주기 관계·합성 지연 등)과 F-A 필요 여부(사용자 질문), ITM 체감 약함(M4)
+
+## M2 0b 4차 회신 (2026-10-01, R4 절차, 사용자 Mac)
+
+- vf 경로 동작: 영상 2개(vF5oXa1cVEg 3840×2160, MR_53SGVXXc 3840×1920) 모두 `render.path: vf`, errors 없음, vfErr 없음(content script에서 VideoFrame 사용 가능 → A23의 isolated world 항목 확인). 오버레이가 "거의 바로" 뜸(Q1 결함 해소) / (3)
+- 비용(ProMotion 설정, 창 모드, 추정 displayHz 60): JS p95 2 ms, vfMs p95 1~2 ms, video 드롭 0. 디스플레이 갱신 누락 3.1~4.4%(loopFps 58.1~58.9) → G3c 누락 기준(1%) 초과
+- 끊김 육안: 창·전체화면 모두 "조금 있는 편", 1080p도 비슷. 사용자 메모: vF5oXa1cVEg는 4K60 영상이 아님(소스 fps 미확인), "네이티브 헬퍼 필요할지도?"
+- ITM 체감: 밝기 중간에서는 "하이라이트가 원본보다 밝기는 한데 자막 같은 부분만 밝고 영상은 차이가 크지 않음". **밝기 최대에서는 "HDR 효과가 꽤나 잘 느껴짐"**(헤드룸은 최대 약 2로 더 작음 → 체감이 헤드룸 배율보다 절대 밝기에 좌우될 가능성, S10상 균형 P=3은 최대에서 입력 코드 247~255 잘림) → M4 프리셋 결정 자료
+- 60Hz 설정: 확장 loopFps 29.4·누락 51%, 프로브 P0-6 재측정도 H.264 대조군 포함 전 변형 loopFps 30 → **R5 현상 재현**(60Hz 설정에서 rAF 30Hz 구동, 저전력 모드 끔 상태). 0a 4차(2026-09-30)에서는 60Hz rAF 600/600이었음. 원인 미확인
+- 결과: `results/result-M2-20261001-ac-mid-{promotion-2160p-itm-vf-vF5,promotion-2160p-itm-vf-MR5,promotion-1080p-itm-vf-vF5,60hz-1080p-itm-vf-vF5}.json`, `results/result-M1-20261001-ac-mid-60hz-p06-rerun.json`. 2160p 전체화면 JSON, 60Hz 2160p, 확장 off 드롭 수는 미수신
+- Opus 확인 필요: G3c 판정(누락 3~4%, 육안 끊김 조금), 60Hz rAF 30Hz 현상(R5), 끊김 원인(소스 fps와 rAF 주기 관계·합성 지연 등)과 F-A 필요 여부(사용자 질문), 밝기별 ITM 체감 차이(M4 프리셋·밝기 대응)
+
 ## M2 R 회차 구현 (FIX_GUIDE R0~R4, 구현 완료 · Mac 확인 대기)
 
 - 배경: 프로브 P0-6에서 `VideoFrame` → `importExternalTexture`(vf)만 2160p VP9 기준 통과(PLAN.md A23)
