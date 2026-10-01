@@ -64,7 +64,7 @@ def build():
             "limit": sh.LIMIT,
             "cases": sharp_cases,
         },
-        "luma_p3": [float(x) for x in tc.LUMA_P3],
+        "luma_p3": [round(float(x), 9) for x in tc.LUMA_P3],
     }
 
 
