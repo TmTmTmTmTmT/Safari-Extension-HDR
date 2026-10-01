@@ -87,7 +87,12 @@
       a.blackStreak = 0;
       return;
     }
-    // 'none'(ext·copy 검음, c2d만 정상)은 연속 횟수 없이 N2 가드와 같은 결과로 detach한다 (FIX_GUIDE Q1).
+    // 'pending'은 판단 보류(none 1회 포함)이므로 연속 횟수를 세지 않는다.
+    // 'none'은 렌더러가 2회 연속 확인한 결과이므로 N2 가드와 같은 결과로 detach한다 (FIX_GUIDE R2).
+    if (path === 'pending') {
+      a.blackStreak = 0;
+      return;
+    }
     a.blackStreak =
       path === 'none'
         ? ns.detect.BLACK_STREAK_LIMIT
@@ -118,6 +123,9 @@
         if (cur === a && checkDrm(video, a.sawEncrypted)) markDrm(video);
       },
       onProbe: (probe, path) => onProbe(a, probe, path),
+      onWarn: (e, at) => {
+        if (cur === a) addError(at, e);
+      },
       onUndecided: () => {
         if (cur === a)
           addError('path', {
@@ -205,6 +213,7 @@
             loopTimestamps: last.render.loopTimestamps,
             path: last.render.path,
             copyTimesMs: last.render.copyTimesMs,
+            vfTimesMs: last.render.vfTimesMs,
             copySkipped: last.render.copySkipped,
             videoDropped: last.render.videoDropped,
             videoTotal: last.render.videoTotal,

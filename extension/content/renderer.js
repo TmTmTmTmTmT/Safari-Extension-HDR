@@ -14,6 +14,7 @@
   const PROBE_POLL_MS = 500;
   const PROBE_PENDING_MS = 1000; // 경로 보류 중 재시도 주기 (FIX_GUIDE Q1)
   const PENDING_MAX = 60; // 보류 결과가 이 횟수에 이르면 더 시도하지 않는다
+  const VF_FAIL_LIMIT = 3; // VideoFrame 생성 실패가 연속 이 횟수에 이르면 errors에 기록하고 다음 경로로 전환 (FIX_GUIDE R3)
   const TEX_COPY_SRC = 0x01;
   const TEX_COPY_DST = 0x02;
   const TEX_TEXTURE_BINDING = 0x04;
@@ -50,10 +51,13 @@
     let frames = 0;
     const frameTimes = [];
     const copyTimes = [];
+    const vfTimes = [];
     const loopTs = [];
     const api = { gpu: null, adapter: null, device: null, configure: null, configRead: null };
     const onProbe = hooks && typeof hooks.onProbe === 'function' ? hooks.onProbe : null;
     const onUndecided = hooks && typeof hooks.onUndecided === 'function' ? hooks.onUndecided : null;
+    // 재생을 멈추지 않는 오류 기록용 (VideoFrame 실패 등). detach하지 않는다.
+    const onWarn = hooks && typeof hooks.onWarn === 'function' ? hooks.onWarn : null;
     const createdAt = performance.now();
     let probeTimer = null;
     let probeBusy = false;
@@ -61,10 +65,12 @@
     let probeN = 0;
     let probePipeline = null;
     let frameProbe = null;
-    // 입력 경로: null(첫 frameProbe 전) | 'pending'(판단 불가, 재시도 중) | 'none'(detach 대상) | 'ext' | 'copy'.
-    // ext->copy만 허용하고 되돌리지 않는다.
+    // 입력 경로: null(첫 frameProbe 전) | 'pending'(판단 불가, 재시도 중) | 'none'(2회 연속, detach 대상) | 'ext' | 'vf' | 'copy'.
+    // 결정 후에는 ext->vf, vf->copy로 한 단계씩만 내려가고 되돌리지 않는다 (FIX_GUIDE R2).
     let path = null;
     let pendingCount = 0;
+    let noneStreak = 0;
+    let vfCreateFails = 0;
     let undecided = false; // 보류 상한 도달: 더 시도하지 않고 캔버스를 숨긴 채 둔다
     let copyTex = null;
     let copyView = null;
@@ -91,7 +97,7 @@
 
     // video 모드에서 경로가 정해지기 전에는 렌더하지 않는다. stripes는 경로와 무관.
     function pathReady() {
-      return mode === 'stripes' || path === 'ext' || path === 'copy';
+      return mode === 'stripes' || path === 'ext' || path === 'vf' || path === 'copy';
     }
 
     // 결정 전 video 모드에서는 캔버스를 숨겨 원본 video가 보이게 한다.
@@ -212,41 +218,100 @@
       return true;
     }
 
+    function warn(e, at) {
+      if (!onWarn) return;
+      try {
+        onWarn(e, at);
+      } catch (err) {
+        // 콜백 오류가 재생을 방해하지 않게 한다.
+      }
+    }
+
+    // VideoFrame 미정의(isolated world 미지원 등)는 ReferenceError로 던진다.
+    function createVideoFrame() {
+      const VF = globalThis.VideoFrame;
+      if (typeof VF !== 'function')
+        throw Object.assign(new Error('VideoFrame 미정의'), { name: 'ReferenceError' });
+      return new VF(video);
+    }
+
+    function closeFrame(frame) {
+      try {
+        frame.close();
+      } catch (e) {
+        // 이미 닫힌 프레임 등은 무시한다.
+      }
+    }
+
+    // vf 경로 실패 후 한 단계 아래(copy)로 1회 전환한다. copy는 vf로 되돌아오지 않는다.
+    function fallBackFromVf(e, at) {
+      warn(e, at);
+      path = 'copy';
+      updateVisibility();
+    }
+
     // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
     function renderOnce() {
       const isVideo = mode !== 'stripes';
       if (isVideo && (video.readyState < 2 || !pathReady())) return false;
       const useCopy = isVideo && path === 'copy';
+      const useVf = isVideo && path === 'vf';
       if (useCopy && !updateCopyTexture()) return false;
-      const pipeline = useCopy ? copyPipeline() : pipelines[mode];
-      const enc = device.createCommandEncoder();
-      const pass = enc.beginRenderPass({
-        colorAttachments: [
-          {
-            view: ctx.getCurrentTexture().createView(),
-            loadOp: 'clear',
-            storeOp: 'store',
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          },
-        ],
-      });
-      pass.setPipeline(pipeline);
-      if (isVideo) {
-        // 외부 텍스처는 재사용하지 않고 매번 import (GUIDELINES 2.5-1). 복사 경로는 복사 텍스처 뷰를 쓴다.
-        const resource = useCopy ? copyView : device.importExternalTexture({ source: video });
-        const bind = device.createBindGroup({
-          layout: pipeline.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: sampler },
-            { binding: 1, resource },
+      let frame = null;
+      let vf0 = 0;
+      if (useVf) {
+        // 프레임 생성 실패는 일시적일 수 있어 연속 3회까지 이번 프레임만 건너뛴다.
+        vf0 = performance.now();
+        try {
+          frame = createVideoFrame();
+        } catch (e) {
+          vfCreateFails += 1;
+          if (vfCreateFails >= VF_FAIL_LIMIT) {
+            vfCreateFails = 0;
+            fallBackFromVf(e, 'vf.create');
+          }
+          return false;
+        }
+        vfCreateFails = 0;
+      }
+      try {
+        const pipeline = useCopy ? copyPipeline() : pipelines[mode];
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginRenderPass({
+          colorAttachments: [
+            {
+              view: ctx.getCurrentTexture().createView(),
+              loadOp: 'clear',
+              storeOp: 'store',
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            },
           ],
         });
-        pass.setBindGroup(0, bind);
+        pass.setPipeline(pipeline);
+        if (isVideo) {
+          // 외부 텍스처는 재사용하지 않고 매번 import (GUIDELINES 2.5-1). 복사 경로는 복사 텍스처 뷰를 쓴다.
+          let resource;
+          if (useCopy) resource = copyView;
+          else if (useVf) {
+            resource = device.importExternalTexture({ source: frame });
+            push(vfTimes, performance.now() - vf0);
+          } else resource = device.importExternalTexture({ source: video });
+          const bind = device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [
+              { binding: 0, resource: sampler },
+              { binding: 1, resource },
+            ],
+          });
+          pass.setBindGroup(0, bind);
+        }
+        pass.draw(3);
+        pass.end();
+        device.queue.submit([enc.finish()]);
+        return true;
+      } finally {
+        if (frame) closeFrame(frame);
       }
-      pass.draw(3);
-      pass.end();
-      device.queue.submit([enc.finish()]);
-      return true;
     }
 
     function tick(ts) {
@@ -260,8 +325,11 @@
           frames += 1;
         }
       } catch (e) {
-        fail(e, 'render');
-        return;
+        if (path === 'vf') fallBackFromVf(e, 'vf.render');
+        else {
+          fail(e, 'render');
+          return;
+        }
       }
       if (onFrame) onFrame();
       if (!running || destroyed) return;
@@ -306,7 +374,8 @@
       }
     }
 
-    async function probeExt() {
+    // 진단 렌더: source를 외부 텍스처로 import해 64x36 대상에 그리고 submit한다. 되읽기는 호출자가 한다.
+    function drawProbe(target, source) {
       if (!probePipeline) {
         const module = device.createShaderModule({ code: globalThis.__sdrhdr.itm.VIDEO_IDENTITY });
         probePipeline = device.createRenderPipeline({
@@ -316,34 +385,54 @@
           primitive: { topology: 'triangle-list' },
         });
       }
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginRenderPass({
+        colorAttachments: [
+          {
+            view: target.createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          },
+        ],
+      });
+      pass.setPipeline(probePipeline);
+      const tex = device.importExternalTexture({ source });
+      pass.setBindGroup(
+        0,
+        device.createBindGroup({
+          layout: probePipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource: tex },
+          ],
+        }),
+      );
+      pass.draw(3);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+    }
+
+    async function probeExt() {
       const target = newProbeTarget();
       try {
-        const enc = device.createCommandEncoder();
-        const pass = enc.beginRenderPass({
-          colorAttachments: [
-            {
-              view: target.createView(),
-              loadOp: 'clear',
-              storeOp: 'store',
-              clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            },
-          ],
-        });
-        pass.setPipeline(probePipeline);
-        const tex = device.importExternalTexture({ source: video });
-        pass.setBindGroup(
-          0,
-          device.createBindGroup({
-            layout: probePipeline.getBindGroupLayout(0),
-            entries: [
-              { binding: 0, resource: sampler },
-              { binding: 1, resource: tex },
-            ],
-          }),
-        );
-        pass.draw(3);
-        pass.end();
-        device.queue.submit([enc.finish()]);
+        drawProbe(target, video);
+        return await readTextureMean(target);
+      } finally {
+        target.destroy();
+      }
+    }
+
+    // vf: new VideoFrame(video) -> importExternalTexture. frame은 submit 직후(되읽기 전) 닫고, 예외 시에도 닫는다.
+    async function probeVf() {
+      const target = newProbeTarget();
+      try {
+        const frame = createVideoFrame();
+        try {
+          drawProbe(target, frame);
+        } finally {
+          closeFrame(frame);
+        }
         return await readTextureMean(target);
       } finally {
         target.destroy();
@@ -395,6 +484,7 @@
       try {
         const t0 = performance.now();
         const ext = await runPath(probeExt);
+        const vf = await runPath(probeVf);
         const copy = await runPath(probeCopy);
         const c2d = await runPath(probeC2d);
         if (destroyed) return;
@@ -403,20 +493,26 @@
           at: performance.now() - createdAt,
           n: probeN,
           ext: ext.v,
+          vf: vf.v,
           copy: copy.v,
           c2d: c2d.v,
           extErr: ext.err,
+          vfErr: vf.err,
           copyErr: copy.err,
           c2dErr: c2d.err,
           ms: performance.now() - t0,
           extSyncMs: ext.syncMs,
+          vfSyncMs: vf.syncMs,
           copySyncMs: copy.syncMs,
           c2dSyncMs: c2d.syncMs,
         };
-        // 경로가 정해지기 전(null/pending)에는 결과를 따르고, 이후 ext에서 copy로 1회만 전환한다 (반대 방향 없음).
-        const chosen = globalThis.__sdrhdr.detect.choosePath(frameProbe);
-        if (path === null || path === 'pending' || (path === 'ext' && chosen === 'copy')) {
-          path = chosen;
+        // 경로가 정해지기 전(null/pending)에는 결과를 따른다. none은 2회 연속일 때만 확정(detach 대상)하고 그 전에는 보류로 재시도한다.
+        // 결정 후에는 선택 경로가 검고 다음 단계가 밝을 때 한 단계 아래로만 전환한다 (FIX_GUIDE R2).
+        const detect = globalThis.__sdrhdr.detect;
+        const chosen = detect.choosePath(frameProbe);
+        noneStreak = detect.nextNoneStreak(noneStreak, chosen);
+        if (path === null || path === 'pending') {
+          path = chosen === 'none' && noneStreak < detect.NONE_STREAK_LIMIT ? 'pending' : chosen;
           updateVisibility();
           kick();
           if (path === 'pending') {
@@ -432,6 +528,13 @@
                 }
               }
             }
+          }
+        } else {
+          const down = detect.stepDownPath(path, frameProbe);
+          if (down !== path) {
+            path = down;
+            updateVisibility();
+            kick();
           }
         }
         if (onProbe) {
@@ -464,6 +567,7 @@
     function clearRings() {
       frameTimes.length = 0;
       copyTimes.length = 0;
+      vfTimes.length = 0;
       loopTs.length = 0;
     }
     const onWake = () => {
@@ -549,6 +653,7 @@
         frames,
         copyTimesMs: copyTimes.slice(),
         copySkipped,
+        vfTimesMs: vfTimes.slice(),
         videoDropped: vq ? vq.droppedVideoFrames : null,
         videoTotal: vq ? vq.totalVideoFrames : null,
         api: Object.assign({}, api, {

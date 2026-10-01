@@ -194,6 +194,49 @@ def test_m2_v3_wrong_types_fail(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def _v4_sample():
+    d = _v3_sample()
+    d["schemaVersion"] = 4
+    d["render"].update({"path": "vf", "vfMsP50": 0.75, "vfMsP95": 1.5})
+    d["frameProbe"].update({"vf": 96.25, "vfErr": None, "vfSyncMs": 0.5})
+    return d
+
+
+def test_m2_v4_prints_vf_columns_values_only(tmp_path):
+    r = run(write(tmp_path, "result-M2-v4.json", _v4_sample()))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "스키마 검증 실패" not in r.stdout
+    for s in ("vfMsP50", "vfMsP95", "0.75", "vfErr", "vfSyncMs", "96.25", "vf"):
+        assert s in r.stdout
+    for word in ("PASS", "FAIL", "통과", "판정:"):
+        assert word not in r.stdout
+
+
+def test_m2_v1_to_v3_have_no_vf_columns(tmp_path):
+    for name, d in (("v1", M2_SAMPLE), ("v2", _v2_sample()), ("v3", _v3_sample())):
+        r = run(write(tmp_path, "result-M2-%s.json" % name, d))
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "vfMsP50" not in r.stdout
+        assert "vfSyncMs" not in r.stdout
+
+
+def test_m2_v4_vf_error_and_wrong_types(tmp_path):
+    ok = _v4_sample()
+    ok["frameProbe"].update({"vf": None, "vfErr": "ReferenceError", "vfSyncMs": 0.1})
+    ok["render"].update({"vfMsP50": None, "vfMsP95": None})
+    r = run(write(tmp_path, "result-M2-v4-err.json", ok))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "ReferenceError" in r.stdout
+    bad = _v4_sample()
+    bad["frameProbe"]["vf"] = "96"
+    r = run(write(tmp_path, "result-M2-v4-bad-vf.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+    bad = _v4_sample()
+    bad["render"]["vfMsP95"] = "1.5"
+    r = run(write(tmp_path, "result-M2-v4-bad-ms.json", bad))
+    assert r.returncode == 1 and "스키마 검증 실패" in r.stdout
+
+
 def _v5_result():
     """results/의 M1 v4 파일 하나를 바탕으로 v5(vp9Paths 추가) 샘플을 만든다."""
     src = sorted(glob.glob(os.path.join(ROOT, "results", "result-M1-*.json")))[0]

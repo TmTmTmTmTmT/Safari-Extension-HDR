@@ -45,25 +45,49 @@
     return (num(p.c2d) && p.c2d >= BLACK_REF_MIN) || (num(p.copy) && p.copy >= BLACK_REF_MIN);
   }
 
-  // 순수: 입력 경로 선택 (PLAN C절, FIX_GUIDE Q1).
-  // 'pending': 기준 경로(c2d/copy)가 모두 어둡거나 값이 없어 ext 검정 여부를 판단할 수 없음.
-  // 'none': ext가 검고 copy도 검은데 c2d만 정상 (N2 가드와 같은 결과로 detach).
+  const VF_MIN = 2; // ext/vf가 이 값 이상이면 비검정
+  const NONE_STREAK_LIMIT = BLACK_STREAK_LIMIT; // none 연속 판정 횟수 (FIX_GUIDE R2-2)
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+  // 순수: 입력 경로 선택 (PLAN C절, FIX_GUIDE R2). 순서 ext -> vf -> copy.
+  // 'pending': 기준 경로(c2d)가 8 미만이거나 값이 없어 검정 여부를 판단할 수 없음.
+  // 'none': 기준은 정상인데 ext·vf·copy가 모두 검음. 2회 연속일 때만 detach한다(호출자가 연속 횟수를 센다).
   function choosePath(probe) {
     const p = probe || {};
-    const num = (v) => typeof v === 'number' && Number.isFinite(v);
-    const copyOk = num(p.copy) && p.copy >= BLACK_REF_MIN;
-    const c2dOk = num(p.c2d) && p.c2d >= BLACK_REF_MIN;
-    if (!copyOk && !c2dOk) return 'pending';
-    if (!num(p.ext) || p.ext >= BLACK_EXT_MAX) return 'ext';
-    return copyOk ? 'copy' : 'none';
+    if (!isNum(p.c2d) || p.c2d < BLACK_REF_MIN) return 'pending';
+    if (isNum(p.ext) && p.ext >= BLACK_EXT_MAX) return 'ext';
+    if (isNum(p.vf) && p.vf >= VF_MIN) return 'vf';
+    if (isNum(p.copy) && p.copy >= BLACK_REF_MIN) return 'copy';
+    return 'none';
   }
 
-  // 순수: 선택된 경로의 출력이 검은지. ext는 isBlackOverlay, copy는 copy 자체가 검고 c2d가 정상일 때 (FIX_GUIDE P2-4).
-  function isBlackSelected(probe, path) {
-    if (path !== 'copy') return isBlackOverlay(probe);
+  // 순수: none 연속 횟수 갱신. none이 아니면 0.
+  function nextNoneStreak(streak, chosen) {
+    return chosen === 'none' ? (streak || 0) + 1 : 0;
+  }
+
+  // 순수: 결정 후 경로 전환. 선택 경로가 검고(<2) 다음 단계 경로가 밝을 때만 한 단계 아래로 (ext->vf, vf->copy).
+  // 위로는 가지 않는다. 전환 조건이 아니면 현재 경로를 그대로 돌려준다.
+  function stepDownPath(path, probe) {
     const p = probe || {};
-    const num = (v) => typeof v === 'number' && Number.isFinite(v);
-    return num(p.copy) && p.copy < BLACK_EXT_MAX && num(p.c2d) && p.c2d >= BLACK_REF_MIN;
+    const black = (v) => isNum(v) && v < BLACK_EXT_MAX;
+    if (path === 'ext' && black(p.ext) && isNum(p.vf) && p.vf >= VF_MIN) return 'vf';
+    if (path === 'vf' && black(p.vf) && isNum(p.copy) && p.copy >= BLACK_REF_MIN) return 'copy';
+    return path;
+  }
+
+  // 순수: 선택된 경로의 출력이 검은지. ext는 isBlackOverlay, vf는 vf 자체가 검고 c2d/copy가 정상일 때,
+  // copy는 copy 자체가 검고 c2d가 정상일 때 (FIX_GUIDE P2-4, R2).
+  function isBlackSelected(probe, path) {
+    const p = probe || {};
+    if (path === 'vf')
+      return (
+        isNum(p.vf) &&
+        p.vf < BLACK_EXT_MAX &&
+        ((isNum(p.c2d) && p.c2d >= BLACK_REF_MIN) || (isNum(p.copy) && p.copy >= BLACK_REF_MIN))
+      );
+    if (path !== 'copy') return isBlackOverlay(probe);
+    return isNum(p.copy) && p.copy < BLACK_EXT_MAX && isNum(p.c2d) && p.c2d >= BLACK_REF_MIN;
   }
 
   // 순수: 연속 횟수 갱신. 검지 않거나 판단 불가면 0으로 되돌린다. path 생략 시 ext 기준.
@@ -89,10 +113,13 @@
   globalThis.__sdrhdr.detect = {
     SELECTORS,
     BLACK_STREAK_LIMIT,
+    NONE_STREAK_LIMIT,
     isDrm,
     isBlackOverlay,
     isBlackSelected,
     choosePath,
+    nextNoneStreak,
+    stepDownPath,
     nextBlackStreak,
     contentRect,
     canvasResolution,

@@ -121,13 +121,16 @@
       at: round2(numOrNull(p.at)),
       n: numOrNull(p.n),
       ext: round2(numOrNull(p.ext)),
+      vf: round2(numOrNull(p.vf)),
       copy: round2(numOrNull(p.copy)),
       c2d: round2(numOrNull(p.c2d)),
       ms: round2(numOrNull(p.ms)),
       extSyncMs: round2(numOrNull(p.extSyncMs)),
+      vfSyncMs: round2(numOrNull(p.vfSyncMs)),
       copySyncMs: round2(numOrNull(p.copySyncMs)),
       c2dSyncMs: round2(numOrNull(p.c2dSyncMs)),
       extErr: nameOrNull(p.extErr),
+      vfErr: nameOrNull(p.vfErr),
       copyErr: nameOrNull(p.copyErr),
       c2dErr: nameOrNull(p.c2dErr),
     };
@@ -161,8 +164,9 @@
         ? null
         : displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], displayHz);
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
+    const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -205,12 +209,14 @@
         loopFps: sum.loopFps,
         jsP50: sum.jsP50,
         jsP95: sum.jsP95,
-        path: ['ext', 'copy', 'pending'].includes(render.path) ? render.path : null,
+        path: ['ext', 'vf', 'copy', 'pending'].includes(render.path) ? render.path : null,
         displayHz,
         displayMissRate: miss === null ? null : Math.round(miss * 1e5) / 1e5,
         copyMsP50: round2(percentile(copyTimes, 50)),
         copyMsP95: round2(percentile(copyTimes, 95)),
         copySkipped: numOrNull(render.copySkipped),
+        vfMsP50: round2(percentile(vfTimes, 50)),
+        vfMsP95: round2(percentile(vfTimes, 95)),
         videoDropped: numOrNull(render.videoDropped),
         videoTotal: numOrNull(render.videoTotal),
       },

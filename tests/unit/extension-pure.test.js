@@ -191,7 +191,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'flags',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 3);
+  assert.strictEqual(d.schemaVersion, 4);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -318,6 +318,9 @@ test('normalizeFrameProbe: 숫자 2자리 반올림, 예외는 name 문자열만
       at: 5000.126,
       n: 2,
       ext: 0.123456,
+      vf: 7.777,
+      vfErr: 'ReferenceError',
+      vfSyncMs: 0.456,
       copy: undefined,
       c2d: NaN,
       extErr: null,
@@ -332,6 +335,9 @@ test('normalizeFrameProbe: 숫자 2자리 반올림, 예외는 name 문자열만
     at: 5000.13,
     n: 2,
     ext: 0.12,
+    vf: 7.78,
+    vfErr: 'ReferenceError',
+    vfSyncMs: 0.46,
     copy: null,
     c2d: null,
     extErr: null,
@@ -390,32 +396,62 @@ test('schema v2: frameProbe 선택 필드와 flags.blackFrame 선언, required�
 
 // ---- P2 choosePath / P3 displayMissRate·estimateDisplayHz ----
 
-test('choosePath 경계 표 (FIX_GUIDE Q1)', () => {
+test('choosePath 경계 표 (FIX_GUIDE R2)', () => {
   const { choosePath } = ns.detect;
   const table = [
     // [probe, 기대값]
-    [{ ext: 0, copy: 97.8, c2d: 145 }, 'copy'],
-    [{ ext: 1.9, copy: 8, c2d: null }, 'copy'],
-    [{ ext: 1.9, copy: 8, c2d: 0 }, 'copy'],
-    [{ ext: 1.9, copy: 7.9, c2d: 145 }, 'none'], // ext·copy 검음, c2d만 정상
-    [{ ext: 0, copy: null, c2d: 60 }, 'none'],
-    [{ ext: 1.9, copy: 7.9, c2d: 7.9 }, 'pending'], // 기준 경로 모두 8 미만
-    [{ ext: 0, copy: 0, c2d: 0 }, 'pending'],
-    [{ ext: 100, copy: 7.9, c2d: 7.9 }, 'pending'], // ext가 밝아도 기준이 어두우면 보류
-    [{ ext: 2, copy: 60, c2d: 60 }, 'ext'],
-    [{ ext: 2, copy: 8, c2d: 0 }, 'ext'],
-    [{ ext: 2, copy: 7.9, c2d: 8 }, 'ext'],
+    [{ ext: 0, vf: 0, copy: 97.8, c2d: 145 }, 'copy'],
+    [{ ext: 1.9, vf: 1.9, copy: 8, c2d: 8 }, 'copy'],
+    [{ ext: 1.9, copy: 8, c2d: 20 }, 'copy'], // vf 값 없음(v3 이전 probe)
+    [{ ext: 1.9, vf: 1.9, copy: 7.9, c2d: 145 }, 'none'], // 모두 검음, c2d만 정상
+    [{ ext: 0, vf: null, copy: null, c2d: 60 }, 'none'],
+    [{ ext: 0, vf: 0, copy: 0, c2d: 8 }, 'none'],
+    [{ ext: 1.9, vf: 1.9, copy: 7.9, c2d: 7.9 }, 'pending'], // 기준 c2d 8 미만
+    [{ ext: 0, vf: 0, copy: 0, c2d: 0 }, 'pending'],
+    [{ ext: 100, vf: 100, copy: 100, c2d: 7.9 }, 'pending'], // 경로가 밝아도 기준이 어두우면 보류
+    [{ ext: 100, vf: 100, copy: 100, c2d: null }, 'pending'],
+    [{ ext: 100, vf: 100, copy: 100, c2d: undefined }, 'pending'],
+    [{ ext: 100, vf: 100, copy: 100, c2d: NaN }, 'pending'],
+    [{ ext: 2, vf: 60, copy: 60, c2d: 60 }, 'ext'],
+    [{ ext: 2, vf: 0, copy: 0, c2d: 8 }, 'ext'],
     [{ ext: 40, copy: 60, c2d: 60 }, 'ext'],
-    [{ ext: null, copy: 60, c2d: 60 }, 'ext'], // ext 값 없음(예외)은 ext로 두어 렌더 오류가 detach
-    [{ ext: null, copy: null, c2d: null }, 'pending'],
-    [{ ext: 50, copy: null, c2d: null }, 'pending'],
-    [{ ext: 50, copy: NaN, c2d: undefined }, 'pending'],
-    [{ ext: 0, copy: null, c2d: 7.9 }, 'pending'],
+    [{ ext: 1.9, vf: 2, copy: 60, c2d: 60 }, 'vf'], // ext 검음, vf 경계 2
+    [{ ext: null, vf: 2, copy: 0, c2d: 60 }, 'vf'], // ext 예외
+    [{ ext: 0, vf: 1.9, copy: 8, c2d: 60 }, 'copy'], // vf 경계 1.9
+    [{ ext: 0, vf: null, copy: 7.9, c2d: 60 }, 'none'],
+    [{ ext: null, vf: null, copy: null, c2d: null }, 'pending'],
+    [{}, 'pending'],
     [null, 'pending'],
     [undefined, 'pending'],
   ];
   for (const [probe, want] of table)
     assert.strictEqual(choosePath(probe), want, JSON.stringify(probe));
+});
+
+test('nextNoneStreak: none 2회 연속에서만 한도, 다른 결과는 0', () => {
+  const { nextNoneStreak, NONE_STREAK_LIMIT } = ns.detect;
+  assert.strictEqual(NONE_STREAK_LIMIT, 2);
+  let n = nextNoneStreak(0, 'none');
+  assert.ok(n < NONE_STREAK_LIMIT);
+  n = nextNoneStreak(n, 'none');
+  assert.ok(n >= NONE_STREAK_LIMIT);
+  for (const c of ['pending', 'ext', 'vf', 'copy']) assert.strictEqual(nextNoneStreak(1, c), 0, c);
+  assert.strictEqual(nextNoneStreak(undefined, 'none'), 1);
+});
+
+test('stepDownPath: 선택 경로 검음 + 다음 단계 밝음일 때만 한 단계 아래로', () => {
+  const { stepDownPath } = ns.detect;
+  assert.strictEqual(stepDownPath('ext', { ext: 0, vf: 2, copy: 60, c2d: 60 }), 'vf');
+  assert.strictEqual(stepDownPath('ext', { ext: 1.9, vf: 100, copy: 0, c2d: 0 }), 'vf');
+  assert.strictEqual(stepDownPath('ext', { ext: 2, vf: 100, copy: 60, c2d: 60 }), 'ext');
+  assert.strictEqual(stepDownPath('ext', { ext: 0, vf: 1.9, copy: 60, c2d: 60 }), 'ext'); // 두 단계 건너뛰지 않음
+  assert.strictEqual(stepDownPath('ext', { ext: null, vf: 100, copy: 60, c2d: 60 }), 'ext');
+  assert.strictEqual(stepDownPath('vf', { ext: 100, vf: 0, copy: 8, c2d: 60 }), 'copy');
+  assert.strictEqual(stepDownPath('vf', { ext: 100, vf: 0, copy: 7.9, c2d: 60 }), 'vf');
+  assert.strictEqual(stepDownPath('vf', { ext: 0, vf: 2, copy: 60, c2d: 60 }), 'vf');
+  assert.strictEqual(stepDownPath('copy', { ext: 100, vf: 100, copy: 0, c2d: 60 }), 'copy'); // 위로 가지 않음
+  assert.strictEqual(stepDownPath('ext', null), 'ext');
+  assert.strictEqual(stepDownPath('none', { ext: 100, vf: 100, copy: 100 }), 'none');
 });
 
 test('isBlackSelected/nextBlackStreak: 선택된 경로의 출력 기준', () => {
@@ -427,8 +463,14 @@ test('isBlackSelected/nextBlackStreak: 선택된 경로의 출력 기준', () =>
   assert.strictEqual(isBlackSelected({ ext: 0, copy: 1.9, c2d: 7.9 }, 'copy'), false);
   assert.strictEqual(isBlackSelected({ ext: 50, copy: 2, c2d: 50 }, 'copy'), false);
   assert.strictEqual(isBlackSelected({ ext: 0, copy: null, c2d: 50 }, 'copy'), false);
+  assert.strictEqual(isBlackSelected({ ext: 50, vf: 1.9, copy: 0, c2d: 8 }, 'vf'), true);
+  assert.strictEqual(isBlackSelected({ ext: 50, vf: 1.9, copy: 8, c2d: 0 }, 'vf'), true);
+  assert.strictEqual(isBlackSelected({ ext: 50, vf: 1.9, copy: 7.9, c2d: 7.9 }, 'vf'), false);
+  assert.strictEqual(isBlackSelected({ ext: 0, vf: 2, copy: 50, c2d: 50 }, 'vf'), false);
+  assert.strictEqual(isBlackSelected({ ext: 0, vf: null, copy: 50, c2d: 50 }, 'vf'), false);
   assert.strictEqual(nextBlackStreak(1, { ext: 0, copy: 0, c2d: 50 }, 'copy'), 2);
   assert.strictEqual(nextBlackStreak(1, { ext: 0, copy: 50, c2d: 50 }, 'copy'), 0);
+  assert.strictEqual(nextBlackStreak(1, { ext: 50, vf: 0, copy: 0, c2d: 50 }, 'vf'), 2);
 });
 
 // 결정적 지터(+-jitter 교대)를 넣은 콜백 시각열 (ms).
@@ -511,19 +553,22 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
         frameTimesMs: [1, 2],
         loopTimestamps: t,
         copyTimesMs: [1, 2, 3, 4, 5],
+        vfTimesMs: [0.5, 1, 1.5, 2, 2.5],
         copySkipped: 7,
         videoDropped: 3,
         videoTotal: 100,
       },
-      frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3 },
+      frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 3);
+  assert.strictEqual(d.schemaVersion, 4);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
   assert.strictEqual(d.render.displayMissRate, 0);
   assert.strictEqual(d.render.copyMsP50, 3);
   assert.strictEqual(d.render.copyMsP95, 4.8);
+  assert.deepStrictEqual([d.render.vfMsP50, d.render.vfMsP95], [1.5, 2.4]);
+  assert.strictEqual(d.frameProbe.vf, 50);
   assert.deepStrictEqual(
     [d.render.copySkipped, d.render.videoDropped, d.render.videoTotal],
     [7, 3, 100],
@@ -533,10 +578,12 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
     assert.ok(k in schema.properties.frameProbe.properties, k);
   assert.deepStrictEqual(schema.properties.render.properties.path.enum, [
     'ext',
+    'vf',
     'copy',
     'pending',
     null,
   ]);
+  assert.strictEqual(plain(ns.hud.buildDiag({ render: { path: 'vf' } })).render.path, 'vf');
   assert.strictEqual(
     plain(ns.hud.buildDiag({ render: { path: 'pending' } })).render.path,
     'pending',
@@ -545,7 +592,13 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
   assert.ok(!schema.properties.render.required.includes('path'));
   const e = plain(ns.hud.buildDiag({}));
   assert.deepStrictEqual(
-    [e.render.path, e.render.displayHz, e.render.displayMissRate, e.render.copyMsP50],
-    [null, null, null, null],
+    [
+      e.render.path,
+      e.render.displayHz,
+      e.render.displayMissRate,
+      e.render.copyMsP50,
+      e.render.vfMsP50,
+    ],
+    [null, null, null, null, null],
   );
 });

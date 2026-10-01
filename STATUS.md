@@ -51,6 +51,13 @@ M2 구현 완료(PR #4, `claude/m2-extension`, PLAN.md D-M2). 다음: 사용자 
 - 결과 JSON: `results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json`(stripes JSON은 미수신)
 - Opus 확인 필요: 검은 프레임 원인 분석과 FIX_GUIDE(진단 방법: 프로브에 VP9 webm/MSE 사례 추가, 확장에 첫 프레임 픽셀 되읽기 진단 등)
 
+## M2 R 회차 구현 (FIX_GUIDE R0~R4, 구현 완료 · Mac 확인 대기)
+
+- 배경: 프로브 P0-6에서 `VideoFrame` → `importExternalTexture`(vf)만 2160p VP9 기준 통과(PLAN.md A23)
+- R0 parse-result 테스트가 v5 결과 파일 제외(CI 복구, `5bd1d52`) · R1 frameProbe vf 경로 · R2 choosePath ext→vf→copy, none 2회 연속 시 detach, 결정 후 한 단계 아래로 1회 전환 · R3 vf 렌더(submit 후 frame.close), 진단 schemaVersion 4(vfMsP50/P95) · R4 체크리스트 0b 7단계
+- → verify: lint 통과, npm test 119/119, pytest sim 103/103, results 전체 parse-result rc=0 / (1). content script에서 VideoFrame 사용 가능 여부, vf 실제 렌더·비용·frame.close 타이밍은 미검증 / (3)
+- Opus 확인 필요: (a) `new VideoFrame` 실패는 연속 3회까지 프레임만 건너뛰고 3회째 errors(`vf.create`) 기록 후 copy 전환, import·렌더 예외는 즉시 copy 전환(가이드의 "예외 시 전환"과 "3회 연속 기록"이 동시에 성립하지 않아 해석) (b) errors 기록용 `onWarn` 훅 추가(onError는 detach) (c) 결정 후 전환은 한 단계만(ext 검정·vf 검정·copy 밝음이면 ext→copy로 건너뛰지 않음 → N2 가드가 detach할 수 있음) (d) none 1회째는 path를 pending으로 두고 60회 상한에 합산 (e) vf 경로 검정 판정 `vf<2 && (c2d|copy)>=8`(가이드에 명시 없음) (f) 체크리스트의 이전 소절은 남기고 새 소절이 대체한다고 명시
+
 ## M2 Q 회차 구현 (FIX_GUIDE Q1~Q4, 구현 완료 · Mac 확인 대기)
 
 - 배경: 0b 3차에서 복사 경로 G3c 불통과(2160p 복사 JS p95 14 ms, PLAN.md A22), 시작 약 30초 검정

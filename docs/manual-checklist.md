@@ -62,6 +62,20 @@
 - 조건마다 popup의 진단 JSON을 "복사"로 복사해 `results/result-M2-<YYYYMMDD>-<전원>-<밝기>-<해상도>-<모드>.json`으로 저장한다. "JSON 저장" 링크의 Safari popup 동작은 [미확인]이므로 복사를 기본 경로로 한다. 전원은 `ac`, 밝기는 `mid`, 해상도는 `1080p60`/`2160p60`, 모드는 `stripes`/`identity`/`itm`으로 적는다.
 - 확인하지 못한 항목은 비워 두지 말고 [미확인]으로 적는다.
 
+### 0b VideoFrame 경로 확인 절차 (FIX_GUIDE R4)
+
+확장은 첫 frameProbe 결과로 `ext` → `vf` → `copy` 순서로 처음 비검정인 경로를 고른다(`render.path`). 아래 순서로 확인하며, 이 절차가 아래 "복사 경로 확인 절차"와 "경로 보류·측정 창 확인 절차"를 대체한다. 확인하지 못한 항목은 [미확인]으로 적는다. 이 클라우드 환경에서는 `VideoFrame`·WebGPU·Safari 확장 동작을 검증하지 못했다.
+
+1. `git pull` → Xcode Run → Safari 재시작, "서명되지 않은 확장 허용"을 다시 확인한다.
+2. 전원 연결, 밝기 중간, **저전력 모드 끔**(시스템 설정 → 배터리). ProMotion.
+3. 영상 2개(vF5oXa1cVEg, MR_53SGVXXc)에서 각각 2160p60, 모드 `itm`, 창 모드로 30초 재생 후 popup JSON을 복사해 저장한다(일시정지하지 말 것). 오버레이가 뜨기까지 걸린 시간과, 하이라이트가 원본보다 밝아 보이는지 한 줄 적는다. `frameProbe.vfErr`가 `ReferenceError`이면 content script에서 `VideoFrame`이 없는 것이므로 그대로 적는다.
+4. 같은 영상 전체화면 30초 후 JSON을 저장하고 끊김 육안(없음/가끔/자주)을 적는다.
+5. 화질을 1080p60으로 바꾸고 새로고침한 뒤 전체화면 30초 후 JSON을 저장한다.
+6. 시스템 설정 → 디스플레이 → 60Hz로 바꾸고 4번을 반복한다. 이때 프로브 P0-6 일괄 측정도 1회 다시 하고 JSON을 export한다(60Hz 재측정, 루프 30Hz 현상 확인용). 끝나면 ProMotion으로 되돌린다.
+7. 비교: 확장을 끈 상태로 같은 영상 2160p60 전체화면 30초를 재생하고 Stats for nerds의 "dropped of" 숫자를 적는다.
+
+파일명은 `results/result-M2-<YYYYMMDD>-ac-mid-<해상도>-itm-vf-<window|fullscreen>[-60hz]-<영상ID>.json` 형식으로 둔다. 판정 자료: `render.path`, `render.vfMsP50/P95`, `render.displayMissRate`, `render.displayHz`, `render.videoDropped/videoTotal`, `frameProbe.vf/vfErr/vfSyncMs`. `python3 scripts/parse-result.py`가 값만 표로 출력한다.
+
 ### 0b 복사 경로 확인 절차 (FIX_GUIDE P4)
 
 VP9 영상에서 외부 텍스처가 검어(PLAN.md A21) 확장은 첫 frameProbe 결과로 복사 경로(`render.path:"copy"`)를 고른다. 아래 순서로 확인한다. 확인하지 못한 항목은 [미확인]으로 적는다.
