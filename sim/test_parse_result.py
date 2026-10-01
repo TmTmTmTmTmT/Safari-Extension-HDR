@@ -258,7 +258,12 @@ def test_v5_prints_vp9_paths_table_values_only(tmp_path):
 
 
 def test_v1_to_v4_have_no_vp9_paths_section():
-    files = sorted(glob.glob(os.path.join(ROOT, "results", "result-M1-*.json")))
+    files = []
+    for f in sorted(glob.glob(os.path.join(ROOT, "results", "result-M1-*.json"))):
+        with open(f, encoding="utf-8") as fh:
+            if json.load(fh).get("schemaVersion", 1) < 5:
+                files.append(f)
+    assert files
     r = run(*files)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "P0-6 VP9 입력 방식" not in r.stdout
