@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.6 (2026-10-01, A23·입력 경로 vf 채택)
+> 버전: v1.7 (2026-10-01, G4 통과·G3c 개정·A24)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -45,7 +45,8 @@
 | A20 | Safari `requestVideoFrameCallback`은 video가 표시하는 모든 프레임마다 호출됨 | [반증(0a 3차)] 60Hz 디스플레이에서 60fps video의 콜백이 약 30회/s(모든 모드, 캔버스 없는 B0 포함). ProMotion에서도 51~56회/s. 같은 run의 presentedFrames 기준 video 표시율은 약 54~57회/s로 video 자체는 정상 표시. 즉 rVFC 구동 오버레이는 60Hz에서 약 30fps로만 갱신됨. 4차(rVFC 비교 run V3)에서는 60Hz 53~56회/s, ProMotion 54~56회/s로 3차의 30회/s는 재현되지 않았으나(원인 미확인), 갱신 누락은 여전히 11~32%. 구동 수단으로 신뢰할 수 없다는 결론은 유지 | 0a 3·4차 |
 | A21 | Safari `importExternalTexture`는 VP9 video 프레임을 샘플링할 수 있음 | [반증(0b 2차)] Safari 27.2: YouTube(MSE, VP9)에서 ext 평균 0, 같은 순간 `copyExternalImageToTexture` 97.8·Canvas2D 145.0. 프로브 same-origin VP9 webm(비MSE, main world)도 출력 검정. H.264(0a)는 정상. 예외 없이 검은 텍스처를 반환 → 코덱 의존 결함. 같은 프로브 run에서 VP9 1080p60 video 자체 드롭 327/671(디코드 부하 추정, 원인 미확인) | 0b 2차 |
 | A22 | Safari에서 VP9 video → `copyExternalImageToTexture`는 렌더 루프에 쓸 만큼 싸다 | [반증(0b 3차)] 창 모드 60Hz, 복사 호출의 JS 동기 시간 2160p p50 13 ms / p95 14 ms(loopFps 50.6, 디스플레이 갱신 누락 5.6%), 1440p p50 8 ms / p95 12.8 ms. VP9 프레임이 GPU 텍스처로 바로 쓰이지 않고 복사 때 변환·업로드되는 것으로 추정(원인 미확인). frameProbe의 64×36 Canvas2D drawImage도 18~27 ms | 0b 3차 |
-| A23 | Safari에서 `new VideoFrame(video)` → `importExternalTexture({source: frame})`는 VP9 프레임을 싸게 샘플링함 | [확인(0a P0-6, 2026-10-01)] 프로브 VP9 2160p60: 출력 평균 128(비검정), JS p95 2 ms, 디스플레이 갱신 누락 0.2%(loopFps 58.8). 1080p p95 2~3 ms. 같은 run에서 video 직접 import는 0(검정), copyExternalImageToTexture p95 14 ms(rgba8)·21 ms(bgra8), createImageBitmap 비동기 준비 40 ms. content script(isolated world)에서의 `VideoFrame` 사용 가능 여부는 미확인 | 0a P0-6 |
+| A23 | Safari에서 `new VideoFrame(video)` → `importExternalTexture({source: frame})`는 VP9 프레임을 싸게 샘플링함 | [확인(0a P0-6, 2026-10-01)] 프로브 VP9 2160p60: 출력 평균 128(비검정), JS p95 2 ms, 디스플레이 갱신 누락 0.2%(loopFps 58.8). 1080p p95 2~3 ms. 같은 run에서 video 직접 import는 0(검정), copyExternalImageToTexture p95 14 ms(rgba8)·21 ms(bgra8), createImageBitmap 비동기 준비 40 ms. 0b 4차(2026-10-01): 확장 content script에서도 동작 확인(path vf, vfErr 없음, vf p95 1~2 ms) | 0a P0-6 |
+| A24 | 시스템 설정 60Hz에서 Safari rAF가 60회/s로 호출됨 | [관찰(2026-10-01)] 60Hz 설정에서 프로브(H.264 대조군 포함 전 변형)와 확장 모두 rAF 약 30회/s. 0a 4차(2026-09-30) 60Hz에서는 600/600이었음. 저전력 모드 끔. 원인 미확인(설정 값·OS 상태 확인 필요, FIX_GUIDE S3) | 0b 4차 |
 
 **해석이 갈리는 지점 → 결정**
 - 색 방향: 측색적 변환(709→P3 행렬)을 기반으로 하고, 채도·하이라이트 확장은 **프리셋 + 상세 슬라이더**로 둔다(사용자 답변 반영). 프리셋 수치는 S2/S4 시뮬레이션과 0a 헤드룸 측정 후 Opus가 확정한다.
@@ -75,6 +76,7 @@
 - **G2 EDR**: SDR white보다 밝은 단계가 **2개 이상 구분**됨. 참조 HDR 이미지는 밝은데 스트라이프가 1.0에서 포화되면 실패.
 - **G3 성능** (2026-09-30 3차 개정): 전체화면 오버레이 배치(video 위 단일 캔버스, 캔버스 = min(원본, 표시×DPR)), 전원 연결, 1080p60과 2160p60, 60Hz와 ProMotion 모두에서 (1) **구동 루프의 디스플레이 갱신 누락률(R3) − 기준선(R0) < 1%p**, (2) JS p95 < 4 ms, (3) 움직이는 박스 끊김 육안 "없음". 디스플레이 갱신 누락률 = 측정 창에서 구동 콜백 간격이 디스플레이 갱신 간격의 1.5배를 넘어 놓친 갱신 수 / 기대 갱신 수(기대 갱신 수 = 측정 창 초 × 디스플레이 Hz). 이력: 1차 개정(rVFC 콜백 드롭률)은 rVFC가 표시 프레임보다 적게 호출돼(A20) 폐기. 2차 개정(소스 프레임 슬롯 누락률)은 구동 루프 주기와 소스 fps가 같은 60Hz에서 위상 지터만으로 거짓 누락이 생겨(캔버스 없는 R0가 콜백 600/600인데 5.67%) 폐기.
 - **G4 확장 컨텍스트(0b)**: content script에서 `navigator.gpu` 사용 가능, YouTube video SecurityError 없음, 오버레이 EDR이 G2와 동등.
+- **G3c 개정(2026-10-01)**: 누락률 기준을 G3와 같이 '확장 렌더(R3) − 같은 페이지 기준선(R0, 렌더 없이 rAF만) < 1%p'로 바꾼다. 확장 쪽 R0은 진단용 `baseline` 모드(FIX_GUIDE S1)로 잰다. 추가로 끊김 원인 분리를 위해 샘플링 cadence 지표(S2)를 기록한다.
 - **G3c 복사 경로 비용(0b, 2026-09-30 추가)**: 복사 경로로 YouTube VP9 1080p60·2160p60 재생, 전원 연결, 60Hz와 ProMotion, 전체화면에서 (1) 렌더 루프 콜백의 디스플레이 갱신 누락률 < 1%(기준선 R0 대신 절대값, 확장에는 R0가 없음), (2) JS p95 < 4 ms, (3) 끊김 육안 없음, (4) video 자체 드롭(`getVideoPlaybackQuality`)이 확장 off 대비 +1%p 미만.
 
 ### 실패 분기 (Opus가 FIX_GUIDE.md 또는 PLAN.md 개정으로 지시)
@@ -396,9 +398,10 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | G1 API | 2026-09-30 | results/result-M1-20260930-battery-max-fullscreen.json | **통과** | configure 예외 없음, 되읽기 `rgba16float`/`display-p3`/`extended`. 조건 무관 항목이라 재측정 불필요 |
 | G2 EDR | 2026-09-30 | results/result-M1-20260930-ac-{low,mid,max}-mixed.json | **통과** | 전원 연결 3단계 밝기 모두 SDR white 위 2단계 이상 구분(안정 후 4 / 3 / 2, 최소 조건인 밝기 최대에서도 1.25·1.5·2). 1차 잠정 판정 확정. 헤드룸 제약은 C절 "0a 헤드룸 제약"으로 M4에 넘김 |
 | G3 성능 | 2026-09-30 | 4차: results/result-M1-20260930-ac-mid-actual60hz-raf.json, …-actualpromotion-raf.json (이전 회차 이력은 git) | **통과** | B절 3차 개정 기준. rAF 구동 run 전부 콜백 수 = 기대 갱신 수(60Hz 600/599~600, ProMotion 1200~1201/1199~1200) → 디스플레이 갱신 누락 0, R3−R0 = 0%p(두 해상도·두 주사율). JS p95 ≤ 1.05 ms. GPU(2160p ITM, 3600×2025) 60Hz 5.3 ms / ProMotion 2.4 ms로 예산 내. 끊김 육안 "없음"(두 주사율). 비교용 rVFC 구동(V3)은 11~32% 누락. 주: 사용자 보고로 4차 두 파일의 refreshRate 표기가 뒤바뀜(loopFps 60/120으로 확인, 파일명은 실제 주사율로 저장). 제한: 픽스처 기준이며 YouTube 실제 재생은 G4(0b)에서 함께 확인 |
-| G4 확장 컨텍스트 | 2026-09-30 | 1차: results/result-M2-20260930-youtube-vp9-{itm,identity}-black.json, stripes 스크린샷 / 2차: 사용자 회신 frameProbe JSON(ext 0, copy 97.8, c2d 145.0, 가드 detach 정상), results/result-M1-20260930-probe-vp9-split-fullscreen.json | **통과(조건부)** | 확장 컨텍스트 조건 세 가지 충족: `navigator.gpu`(isolated world) 사용 가능, YouTube video를 SecurityError 없이 읽을 수 있음(copy·c2d 정상, A10 확인), 오버레이 EDR 동작(stripes 1~5번째 줄 1.0/1.25/1.5/2/3 구분, 6번째 4.0부터 동일 → 한계 3, 밝기 중간 G2와 일치. 0b 3차 확정). 검은 화면은 컨텍스트가 아니라 Safari의 VP9 외부 텍스처 결함(A21). 조건: 복사 경로로 YouTube VP9 영상 표시는 확인(0b 3차, 시작 약 30초 검정은 Q1 결함). G3c 비용 기준 통과가 남음. 통과해야 M2 PR 머지·M3 착수 가능 |
+| G4 확장 컨텍스트 | 2026-10-01 | 1~3차(이전 행 근거) + 4차 results/result-M2-20261001-ac-mid-*-itm-vf-*.json | **통과** | 확장 컨텍스트 조건 세 가지 충족(2026-09-30 기록 유지). 2026-09-30의 조건(YouTube VP9 영상 표시 + 비용)은 vf 경로로 해소: 영상 2개 path vf, 오버레이 즉시 표시, JS p95 2 ms, video 드롭 0. 남은 디스플레이 갱신 누락 3~4%와 육안 끊김 '조금'은 원인 미분리(YouTube 페이지 자체 부하·샘플링 위상 가능) → G3c 행에서 계속. F-A는 착수하지 않는다: vf 경로가 비용 기준을 만족하고, 남은 끊김은 원인 미확인이며 F-A(화면 캡처 1~2프레임 지연)가 이를 줄인다는 근거가 없다. FIX_GUIDE S 회차 결과로 재검토 |
 | G3c 복사 경로 비용 | 2026-09-30 | results/result-M2-20260930-ac-mid-{2160p,1440p}-identity-copy-window.json | **불통과(2160p)** | 2160p: 복사 JS p95 14 ms(기준 4 ms), 갱신 누락 5.6%(기준 1%). video 드롭 0. 1440p는 export 시 일시정지 상태라 누락률·loopFps가 일시정지 공백에 오염됨(복사 p95 12.8 ms로 이미 기준 초과). 전체화면·ProMotion·1080p 측정 전이지만 복사 시간만으로 판정 가능. FIX_GUIDE Q3 실험 후 재판정 |
 | G3c 입력 경로 후보(프로브 P0-6) | 2026-10-01 | results/result-M1-20261001-ac-mid-{promotion,60hz}-p06.json | **vf 후보 채택** | 첫 파일(ProMotion 표기, 추정 displayHz 60): V-vf 2160p JS p95 2 ms·누락 0.2%·비검정, 1080p p95 2 ms·누락 0. copy 계열·createImageBitmap 계열은 모두 기준 초과. 둘째 파일(60Hz 표기)은 H.264 V-ext 대조군까지 모든 변형이 loopFps 30·누락 50%라 환경 문제(rAF 30Hz 구동)로 보고 판정에 쓰지 않는다(원인 미확인, 재측정). 확장 적용 후 G3c 재판정(FIX_GUIDE R4) |
+| G3c vf 경로(확장) | 2026-10-01 | results/result-M2-20261001-ac-mid-{promotion-2160p-itm-vf-vF5,promotion-2160p-itm-vf-MR5,promotion-1080p-itm-vf-vF5,60hz-1080p-itm-vf-vF5}.json | **보류** | ProMotion 설정 창 모드: JS p95 2 ms(기준 4 ms 충족), video 드롭 0(충족), 디스플레이 갱신 누락 3.1~4.4%(절대 기준 1% 초과), 육안 끊김 조금(1080p 동일). 확장에는 기준선(R0)이 없어 누락이 오버레이 탓인지 YouTube 페이지 탓인지 가를 수 없다 → FIX_GUIDE S1 기준선 모드로 R3−R0 판정으로 되돌린다(G3와 같은 차분 기준). 60Hz는 A24로 판정 보류 |
 
 ---
 

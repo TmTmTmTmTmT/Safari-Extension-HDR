@@ -1,69 +1,71 @@
-# FIX_GUIDE.md — M2 VideoFrame 입력 경로(R) + 프로브 지표(K1)
+# FIX_GUIDE.md — M2 끊김 원인 분리(S) + 프로브 지표(K1)
 
-> 작성: Opus. 근거: `results/result-M1-20261001-ac-mid-{promotion,60hz}-p06.json`(P0-6), `results/result-M2-20261001-ac-mid-yt-vp9-identity-none.json`(확장, 새 영상 3840×1920 VP9), 사용자 회신 "검은화면 아예 없음".
+> 작성: Opus. 근거: STATUS.md "M2 0b 4차 회신", `results/result-M2-20261001-ac-mid-*-itm-vf-*.json`, `results/result-M1-20261001-ac-mid-60hz-p06-rerun.json`, 사용자 회신(끊김 '조금', vF5oXa1cVEg는 4K60이 아님, 밝기 최대에서 HDR 효과가 잘 느껴짐, "네이티브 헬퍼 필요할지도?").
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
-> 이전 회차: L·N·P·Q 회차 완료(`830da17`). Q5(제품 결정)는 아래 판정으로 불필요해졌다. K1은 미구현이며 그대로 둔다.
+> 이전 회차: L·N·P·Q·R 회차 완료(`fb2d5cc`). K1은 미구현이며 그대로 둔다.
 
 ## 판정 요약
 
-- **P0-6 결과: `vf`(`new VideoFrame(video)` → `importExternalTexture`)가 유일하게 기준을 통과한다(PLAN.md A23).** 2160p VP9에서 JS p95 2 ms, 디스플레이 갱신 누락 0.2%, 출력 평균 128(비검정). video 직접 import는 검정(A21), `copyExternalImageToTexture`는 p95 14~21 ms(A22), `createImageBitmap`은 비동기 준비 40 ms로 모두 탈락.
-- **제품 결정(Q5)은 필요 없다.** 해상도 상한·H.264 강제·F-A 없이 2160p VP9를 처리할 경로가 있다.
-- 60Hz 표기 파일은 H.264 대조군(V-ext)까지 모든 변형이 loopFps 30·누락 50%다. 변형과 무관한 환경 문제(rAF가 30Hz로 구동)로 보고 판정에서 제외한다. 저전력 모드 등 원인 후보를 R5에서 확인한다.
-- **확장 결과(새 영상 MR_53SGVXXc)**: 첫 frameProbe(1.4초)에서 ext 0, copy 0, c2d 138 → Q1 규칙상 `none` → 즉시 detach. "검은 화면 없음"은 오버레이가 붙지 않아 원본만 보인 것이다(ITM 미적용). copy가 0으로 나온 원인은 미확인(초기 프레임에서 복사 실패 가능). 한 번의 결과로 영구 detach하는 Q1의 `none` 처리는 너무 엄격하므로 R2에서 고친다.
+- **G4 통과(확정).** vf 경로로 YouTube VP9가 즉시 표시되고 JS p95 2 ms, video 드롭 0이다(PLAN.md 게이트 판정 기록).
+- **G3c 보류.** 갱신 누락 3~4%와 육안 끊김 '조금'이 남았지만 원인을 가를 자료가 없다. 후보:
+  - C-a: YouTube 페이지 자체가 메인 스레드를 써서 rAF가 빠짐(오버레이와 무관). 확장에는 기준선(R0)이 없어 지금은 구분 불가.
+  - C-b: 샘플링 위상. 오버레이는 rAF 시점의 현재 프레임을 그리므로, 소스가 60fps가 아닐 때(사용자 메모: vF5oXa1cVEg는 4K60 아님) 프레임 교체 시점과 rAF가 가까우면 유지 길이가 불규칙해진다(예: 24fps에서 3·2 대신 3·3·1). 네이티브 합성은 vsync에 맞춰 교체하므로 차이가 생길 수 있다.
+  - C-c: 원본 영상 자체의 끊김(24/30fps를 60Hz에 표시할 때 생기는 고유 cadence). 확장을 꺼도 보이면 확장 문제가 아니다.
+- **F-A(네이티브 헬퍼)는 착수하지 않는다.** vf 경로가 비용 기준을 만족하고, F-A는 화면 캡처로 1~2프레임 지연과 자체 지터가 생겨 C-a~C-c 어느 것도 줄인다는 근거가 없다. S 회차 결과가 C-b로 확정되고 웹 경로에서 고칠 수 없을 때 다시 검토한다.
+- **60Hz rAF 30Hz(A24)**: 프로브 H.264 대조군까지 30회/s라 확장 문제가 아니다. 0a 4차와 무엇이 달라졌는지 확인한다(S3).
+- **밝기별 체감**: 밝기 중간에서는 약하고 최대에서는 잘 느껴짐. M4 프리셋·밝기 대응 결정 자료로 남긴다(이번 회차 구현 없음).
 
 ---
 
-## R0. CI 수정: parse-result 테스트의 결과 파일 가정 (먼저 처리)
+## S1. 확장 기준선 모드 `baseline` (G3c R0)
 
-- **원인**: `sim/test_parse_result.py::test_v1_to_v4_have_no_vp9_paths_section`이 `results/result-M1-*.json` 전부를 v1~v4로 가정한다. 사용자 회신 P0-6 결과(`result-M1-20261001-*-p06.json`, schemaVersion 5)를 `results/`에 넣자 실패했다(`75aa21a` CI ubuntu).
-- **수정 방향**: 이 테스트는 파일을 읽어 `schemaVersion < 5`인 것만 넘기도록 한다. 테스트 의도(v1~v4에는 P0-6 절이 없다)는 그대로 유지한다. 결과 파일은 옮기거나 지우지 않는다.
-- **검증(1)**: `python3 -m pytest sim` 전부 통과, CI ubuntu green.
+- **수정 방향**: popup 모드 목록에 진단용 `baseline`을 추가한다(GUIDELINES 2.6-3: 진단 모드는 진단 영역에만). `baseline`에서는 캔버스를 숨기고(원본 표시) rAF 루프는 그대로 돌리되 import·렌더·submit을 하지 않는다. diag의 loopFps·displayMissRate·displayHz는 같은 방식으로 잰다. frameProbe·경로 결정·N2 가드는 실행하지 않는다.
+- **영향 범위**: `params.js`(모드 목록), `renderer.js`, `main.js`(가드 제외), popup(선택지), 스키마 m2(`render.mode` enum), 테스트.
 
-## R1. frameProbe에 `vf` 경로 추가
-
-- **수정 방향**: frameProbe에 네 번째 경로 `vf`를 추가한다. `new VideoFrame(video)` → `importExternalTexture({source: frame})` → 기존 ext 진단용 64×36 rgba8unorm 렌더·되읽기 → submit 후 `frame.close()`. 평균 `vf`, 예외 `vfErr`(name), 동기 시간 `vfSyncMs`를 기록한다. `VideoFrame`이 content script에서 정의되지 않으면 `vfErr: 'ReferenceError'`로 기록한다(isolated world 지원 여부 확인용).
-- **영향 범위**: `renderer.js`, `hud.js`(normalizeFrameProbe), 스키마 m2, `scripts/parse-result.py`(M2 v4 열), 테스트.
-
-## R2. 경로 선택 순서와 detach 조건 개정
+## S2. 샘플링 cadence 지표
 
 - **수정 방향**:
-  1. `choosePath(probe)` 반환값: `'pending' | 'ext' | 'vf' | 'copy' | 'none'`. 기준(c2d)이 8 미만이거나 값 없음 → `pending`. 그 외에는 `ext ≥ 2` → `ext`, 아니면 `vf ≥ 2` → `vf`, 아니면 `copy ≥ 8` → `copy`, 모두 아니면 `none`.
-  2. `none`은 즉시 detach하지 않는다. `pending`과 같이 1초 후 다시 frameProbe를 하고, `none`이 **2회 연속**일 때만 detach한다(N2와 같은 기준). 다른 결과가 나오면 연속 카운트를 0으로.
-  3. pending 60회 상한, 결정 후 30초 주기 frameProbe는 유지. 결정 후 전환은 "선택된 경로가 검게 나오고 순서상 다음 경로가 밝을 때" 한 단계 아래로만 1회 허용(ext→vf, vf→copy). 위로는 가지 않는다.
-- **영향 범위**: `detect.js`, `renderer.js`, `main.js`, 테스트(경계 표 갱신: Q1 표 + vf 분기 + none 2회 연속).
+  1. 렌더한 rAF마다 "이번에 그린 소스 프레임의 시각"을 기록한다. vf 경로는 `frame.timestamp`(µs), ext·copy 경로는 `video.currentTime`. 최근 600개 링 버퍼(Q2 규칙대로 비움).
+  2. 순수 함수 `cadenceStats(srcTimes, loopTimes, displayHz)`:
+     - `srcFps`: 서로 다른 소스 시각 사이 간격의 중앙값으로 추정(23.976/24/25/29.97/30/50/59.94/60 중 가장 가까운 값과 원값 둘 다).
+     - `holdHist`: 같은 소스 프레임을 연속으로 그린 디스플레이 갱신 수의 분포(1, 2, 3, 4, 5+). 500 ms 넘는 공백 구간은 제외.
+     - `irregular`: 이상 유지 길이 집합(`floor(displayHz/srcFps)`, `ceil(displayHz/srcFps)`)에 들지 않는 유지 길이의 비율.
+     - `skipped`: 소스 시각이 1/srcFps의 1.5배 넘게 건너뛴 횟수(그리지 못하고 지나간 소스 프레임).
+  3. diag `render.cadence`에 위 값을 넣는다. 진단 schemaVersion 5. parse-result에 열 추가.
+- **영향 범위**: `renderer.js`, `hud.js`(순수 함수), 스키마 m2, `scripts/parse-result.py`, 테스트.
+- **검증(1)**: 24fps 소스·60Hz 규칙 시퀀스(3·2 반복) → irregular 0, 3·3·1 섞인 시퀀스 → 해당 비율, 60fps·60Hz → holdHist 1에 집중, 프레임 건너뜀 1회 → skipped 1.
 
-## R3. 렌더 루프 `vf` 경로
+## S3. 사용자 Mac 절차 (docs/manual-checklist.md 0b 절)
 
-- **수정 방향**: `vf` 경로에서는 렌더마다 `const frame = new VideoFrame(video)` → `device.importExternalTexture({source: frame})` → 외부 텍스처용 기존 파이프라인(ITM/identity, 수식 변경 없음)으로 렌더 → `queue.submit` 후 `frame.close()`. 예외 시 frame을 닫고 R2의 다음 경로로 1회 전환한다. 프레임 생성 실패가 연속 3회면 errors에 기록한다. 같은 프레임 재생성 생략은 하지 않는다(비용이 작음, 필요하면 M6).
-- 진단: `render.path`에 `vf` 추가, `vfMsP50/P95`(VideoFrame 생성+import 동기 시간) 추가. 진단 schemaVersion 4.
-- **영향 범위**: `renderer.js`, `hud.js`, 스키마 m2, parse-result, 테스트(stub: frame.close 호출 보장—정상·예외 경로 모두).
+1. `git pull` → Xcode Run → Safari 재시작, 서명되지 않은 확장 허용. 전원 연결, 저전력 모드 끔, ProMotion, 밝기 **최대**(체감이 잘 되는 조건).
+2. 영상마다(vF5oXa1cVEg, MR_53SGVXXc, 그리고 확실한 60fps 영상 1개) Stats for nerds의 `Current / Optimal Res`에 표시된 `@fps` 값을 적는다.
+3. 같은 영상, 창 모드, 각 30초씩 일시정지 없이:
+   - 모드 `baseline` → popup JSON
+   - 모드 `itm` → popup JSON, 끊김 육안(없음/가끔/자주)
+   - popup에서 확장 끔 → 끊김 육안(없음/가끔/자주). **확장 off에서도 같은 끊김이 보이는지가 핵심**
+4. 60Hz 확인: 시스템 설정 → 디스플레이 → 주사율 목록의 정확한 표기(예: "60Hz", "59.94Hz", "ProMotion")를 적고 60Hz로 바꾼 뒤, 프로브 P0-4 "G3 진단 일괄 측정"을 1회 실행해 JSON export(0a 4차와 같은 절차로 30회/s 여부 비교).
 
-## R4. 사용자 Mac 절차 (docs/manual-checklist.md 0b 절 갱신)
+## S4. 결과별 다음 단계 (Opus 판정용, 구현 대상 아님)
 
-1. `git pull` → Xcode Run → Safari 재시작, 서명되지 않은 확장 허용.
-2. 전원 연결, 밝기 중간, **저전력 모드 끔**(시스템 설정 → 배터리). ProMotion.
-3. 영상 2개(vF5oXa1cVEg, MR_53SGVXXc)에서 각각 2160p60, 모드 `itm`, 창 모드 30초 → popup JSON(일시정지하지 말 것). 오버레이가 뜨기까지 걸린 시간, 하이라이트가 원본보다 밝아 보이는지 한 줄.
-4. 같은 영상 전체화면 30초 → JSON, 끊김 육안.
-5. 화질 1080p60으로 새로고침 → 전체화면 30초 → JSON.
-6. 시스템 설정 → 디스플레이 → 60Hz로 바꾸고 4번 반복. 이때 프로브 P0-6 일괄 측정도 1회 다시 하고 JSON export(60Hz 재측정, 루프 30Hz 현상 확인용).
-7. 비교: 확장 off로 같은 영상 2160p60 전체화면 30초, Stats for nerds의 "dropped of".
-
-## R5. 60Hz 루프 30Hz 현상 기록 (구현 대상 아님)
-
-- R4-6 재측정에서도 H.264 V-ext loopFps가 30이면 STATUS.md에 기록하고 Opus로 반환한다. 이 경우 G3c 60Hz 항목 판정 방법을 다시 정한다.
+| 관찰                                         | 해석              | 다음                                                   |
+| -------------------------------------------- | ----------------- | ------------------------------------------------------ |
+| itm 누락 − baseline 누락 < 1%p               | C-a(페이지 부하)  | G3c 통과 처리(차분 기준)                               |
+| 확장 off에서도 같은 끊김                     | C-c(원본 cadence) | 확장 문제 아님, G3c 육안 항목 통과                     |
+| irregular·skipped가 크고 off에서는 끊김 없음 | C-b(샘플링 위상)  | 프레임 교체 동기화 방법 검토(Opus), 필요 시 F-A 재검토 |
+| 60Hz G3 매트릭스도 30회/s                    | 환경 변화(A24)    | 60Hz 판정 방법 재정의                                  |
 
 ---
 
-## Q 회차 보류 항목 판정 (기록)
+## R 회차 보류 항목 판정 (기록)
 
-| 항목                                  | 판정                                               |
-| ------------------------------------- | -------------------------------------------------- |
-| (a) P0-6 측정 8초(앞 1초 제외 후 8초) | 승인                                               |
-| (b) P0-6 JS 시간은 rAF 콜백 전체      | 승인. 판정에는 이쪽이 더 적합(구동 루프 비용 전체) |
-| (c) 밝기 되읽기는 별도 64×36 재렌더   | 승인(입력 경로가 검은지만 보면 됨)                 |
-| (d) 예외 변형은 수치 null + errorName | 승인                                               |
-| (e) 결정 후 pending/none은 경로 불변  | R2-3으로 대체                                      |
-| (f) K1 미구현, schemaVersion 6        | 유지                                               |
+| 항목                                                                         | 판정                                                                            |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| (a) VideoFrame 생성 실패 3회까지 프레임 건너뜀, import·렌더 예외는 즉시 전환 | 승인                                                                            |
+| (b) `onWarn` 훅                                                              | 승인                                                                            |
+| (c) 결정 후 전환은 한 단계만                                                 | 승인. ext·vf 모두 검고 copy만 밝은 경우는 관측되지 않았다. 관측되면 재검토      |
+| (d) none 1회째는 pending으로 두고 60회 상한에 합산                           | 승인                                                                            |
+| (e) vf 검정 판정 `vf<2 && (c2d                                               | copy)>=8`                                                                       | 승인(ext와 같은 임계) |
+| (f) 체크리스트 이전 소절 유지                                                | 승인. S 회차 문구 반영 시 0b 절의 지난 회차 소절은 "이전 회차" 아래로 접어 둔다 |
 
 ---
 
@@ -82,18 +84,19 @@
 
 ---
 
-## 이번 수정 범위 밖 (변경 금지, R·K 공통)
+## 이번 수정 범위 밖 (변경 금지, S·K 공통)
 
 - ITM 수식, 프리셋 수치(M4).
 - K1은 `probe/` 지표 전용이며 M2 브랜치에 섞지 않는다. N3의 프로브 변경은 픽스처 목록 추가만이다.
 - Canvas2D 중간 단계, main world 주입, 코덱 협상 조작(H.264 강제)은 구현 금지.
 - 프로브(`probe/`)는 이번 회차에 수정하지 않는다.
+- ITM 수식·프리셋 수치·밝기 대응(M4), F-A 코드.
 - ITM 수식·프리셋 수치(M4), 캔버스 설정 고정값(GUIDELINES 2.5-3).
 - 커밋된 `xcode/`의 수기 편집·형식 변환(GUIDELINES 7-5).
 
-## 병렬 분할 (R 회차)
+## 병렬 분할 (S 회차)
 
-- R1~R3는 모두 `renderer.js`·`detect.js`·`hud.js`·스키마를 건드린다. R0(CI 수정, 테스트 1개)는 본 세션이 먼저 처리해 push한다. 이후 impl-worker 1개가 R1 → R2 → R3 → R4(체크리스트) 순서로 한다.
+- S1·S2는 `renderer.js`·`hud.js`·스키마가 겹친다. impl-worker 1개가 S1 → S2 → S3(체크리스트) 순서로 한다.
 
 ## 병렬 분할 (K1)
 
