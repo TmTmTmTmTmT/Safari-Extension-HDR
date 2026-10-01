@@ -96,3 +96,10 @@
 - W-B(impl-worker): `popup/*` T2(popup 쪽)·T4·T5(a) + `tests/unit/extension-popup.test.js`.
 - 본 세션(Sonnet): `params.js`(T2 키·구독, W-B 시작 전에 먼저 커밋해 W-B가 사용), `main.js` T2·T3(HUD), `hud.js`·스키마·parse-result(TA 진단), manifest(T5(b)·버전), 관련 테스트(load·manifest·wgsl·main), 체크리스트·install.md 문구, STATUS.
 - 순서: 본 세션 params 먼저 → W-A·W-B 병렬 → 본 세션 나머지 통합 → lint·test·test:dom·pytest → PR.
+
+## 구현 검토 (Opus, 2026-10-01, PR #12 `claude/review-fixes`)
+
+- T1·T2·T3·T4·T5·TA 모두 이 문서의 수정 방향과 일치한다. 범위 밖 변경 없음. 추가 수정 지시 없음.
+- 기존 테스트 P2의 렌더 횟수 3→2 변경은 TA(e)의 의도된 결과라 성질 약화가 아니다.
+- 해석 확인: (1) 생략 tick도 `frameTimes`에 JS 시간을 넣으므로 `jsP95`는 생략 tick(수 μs)이 섞여 1.0.0보다 낮게 나올 수 있다. 이 문서 TA-5의 결정대로 두며, M6 기준(`jsP95` ≤ 4 ms) 비교 시 1.0.0 값과 직접 비교하지 않는다. (2) 경로 변경 dirty는 단위 테스트가 약하지만 경로 변경 시 `lastVfTs`·복사 텍스처가 어차피 달라져 실해가 없다. (3) popup을 처음 열 때 진단 상자가 비어 있거나 다른 탭의 이전 값일 수 있음은 수용한다(영역을 펼치면 보이는 탭 값으로 바뀜).
+- 판정 보류: TA 캔버스 내용 유지(깜박임 없음)와 T2 popup 동작은 사용자 Mac 체크리스트 "T 회차 확인" 결과로 판정한다. 1(a)가 "가끔" 이상이면 `SKIP_SAME_FRAME = false`로 되돌리는 것을 Sonnet이 바로 해도 된다(이 문서로 사전 승인).
