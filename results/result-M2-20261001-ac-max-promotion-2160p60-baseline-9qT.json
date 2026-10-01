@@ -1,0 +1,64 @@
+{
+  "extVersion": "0.1.0",
+  "milestone": "M2",
+  "schemaVersion": 5,
+  "canvas": {
+    "cssWidth": 1214,
+    "cssHeight": 607,
+    "width": 2428,
+    "height": 1214
+  },
+  "flags": {
+    "fullscreen": false,
+    "drm": false,
+    "attached": true,
+    "blackFrame": false
+  },
+  "errors": [],
+  "page": {
+    "url": "/watch?v=9qT9KyyGGhM"
+  },
+  "env": {
+    "dpr": 2,
+    "screen": {
+      "w": 1800,
+      "h": 1169
+    },
+    "dynamicRangeHigh": true,
+    "colorGamutP3": true,
+    "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15"
+  },
+  "video": {
+    "srcIsBlob": true,
+    "videoHeight": 1920,
+    "paused": false,
+    "videoWidth": 3840
+  },
+  "createdAt": "2026-10-01T01:39:17.236Z",
+  "render": {
+    "displayMissRate": 0.04823,
+    "copyMsP50": null,
+    "videoDropped": 0,
+    "vfMsP95": null,
+    "loopFps": 57.77949262081605,
+    "videoTotal": 7385,
+    "path": null,
+    "vfMsP50": null,
+    "copyMsP95": null,
+    "mode": "baseline",
+    "jsP50": null,
+    "copySkipped": 0,
+    "frames": 0,
+    "jsP95": null,
+    "displayHz": 60,
+    "cadence": null
+  },
+  "frameProbe": null,
+  "api": {
+    "configRead": null,
+    "gpu": null,
+    "adapter": null,
+    "device": null,
+    "configure": null
+  }
+}

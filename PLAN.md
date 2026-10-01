@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.7 (2026-10-01, G4 통과·G3c 개정·A24)
+> 버전: v1.8 (2026-10-01, M2 판정 완료·G3c 통과·M4 체감 기록)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -156,6 +156,8 @@ results/                       # 사용자 회신 JSON
 
 popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고, 슬라이더를 움직이면 "사용자 지정"으로 전환한다.
 
+**0b 체감 기록 (2026-10-01, M4 결정 자료)**: 균형 초안(P3/k0.65)으로 YouTube 시청 시 밝기 중간에서는 "자막 같은 부분만 밝고 영상 차이는 크지 않음", 밝기 최대에서는 "HDR 효과가 잘 느껴짐"이나 "하이라이트가 너무 밝음, identity와 itm 사이 어딘가라면 만족". 즉 밝기 최대 기준으로 기본 프리셋은 균형 초안보다 약해야 한다.
+
 **0a 헤드룸 제약 (2026-09-30, M4에서 수치 확정)**: 안정 후 헤드룸은 밝기 최대 약 2, 중간 약 3, 낮음 약 4이고 JS에서 조회할 수 없다. 헤드룸을 넘는 값은 시스템이 잘라 하이라이트 계조가 사라진다. M4 결정 조건: 기본(균형) 프리셋은 밝기 최대(헤드룸 2)에서 하드 클리핑으로 잃는 입력 코드가 없어야 한다. 방법은 (a) 균형 P ≤ 2.0 또는 (b) 헤드룸 추정값 근처 소프트 롤오프 중에서 S10 결과로 고른다.
 
 ---
@@ -177,6 +179,8 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
+
+**M2 판정 완료 (2026-10-01)**: G4 통과, G3c 통과(ProMotion·창 모드, 60fps 소스). M3 착수 가능. 렌더러 입력 경로는 C절 "비디오 입력 경로"(ext → vf → copy)로 확정. M6 이월: 비60fps 소스 끊김(샘플링 위상 C-b 대 원본 cadence C-c 분리), 60Hz rAF 30회/s(A24), 전체화면 비용 측정, K1.
 
 **M1 판정 완료 (2026-09-30)**: G1·G2·G3 통과. M2(최소 확장 + Xcode) 착수 가능. M2의 렌더러는 C절 확정 렌더 루프(rAF)로 구현한다.
 
@@ -402,6 +406,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | G3c 복사 경로 비용 | 2026-09-30 | results/result-M2-20260930-ac-mid-{2160p,1440p}-identity-copy-window.json | **불통과(2160p)** | 2160p: 복사 JS p95 14 ms(기준 4 ms), 갱신 누락 5.6%(기준 1%). video 드롭 0. 1440p는 export 시 일시정지 상태라 누락률·loopFps가 일시정지 공백에 오염됨(복사 p95 12.8 ms로 이미 기준 초과). 전체화면·ProMotion·1080p 측정 전이지만 복사 시간만으로 판정 가능. FIX_GUIDE Q3 실험 후 재판정 |
 | G3c 입력 경로 후보(프로브 P0-6) | 2026-10-01 | results/result-M1-20261001-ac-mid-{promotion,60hz}-p06.json | **vf 후보 채택** | 첫 파일(ProMotion 표기, 추정 displayHz 60): V-vf 2160p JS p95 2 ms·누락 0.2%·비검정, 1080p p95 2 ms·누락 0. copy 계열·createImageBitmap 계열은 모두 기준 초과. 둘째 파일(60Hz 표기)은 H.264 V-ext 대조군까지 모든 변형이 loopFps 30·누락 50%라 환경 문제(rAF 30Hz 구동)로 보고 판정에 쓰지 않는다(원인 미확인, 재측정). 확장 적용 후 G3c 재판정(FIX_GUIDE R4) |
 | G3c vf 경로(확장) | 2026-10-01 | results/result-M2-20261001-ac-mid-{promotion-2160p-itm-vf-vF5,promotion-2160p-itm-vf-MR5,promotion-1080p-itm-vf-vF5,60hz-1080p-itm-vf-vF5}.json | **보류** | ProMotion 설정 창 모드: JS p95 2 ms(기준 4 ms 충족), video 드롭 0(충족), 디스플레이 갱신 누락 3.1~4.4%(절대 기준 1% 초과), 육안 끊김 조금(1080p 동일). 확장에는 기준선(R0)이 없어 누락이 오버레이 탓인지 YouTube 페이지 탓인지 가를 수 없다 → FIX_GUIDE S1 기준선 모드로 R3−R0 판정으로 되돌린다(G3와 같은 차분 기준). 60Hz는 A24로 판정 보류 |
+| G3c vf 경로(확장) 재판정 | 2026-10-01 | results/result-M2-20261001-ac-max-promotion-2160p60-{itm-vf,baseline}-9qT.json | **통과(ProMotion·창 모드)** | 60fps 소스(9qT9KyyGGhM, 3840×1920, srcFps 59.94): 누락 itm 1.8% − baseline 4.8% = −3.0%p(개정 기준 < 1%p 충족), JS p95 1 ms, vf p95 1 ms, video 드롭 0(Stats for nerds 포함), 끊김 육안 없음. cadence: 유지 1회 570 / 2회 14, irregular 2.4%, skipped 18(기준선 누락 4.8%와 같은 규모 → 페이지 부하 C-a로 봄). 이전 회차 끊김 '조금'은 비60fps 소스(vF5oXa1cVEg)에서 관찰 → C-b/C-c 미분리, M6 항목. 미측정: 전체화면, 60Hz(A24, 사용자 판단으로 생략) → M6에서 확인 |
 
 ---
 

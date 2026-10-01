@@ -17,6 +17,13 @@
 
 ---
 
+## S 회차 결과 (2026-10-01, 기록)
+
+- S4 판정표 1행(C-a): 60fps 소스에서 itm 누락 − baseline 누락 = −3.0%p, 끊김 없음, video 드롭 0 → G3c 통과(ProMotion·창 모드). 상세는 PLAN.md 게이트 판정 기록.
+- 비60fps 소스 끊김(C-b/C-c)과 60Hz rAF 30회/s(A24)는 M6로 이월. 이번 회차 추가 수정 없음.
+- S 회차 보류 항목(holdHist 경계 제외, 이상 유지 길이 집합, baseline 필드 null, baseline 진입 시 GPU 해제)은 모두 승인.
+- **M2 수정 회차는 여기서 닫는다.** 다음 작업은 M3 계획(Opus)이다.
+
 ## S1. 확장 기준선 모드 `baseline` (G3c R0)
 
 - **수정 방향**: popup 모드 목록에 진단용 `baseline`을 추가한다(GUIDELINES 2.6-3: 진단 모드는 진단 영역에만). `baseline`에서는 캔버스를 숨기고(원본 표시) rAF 루프는 그대로 돌리되 import·렌더·submit을 하지 않는다. diag의 loopFps·displayMissRate·displayHz는 같은 방식으로 잰다. frameProbe·경로 결정·N2 가드는 실행하지 않는다.
