@@ -118,7 +118,7 @@
         },
         "effectivePeak": {
           "type": ["number", "null"],
-          "description": "schemaVersion 9 이상. 유효 피크. v11부터 1 + t (f(g) - 1)로 셰이더와 같은 곡선 f를 쓴다(PLAN D-M7 M7-1). v10 이하의 1 + t (P g - 1)과 g≠1에서 값이 달라 직접 비교하지 않는다."
+          "description": "schemaVersion 9 이상. 유효 피크. v12 이상은 1 + t (f(g) - 1)로 셰이더와 같은 곡선 f를 쓴다(PLAN D-M7 M7-1). v11 이하는 1 + t (P g - 1)이거나(1.0.1 T 회차 빌드) 새 공식이다(1.1.0 빌드, extVersion으로 구분). g≠1에서 값이 달라 직접 비교하지 않는다."
         },
         "sharpness": {
           "type": ["number", "null"],
@@ -196,6 +196,10 @@
         "copySkipped": {
           "type": ["number", "null"],
           "description": "schemaVersion 3 이상. 같은 프레임 재복사 생략 횟수."
+        },
+        "sameFrameSkipped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 11 이상(1.0.1 T 회차 빌드부터, 1.1.0 빌드의 v11에는 없음). 같은 소스 프레임이라 렌더·제출을 생략한 횟수(vf·copy 경로, FIX_GUIDE TA)."
         },
         "videoDropped": {
           "type": ["number", "null"],

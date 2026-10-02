@@ -47,6 +47,7 @@ async function setup(mode = 'itm', enabled = true) {
   const intervals = [];
   const doc = Object.assign(emitter(), {
     fullscreenElement: null,
+    hidden: false,
     visibilityState: 'visible',
     activeElement: null,
   });
@@ -113,9 +114,12 @@ async function setup(mode = 'itm', enabled = true) {
   ns.params.setEnabled = async (v) => {
     enabledWrites.push(v);
   };
-  const t = { intervals, diag: null };
+  let diagReqCb = null;
+  ns.params.subscribeDiagRequest = (cb) => (diagReqCb = cb);
+  const t = { intervals, diag: null, diagWrites: 0 };
   ns.params.writeDiag = async (d) => {
     t.diag = d;
+    t.diagWrites += 1;
   };
   const renderers = [];
   // 상태 칩도 스텁으로 바꾼다 (PLAN M8-3).
@@ -197,12 +201,13 @@ async function setup(mode = 'itm', enabled = true) {
     sent,
     enabledWrites,
     settings: (s) => settingsCb(s),
+    diagRequest: () => diagReqCb(),
   });
 }
 
-// 진단 타이머를 수동으로 돌려 lifecycle 상태를 읽는다.
+// popup 진단 요청을 흉내 내 lifecycle 상태를 읽는다 (FIX_GUIDE T2).
 async function diagOf(t) {
-  t.intervals.forEach((fn) => fn());
+  t.diagRequest();
   await Promise.resolve();
   return plain(t.diag);
 }
@@ -836,4 +841,42 @@ test('보이지 않는 탭은 진단을 쓰지 않고, 다시 보이면 즉시 1
   await Promise.resolve();
   assert.notStrictEqual(t.diag, null);
   assert.strictEqual(t.diag.lifecycle.state, 'probing');
+});
+
+test('진단은 popup 요청 때만 쓴다: 타이머 주기 저장 없음, 숨긴 탭은 무시 (FIX_GUIDE T2)', async () => {
+  const t = await setup();
+  t.intervals.forEach((fn) => fn());
+  await Promise.resolve();
+  assert.strictEqual(t.diagWrites, 0, '요청 없이는 0회');
+  t.doc.hidden = true;
+  t.doc.visibilityState = 'hidden';
+  t.diagRequest();
+  await Promise.resolve();
+  assert.strictEqual(t.diagWrites, 0, '숨긴 탭은 응답하지 않는다');
+  t.doc.hidden = false;
+  t.doc.visibilityState = 'visible';
+  t.diagRequest();
+  await Promise.resolve();
+  assert.strictEqual(t.diagWrites, 1);
+});
+
+test('HUD 갱신은 숨긴 탭에서 건너뛴다 (FIX_GUIDE T3)', async () => {
+  const t = await setup();
+  const base = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+    custom: { P: 2, k: 0.5, n: 2, g: 1, s: 1, hs: 1 },
+  };
+  t.settings({ ...base, hud: true });
+  t.huds[0].lines = null;
+  t.doc.hidden = true;
+  t.intervals.forEach((fn) => fn());
+  assert.strictEqual(t.huds[0].lines, null, 'hidden이면 update 없음');
+  t.doc.hidden = false;
+  t.intervals.forEach((fn) => fn());
+  assert.strictEqual(t.huds[0].lines.length, 5);
 });

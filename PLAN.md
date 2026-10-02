@@ -1,7 +1,7 @@
 # PLAN.md — Safari SDR→HDR(EDR) 실시간 변환 확장
 
 > 작성: Opus(계획 단계). 이 문서와 GUIDELINES.md 범위를 벗어나는 설계 변경은 Sonnet이 임의로 하지 않는다. 발견한 이슈는 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.19 (2026-10-01, M6 판정·전체 마일스톤 완료, 기본값 문구 정리)
+> 버전: v1.20 (2026-10-01, 1.0.0 리뷰 수정 T 회차 착수, M6-5 재렌더 생략 보류 정정)
 
 ## 0. 요약
 1. 방식: content script가 YouTube `<video>` 프레임을 **WebGPU `importExternalTexture`**로 가져와 WGSL 셰이더에서 inverse tone mapping(ITM)을 적용한다. 결과는 `rgba16float + display-p3 + toneMapping:"extended"` 캔버스로 video 위에 오버레이한다.
@@ -474,7 +474,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 **M6-5. 이월 항목 정리 (결정)**
 - K1(프로브 지표 정리, schemaVersion 6 예정): 프로브는 M1·M2 판정 도구였고 확장 진단이 대체했다 → **종료(불필요)**.
 - S2 C¹ 검사법: `RANGES.n` 하한 2.0으로 n<2를 쓰지 않으므로 → **종료**.
-- 같은 소스 프레임 재렌더 생략(ProMotion 2회 렌더, C절): rVFC가 Safari에서 표시 프레임보다 적게 호출(A20)되어 프레임 변화 신호로 쓸 수 없고 `currentTime`은 프레임 단위가 아니다 → **보류**(GPU 예산 내, 측정상 문제 없음).
+- 같은 소스 프레임 재렌더 생략(ProMotion 2회 렌더, C절): rVFC가 Safari에서 표시 프레임보다 적게 호출(A20)되어 프레임 변화 신호로 쓸 수 없고 `currentTime`은 프레임 단위가 아니다 → **보류**(GPU 예산 내, 측정상 문제 없음). **정정(2026-10-01)**: vf 경로는 매 rAF에 만드는 `VideoFrame.timestamp`가 프레임 변화 신호이므로 보류 근거가 vf·copy 경로에는 맞지 않았다 → FIX_GUIDE TA로 구현한다(ext 경로는 보류 유지).
 - M3 [미확인](광고, PiP 복귀, 미니플레이어, 극장 셀렉터): 진단·사용자 체감 영향 없음 → 보류, 회귀 시 FIX_GUIDE.
 - 진단 `milestone: 'M2'` 표기: 스키마 호환을 위해 유지.
 

@@ -298,8 +298,8 @@ def summarize_m2(name, data):
     print("\n## %s" % name)
     print("schemaVersion=%s extVersion=%s createdAt=%s" % (fmt(data.get("schemaVersion")), fmt(data.get("extVersion")), fmt(data.get("createdAt"))))
     sv = data.get("schemaVersion")
-    if isinstance(sv, int) and sv < 11:
-        print("주의: schemaVersion 10 이하의 render.effectivePeak는 1 + t (P g - 1)이라 v11 이상 값과 g≠1에서 직접 비교하지 않는다.")
+    if isinstance(sv, int) and sv < 12:
+        print("주의: schemaVersion 11 이하의 render.effectivePeak는 extVersion 1.1.0 미만이면 1 + t (P g - 1), 1.1.0 이상이면 셰이더와 같은 새 공식이다. g≠1에서 서로 직접 비교하지 않는다.")
     print("page: %s" % fmt(g(data, "page", "url")))
     env = data.get("env") or {}
     print("\nenv")
@@ -369,7 +369,7 @@ def summarize_m2(name, data):
         if "mode" in fp:  # v10: 측정 방식과 HDR 조기 판정
             cols += ["mode", "hdrEarly"]
         print(table(cols + ["blackFrame"], [[fmt(fp.get(c)) for c in cols] + [fmt(flags.get("blackFrame"))]]))
-    v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "videoDropped", "videoTotal"]
+    v3_cols = ["path", "displayHz", "displayMissRate", "copyMsP50", "copyMsP95", "copySkipped", "sameFrameSkipped", "videoDropped", "videoTotal"]
     if any(k in render for k in ("vfMsP50", "vfMsP95")):  # schemaVersion 4 이상
         v3_cols = v3_cols + ["vfMsP50", "vfMsP95"]
     if "strength" in render:  # schemaVersion 7 이상 (HDR 강도), 8 이상은 preset·sharpness·saturation 추가

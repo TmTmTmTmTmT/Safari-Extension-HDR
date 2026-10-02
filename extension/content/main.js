@@ -3,7 +3,6 @@
   const ns = globalThis.__sdrhdr;
   const FIND_INTERVAL_MS = 1000;
   const FIND_MAX_TRIES = 30;
-  const DIAG_INTERVAL_MS = 2000;
   const HUD_INTERVAL_MS = 1000; // 페이지 HUD 갱신 주기 (PLAN M5-3). 렌더 루프와 무관하게 통계만 읽는다.
   const MUTATION_DEBOUNCE_MS = 250;
   const MAX_ERRORS = 20;
@@ -219,7 +218,7 @@
   }
 
   function tickHud() {
-    if (!hudState) return;
+    if (document.hidden || !hudState) return; // 숨긴 탭은 HUD를 갱신하지 않는다 (FIX_GUIDE T)
     hudState.hud.update(ns.hud.hudLines(hudInfo()));
   }
 
@@ -716,6 +715,16 @@
     ns.params.writeDiag(diag).catch(() => {});
   }
 
+  // popup 진단 요청 (FIX_GUIDE T2): 보이는 탭만 응답한다. 숨긴 탭은 쓰지 않는다.
+  function onDiagRequest() {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      writeDiagIfChanged();
+    } catch (e) {
+      // 진단 실패는 무시한다.
+    }
+  }
+
   // 유일한 부작용 시작점. 로드 시점 접근을 피하려고 마이크로태스크로 미룬다.
   async function start() {
     if (started) return;
@@ -724,6 +733,7 @@
       startedAt = performance.now();
       settings = await ns.params.readSettings();
       ns.params.subscribe(onSettings);
+      ns.params.subscribeDiagRequest(onDiagRequest);
       document.addEventListener(ns.detect.NAV_EVENT, onNav);
       document.addEventListener('fullscreenchange', pollMode);
       document.addEventListener('webkitfullscreenchange', pollMode);
@@ -766,13 +776,6 @@
       } catch (e) {
         // runtime 메시지가 없는 환경에서는 popup 상태 줄만 쓰지 못한다.
       }
-      setInterval(() => {
-        try {
-          writeDiagIfChanged();
-        } catch (e) {
-          // 진단 실패는 무시한다.
-        }
-      }, DIAG_INTERVAL_MS);
       setInterval(() => {
         try {
           refreshUi(); // HUD 갱신·container 변경 추적·undecided 전환 알림

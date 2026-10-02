@@ -10,7 +10,10 @@
   const STALE_S = 30; // 진단 출처 줄을 흐리게 하는 경과(초)
   // 프리셋 한글명(저장 id는 그대로). 백업 안내 문구에 쓴다.
   const PRESET_LABEL = { accurate: '정확', balanced: '균형', vivid: '강조' };
+  const DIAG_REQUEST_MS = 2000; // 진단 영역이 열린 동안 요청 주기 (FIX_GUIDE T2)
   let blobUrl = null;
+  let latestText = ''; // 진단 영역이 닫혀 있으면 textarea 대신 여기에 보관 (FIX_GUIDE T4)
+  let diagTimer = null;
   // 현재 UI 값. 유효 피크와 상세 슬라이더 시작값을 저장소 재조회 없이 계산하는 데 쓴다.
   let cur = null;
   let prevCustom = null; // 마지막 백업(되돌리기 대상)
@@ -72,22 +75,42 @@
     }
   }
 
-  // 진단 JSON 표시. 스크롤 위치는 갱신 뒤에도 유지한다.
+  // textarea에는 진단 영역이 열려 있을 때만 쓴다. 스크롤 위치는 갱신 뒤에도 유지한다.
+  function applyDiag() {
+    const ta = $('diag');
+    const top = ta.scrollTop;
+    ta.value = latestText;
+    ta.scrollTop = top;
+  }
   function showDiag(diag) {
     shownDiag = diag || null;
     pendingDiag = null;
     $('diag-refresh').hidden = true;
-    const text = diag
+    latestText = diag
       ? JSON.stringify(diag, null, 2)
       : '아직 상태 정보가 없습니다. ① www.youtube.com 영상 페이지에서 재생 ② Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근 허용 ③ 새로고침. 이 창은 자동으로 갱신됩니다';
-    const ta = $('diag');
-    const top = ta.scrollTop;
-    ta.value = text;
-    ta.scrollTop = top;
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
-    blobUrl = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-    $('save').href = blobUrl;
+    if ($('diag-section').open) applyDiag();
     showSource();
+  }
+
+  // 진단 영역이 열려 있는 동안만 content에 진단을 요청한다: 열 때 1회, 이후 2초마다 (FIX_GUIDE T2).
+  function startDiagRequests() {
+    if (diagTimer !== null || typeof setInterval !== 'function') return;
+    params.requestDiag();
+    diagTimer = setInterval(() => params.requestDiag(), DIAG_REQUEST_MS);
+  }
+  function stopDiagRequests() {
+    if (diagTimer === null) return;
+    clearInterval(diagTimer);
+    diagTimer = null;
+  }
+  function onDiagToggle() {
+    if ($('diag-section').open) {
+      applyDiag();
+      startDiagRequests();
+    } else {
+      stopDiagRequests();
+    }
   }
 
   // 새 진단 도착. 읽거나 선택하는 중이면 보류한다.
@@ -459,6 +482,15 @@
     $('diag-refresh').addEventListener('click', () => {
       if (pendingDiag) showDiag(pendingDiag.diag);
     });
+    // Blob은 'JSON 저장'을 누를 때만 만든다 (FIX_GUIDE T4).
+    $('save').addEventListener('click', () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      blobUrl = URL.createObjectURL(new Blob([latestText], { type: 'application/json' }));
+      $('save').href = blobUrl;
+    });
+    $('diag-section').addEventListener('toggle', onDiagToggle);
+    globalThis.addEventListener?.('pagehide', stopDiagRequests);
+    if ($('diag-section').open) startDiagRequests();
     browser.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && K.diag in changes) onDiag(changes[K.diag].newValue);
     });

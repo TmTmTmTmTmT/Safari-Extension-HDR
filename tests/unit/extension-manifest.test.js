@@ -28,7 +28,6 @@ test('manifest: content_scripts 순서·옵션·파일 존재', () => {
       'ns.js',
       'detect.js',
       'params.js',
-      'tonecurve.js',
       'itm.wgsl.js',
       'hud.js',
       'renderer.js',

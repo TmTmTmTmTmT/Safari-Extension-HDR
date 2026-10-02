@@ -184,7 +184,7 @@ Xcode 작업 불필요. 2026-10-01 1차 스냅샷에는 조상에 `ytd-watch-fle
 
 ## M6 성능·안정화 확인 절차 (PLAN D-M6 M6-2)
 
-전제: 전원 연결, 저전력 모드 끔, 확장 최신 빌드(manifest 1.0.0, 진단 schemaVersion 10). `git pull`(또는 해당 브랜치) → Xcode Run → Safari 재시작. 기본 설정(사용자 지정 곡선, 강도 43%, 채도 105%)과 페이지 HUD 켬 상태로 한다. 확인하지 못한 항목은 [미확인]으로 적는다.
+전제: 전원 연결, 저전력 모드 끔, 확장 최신 빌드(manifest 1.0.0, 진단 schemaVersion 10; T 회차 이후는 1.0.1·11). `git pull`(또는 해당 브랜치) → Xcode Run → Safari 재시작. 기본 설정(사용자 지정 곡선, 강도 43%, 채도 105%)과 페이지 HUD 켬 상태로 한다. 확인하지 못한 항목은 [미확인]으로 적는다.
 
 1. **30분 soak**: 2160p60 SDR 영상(재생목록 가능), 창 모드, 밝기 중간.
    - (a) 시작 5분 시점과 30분 시점에 popup 진단 JSON을 각각 저장한다(`results/result-M6-<YYYYMMDD>-soak-5min.json`, `...-30min.json`). `videoDropped / videoTotal`을 본다.

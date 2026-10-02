@@ -30,6 +30,21 @@
 4. HDR·DRM 영상 건너뜀: HDR 표시가 있는 영상은 진단 `lifecycle.skipReason`이 `hdrSource`, EME를 쓰는 영상(YouTube 영화 등)은 `drm`이고 오버레이가 없는가. 이 두 경우와 WebGPU 실패·확장 끔에서는 HUD도 표시되지 않는 것이 정상이며 진단 JSON으로 확인한다.
 5. 확장 켜고 끄기: popup의 "HDR 변환"을 끄면 원본으로 돌아가고 켜면 다시 적용되는가(`lifecycle.skipReason`이 `disabled` ↔ 해제).
 
+## T 회차 확인 (FIX_GUIDE T 회차, 1.0.1에서 시작, 현재 빌드에 포함됨)
+
+전제: 전원 연결, 확장 최신 빌드(`git pull` → Xcode Run → Safari 재시작), 기본 설정, 페이지 HUD 켬. 확인하지 못한 항목은 [미확인]으로 적는다.
+
+1. **TA 같은 프레임 재렌더 생략**: ProMotion(120Hz)에서 60fps SDR 영상과 30fps SDR 영상을 각각 1분 재생한다.
+   - (a) 깜박임·검은 프레임·하이라이트 번쩍임이 없는가(없음/가끔/자주). 가끔 이상이면 즉시 알려 준다(`SKIP_SAME_FRAME`을 끈다).
+   - (b) HUD fps가 이전과 같은 수준(약 120)인가.
+   - (c) 진단 JSON `render.sameFrameSkipped`: 60fps에서 `frames`와 비슷한 수준(약 절반 생략), 30fps에서 약 3/4 생략인지 값을 적는다.
+   - (d) 선택: 활동 상태 보기(Activity Monitor) GPU 탭의 Safari GPU 시간을 1.0.0과 비교한다.
+   - (e) 끊김 육안이 이전과 같은가(없음/가끔/자주). 슬라이더·프리셋을 바꾸면 1초 안에 반영되는가, 일시정지 후 재생·시크 직후 화면이 정상인가.
+2. **T2 진단 요청 방식**: 진단 영역을 펼치기 전에는 JSON이 갱신되지 않는다. 진단 영역을 펼치면 약 2초마다 갱신되고 스크롤 위치가 유지되는가. YouTube 탭 두 개(하나는 다른 영상을 백그라운드에서 재생)를 열고 popup을 열었을 때 보이는 탭의 URL·상태가 표시되는가. "보이는 YouTube 탭에서만 갱신됩니다" 문구가 보이는가.
+3. T1(소스 변경 중 점검 결과 폐기)·T3(숨긴 탭 중단)은 단위 테스트로 갈음한다. 이상 증상(영상 전환 직후 HDR 영상에 ITM이 걸림 등)이 있으면 알려 준다.
+
+판정: 1(a)(b)(e)가 이상 없고 2가 예이면 T 회차 완료. 1(a)가 아니면 `SKIP_SAME_FRAME = false`로 되돌리고 FIX_GUIDE에 기록한다.
+
 ## 회신 방법
 
 1. export한 JSON을 저장소 `results/result-<M>-<YYYYMMDD>[-조건].json`으로 두고 브랜치에 push한다. (M1 프로브는 `<M>`이 `M1`)

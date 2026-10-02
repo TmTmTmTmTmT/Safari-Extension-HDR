@@ -24,6 +24,8 @@
   const BUF_MAP_READ = 0x01;
   const BUF_COPY_DST = 0x08;
   const MAP_READ = 0x01; // GPUMapMode.READ
+  // FIX_GUIDE TA: vf·copy 경로에서 같은 소스 프레임이면 재렌더·submit을 생략한다. false로 되돌릴 수 있다 (사용자 노출 설정 아님).
+  const SKIP_SAME_FRAME = true;
 
   function withTimeout(promise, ms, label) {
     let timer;
@@ -55,6 +57,14 @@
     let pipelines = null;
     let rafId = null;
     let frames = 0;
+    let sameFrameSkipped = 0;
+    // TA: 다시 그려야 함 플래그. 첫 렌더(GPU 초기화 직후)는 항상 그린다.
+    let dirty = true;
+    let lastVfTs = null; // 직전에 실제로 그린 VideoFrame.timestamp
+    let lastW = null;
+    let lastH = null;
+    // T1: 소스 세대 번호. restartSource·enterBaseline에서 증가해 진행 중인 이전 회차의 결과를 폐기한다.
+    let sourceGen = 0;
     const frameTimes = [];
     const copyTimes = [];
     const vfTimes = [];
@@ -154,6 +164,7 @@
       if (!adapter) throw new Error('requestAdapter()가 null');
       device = await withTimeout(adapter.requestDevice(), GPU_TIMEOUT_MS, 'requestDevice');
       api.device = true;
+      dirty = true;
       const lostDevice = device;
       device.lost.then((info) => {
         // baseline 전환 등으로 우리가 해제한 device의 lost는 오류가 아니다.
@@ -224,7 +235,8 @@
       lastCopyTime = null;
     }
 
-    // video 크기 텍스처를 유지하고, 같은 프레임(currentTime 동일)이면 재복사를 생략한다. 복사 불가면 false.
+    // video 크기 텍스처를 유지하고, 같은 프레임(currentTime 동일)이면 재복사를 생략한다.
+    // 반환: false(복사 불가) | 'copied' | 'same'(같은 프레임이라 복사 생략).
     function updateCopyTexture() {
       const w = video.videoWidth;
       const h = video.videoHeight;
@@ -242,13 +254,13 @@
       const t = video.currentTime;
       if (lastCopyTime !== null && t === lastCopyTime) {
         copySkipped += 1;
-        return true;
+        return 'same';
       }
       const c0 = performance.now();
       device.queue.copyExternalImageToTexture({ source: video }, { texture: copyTex }, [w, h]);
       push(copyTimes, performance.now() - c0);
       lastCopyTime = t;
-      return true;
+      return 'copied';
     }
 
     function warn(e, at) {
@@ -292,10 +304,22 @@
     function fallBackFromVf(e, at) {
       warn(e, at);
       path = 'copy';
+      dirty = true;
       updateVisibility();
     }
 
+    // 이번에 그린 소스 프레임 시각(초). vf는 frame.timestamp(us), 그 외는 video.currentTime (FIX_GUIDE S2).
+    function srcOf(frame) {
+      const t = frame
+        ? frame.timestamp === undefined
+          ? NaN
+          : frame.timestamp / 1e6
+        : video.currentTime;
+      return typeof t === 'number' && Number.isFinite(t) ? t : null;
+    }
+
     // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
+    // 반환: false(그리지 못함) | true(실제 렌더) | 'skip'(같은 소스 프레임이라 생략, TA).
     function renderOnce() {
       lastSrc = null;
       if (mode === 'baseline') return false;
@@ -303,7 +327,13 @@
       if (isVideo && (video.readyState < 2 || !pathReady())) return false;
       const useCopy = isVideo && path === 'copy';
       const useVf = isVideo && path === 'vf';
-      if (useCopy && !updateCopyTexture()) return false;
+      const copyState = useCopy ? updateCopyTexture() : null;
+      if (useCopy && !copyState) return false;
+      if (canvas && (canvas.width !== lastW || canvas.height !== lastH)) dirty = true;
+      if (SKIP_SAME_FRAME && useCopy && copyState === 'same' && !dirty) {
+        lastSrc = srcOf(null);
+        return 'skip';
+      }
       let frame = null;
       let vf0 = 0;
       if (useVf) {
@@ -320,6 +350,16 @@
           return false;
         }
         vfCreateFails = 0;
+        if (
+          SKIP_SAME_FRAME &&
+          !dirty &&
+          typeof frame.timestamp === 'number' &&
+          frame.timestamp === lastVfTs
+        ) {
+          lastSrc = srcOf(frame);
+          closeFrame(frame);
+          return 'skip';
+        }
       }
       try {
         const pipeline = useCopy ? copyPipeline() : pipelines[mode];
@@ -358,15 +398,11 @@
         pass.draw(3);
         pass.end();
         device.queue.submit([enc.finish()]);
-        // 이번에 그린 소스 프레임 시각(초). vf는 frame.timestamp(us), 그 외는 video.currentTime (FIX_GUIDE S2).
-        if (isVideo) {
-          const t = useVf
-            ? frame.timestamp === undefined
-              ? NaN
-              : frame.timestamp / 1e6
-            : video.currentTime;
-          lastSrc = typeof t === 'number' && Number.isFinite(t) ? t : null;
-        }
+        if (isVideo) lastSrc = srcOf(frame);
+        dirty = false;
+        lastW = canvas ? canvas.width : null;
+        lastH = canvas ? canvas.height : null;
+        lastVfTs = useVf && typeof frame.timestamp === 'number' ? frame.timestamp : null;
         return true;
       } finally {
         if (frame) closeFrame(frame);
@@ -382,11 +418,13 @@
         push(loopTs, ts);
       } else {
         try {
-          if (renderOnce()) {
+          const res = renderOnce();
+          if (res) {
             push(frameTimes, performance.now() - t0);
             push(loopTs, ts);
             push(srcTs, lastSrc);
-            frames += 1;
+            if (res === 'skip') sameFrameSkipped += 1;
+            else frames += 1;
           }
         } catch (e) {
           if (path === 'vf') fallBackFromVf(e, 'vf.render');
@@ -489,12 +527,13 @@
     }
 
     // vf: new VideoFrame(video) -> importExternalTexture. frame은 submit 직후(되읽기 전) 닫고, 예외 시에도 닫는다.
-    async function probeVf() {
+    async function probeVf(gen) {
       const target = newProbeTarget();
       try {
         const frame = createVideoFrame();
         try {
-          colorSpace = readColorSpace(frame);
+          // 이전 세대의 프레임이 새 세대의 colorSpace를 덮지 않게 한다 (T1).
+          if (gen === undefined || gen === sourceGen) colorSpace = readColorSpace(frame);
           drawProbe(target, frame);
         } finally {
           closeFrame(frame);
@@ -534,10 +573,10 @@
 
     // 경로마다 예외를 따로 잡아 name만 기록한다. 한 경로 실패가 다른 경로를 막지 않는다.
     // syncMs: 함수 호출 후 첫 await까지의 동기 시간 (메인 스레드 점유 추정, FIX_GUIDE P3-2).
-    async function runPath(fn) {
+    async function runPath(fn, gen) {
       const t0 = performance.now();
       try {
-        const pending = fn();
+        const pending = fn(gen);
         const syncMs = performance.now() - t0;
         return { v: await pending, err: null, syncMs };
       } catch (e) {
@@ -580,6 +619,7 @@
     // 결정 전: vf를 먼저 재서 HDR이면 나머지(4K에서 c2d 수백 ms)를 건너뛴다. 결정 후: 선택 경로만 재고 검을 때만 전체 측정.
     async function runProbe() {
       probeBusy = true;
+      const gen = sourceGen;
       try {
         const t0 = performance.now();
         const detect = globalThis.__sdrhdr.detect;
@@ -587,11 +627,13 @@
         const decided = path === 'ext' || path === 'vf' || path === 'copy';
         let probeMode = 'full';
         if (decided) {
-          r[path] = await runPath(PROBE_FNS[path]);
+          r[path] = await runPath(PROBE_FNS[path], gen);
+          if (gen !== sourceGen) return; // 소스가 바뀌었으면 결과 폐기 (T1)
           const v = r[path].v;
           if (typeof v === 'number' && v >= SINGLE_OK_MIN) probeMode = 'single';
         } else {
-          r.vf = await runPath(probeVf);
+          r.vf = await runPath(probeVf, gen);
+          if (gen !== sourceGen) return; // 소스가 바뀌었으면 결과 폐기 (T1)
           if (destroyed || mode === 'baseline') return; // 진단 중 baseline으로 바뀌면 결과를 버린다
           if (detect.isHdrSource({ frameColorSpace: colorSpace })) {
             // 경로 결정·표시·pendingCount는 건드리지 않는다. main이 hdrSource로 suspend한다.
@@ -608,9 +650,11 @@
         }
         if (probeMode === 'full') {
           for (const k of ['ext', 'vf', 'copy', 'c2d']) {
-            if (r[k] === NOT_MEASURED) r[k] = await runPath(PROBE_FNS[k]);
+            if (r[k] === NOT_MEASURED) r[k] = await runPath(PROBE_FNS[k], gen);
+            if (gen !== sourceGen) return; // 소스가 바뀌었으면 결과 폐기 (T1)
           }
         }
+        if (gen !== sourceGen) return;
         if (destroyed || mode === 'baseline') return; // 진단 중 baseline으로 바뀌면 결과를 버린다
         frameProbe = buildFrameProbe(r, t0, probeMode, false);
         if (probeMode === 'single') {
@@ -630,6 +674,7 @@
         noneStreak = detect.nextNoneStreak(noneStreak, chosen);
         if (path === null || path === 'pending') {
           path = chosen === 'none' && noneStreak < detect.NONE_STREAK_LIMIT ? 'pending' : chosen;
+          dirty = true;
           updateVisibility();
           kick();
           if (path === 'pending') {
@@ -650,6 +695,7 @@
           const down = detect.stepDownPath(path, frameProbe);
           if (down !== path) {
             path = down;
+            dirty = true;
             updateVisibility();
             kick();
           }
@@ -671,6 +717,7 @@
     // stripes 모드와 실행 중에는 건너뜀.
     function probePoll() {
       if (probeBusy || destroyed || !running || !device) return;
+      if (document.hidden) return; // 숨긴 탭에서는 측정하지 않는다. 타이머·probeDue는 유지 (T3)
       if (mode === 'stripes' || mode === 'baseline') return;
       if (undecided || path === 'none') return;
       if (video.readyState < 2) return;
@@ -690,6 +737,7 @@
       srcTs.length = 0;
     }
     const onWake = () => {
+      dirty = true;
       clearRings();
       kick();
     };
@@ -698,6 +746,7 @@
     const onVisibility = () => {
       if (document.hidden) cancel();
       else {
+        dirty = true;
         clearRings();
         kick();
       }
@@ -757,12 +806,14 @@
       uniformBuf = null;
       pipelines = null;
       probePipeline = null;
+      dirty = true;
       for (const k of Object.keys(copyPipelines)) delete copyPipelines[k];
       initPromise = null;
     }
 
     // baseline 진입: 파이프라인·frameProbe·경로 상태를 모두 정리한다 (FIX_GUIDE S1).
     function enterBaseline() {
+      sourceGen += 1;
       cancel();
       stopProbeTimer();
       video.removeEventListener('loadeddata', onLoaded);
@@ -782,13 +833,17 @@
       undecided = false;
       probeDue = 0;
       frames = 0;
+      sameFrameSkipped = 0;
       copySkipped = 0;
+      dirty = true;
       clearRings();
     }
 
     // 같은 video에서 소스가 바뀐 뒤 경로 결정부터 다시 한다 (PLAN D-M3 M3-1). GPU device·파이프라인은 재사용한다.
     function restartSource() {
       if (destroyed) return;
+      sourceGen += 1;
+      dirty = true;
       destroyCopyTexture();
       path = null;
       frameProbe = null;
@@ -799,6 +854,7 @@
       undecided = false;
       probeDue = 0;
       frames = 0;
+      sameFrameSkipped = 0;
       copySkipped = 0;
       lastSrc = null;
       lastCopyTime = null;
@@ -825,12 +881,14 @@
       if (!['itm', 'identity', 'stripes', 'baseline'].includes(next)) return;
       const prev = mode;
       mode = next;
+      dirty = true;
       if (next === 'baseline' && prev !== 'baseline') enterBaseline();
       updateVisibility();
       if (prev === 'baseline' && next !== 'baseline') {
         // baseline에서 나올 때는 이전 측정을 섞지 않고 GPU 초기화부터 다시 한다.
         clearRings();
         frames = 0;
+        sameFrameSkipped = 0;
         if (running) startPipeline();
         return;
       }
@@ -844,6 +902,7 @@
       if (!next || typeof next !== 'object') return;
       shaderSettings = Object.assign({}, shaderSettings, next);
       writeParams();
+      dirty = true;
       if (device && mode === 'itm') kick();
     }
 
@@ -889,6 +948,7 @@
         frames,
         copyTimesMs: copyTimes.slice(),
         copySkipped,
+        sameFrameSkipped,
         vfTimesMs: vfTimes.slice(),
         videoDropped: vq ? vq.droppedVideoFrames : null,
         videoTotal: vq ? vq.totalVideoFrames : null,

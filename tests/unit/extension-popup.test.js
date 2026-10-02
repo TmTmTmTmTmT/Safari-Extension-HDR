@@ -67,6 +67,7 @@ async function setup(stored = {}, opts = {}) {
   const timers = [];
   const intervals = [];
   const intervalMs = [];
+  const blobs = [];
   const changed = [];
   const clock = { now: opts.now || Date.parse('2026-10-02T05:00:00Z') };
   const body = makeEl();
@@ -105,7 +106,11 @@ async function setup(stored = {}, opts = {}) {
     navigator: opts.clipboard ? { clipboard: opts.clipboard } : {},
     Date: FakeDate,
     URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
-    Blob: class {},
+    Blob: class {
+      constructor(parts) {
+        blobs.push(parts.join(''));
+      }
+    },
     setTimeout: (fn) => timers.push(fn) - 1,
     clearTimeout: (i) => {
       timers[i] = null;
@@ -113,6 +118,9 @@ async function setup(stored = {}, opts = {}) {
     setInterval: (fn, ms) => {
       intervalMs.push(ms);
       return intervals.push(fn) - 1;
+    },
+    clearInterval: (i) => {
+      intervals[i] = () => {};
     },
   });
   if (opts.noInterval) delete ctx.setInterval;
@@ -136,6 +144,7 @@ async function setup(stored = {}, opts = {}) {
     runTimers,
     tick,
     intervalMs,
+    blobs,
     clock,
     document,
     body,
@@ -304,7 +313,11 @@ test('mode가 itm이면 진단은 접힌 채, 안내 없음', async () => {
 test('[정상 모드로]: mode=itm 저장, 컨트롤 재활성, 안내 숨김', async () => {
   const { els, sets } = await setup({ 'sdrhdr.mode': 'baseline' });
   els['normal-mode'].fire('click');
-  assert.deepStrictEqual(sets, [{ 'sdrhdr.mode': 'itm' }]);
+  // 모드가 itm이 아니면 진단 영역이 자동으로 열려 진단 요청 키도 쓰인다(FIX_GUIDE T2). 그 외 저장은 mode뿐.
+  assert.deepStrictEqual(
+    sets.filter((o) => !('sdrhdr.diagRequest' in o)),
+    [{ 'sdrhdr.mode': 'itm' }],
+  );
   assert.strictEqual(els.mode.value, 'itm');
   assert.strictEqual(els.preset.disabled, false);
   assert.strictEqual(els.strength.disabled, false);
@@ -558,6 +571,8 @@ test('복사 실패·clipboard 없음: textarea 선택 + Command-C 안내', asyn
 
 test('textarea 포커스 중에는 진단 갱신 보류, 갱신 버튼으로 반영하고 scrollTop 복원', async () => {
   const { els, document, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
+  els['diag-section'].open = true;
+  els['diag-section'].fire('toggle');
   const before = els.diag.value;
   document.activeElement = els.diag;
   els.diag.scrollTop = 40;
@@ -740,8 +755,46 @@ test('단축키 안내 문구와 진단 없음 개정 문구', async () => {
   const html = read('popup/popup.html');
   assert.ok(html.includes('Option+H 누르는 동안 원본 · Option+Shift+H 켜기/끄기'));
   const { els } = await setup();
+  els['diag-section'].open = true;
+  els['diag-section'].fire('toggle');
   assert.strictEqual(
     els.diag.value,
     '아직 상태 정보가 없습니다. ① www.youtube.com 영상 페이지에서 재생 ② Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근 허용 ③ 새로고침. 이 창은 자동으로 갱신됩니다',
   );
+});
+
+const reqs = (sets) => sets.filter((o) => 'sdrhdr.diagRequest' in o);
+
+test('진단 영역이 닫혀 있으면 요청 0회, textarea 불변, 2초 타이머 없음 (FIX_GUIDE T2·T4)', async () => {
+  const { els, sets, intervalMs, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
+  assert.strictEqual(reqs(sets).length, 0);
+  assert.ok(!intervalMs.includes(2000));
+  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
+  assert.strictEqual(els.diag.value, '', '닫힌 동안 textarea를 건드리지 않는다');
+});
+
+test('진단 영역 열기: 즉시 1회 + 2초마다 1회, 닫으면 중단, 열면 최신 진단 반영', async () => {
+  const { els, sets, intervalMs, tick, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
+  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
+  els['diag-section'].open = true;
+  els['diag-section'].fire('toggle');
+  assert.strictEqual(reqs(sets).length, 1);
+  assert.ok(els.diag.value.includes('probing'));
+  assert.strictEqual(intervalMs.filter((ms) => ms === 2000).length, 1);
+  tick();
+  assert.ok(reqs(sets).length >= 2);
+  els['diag-section'].open = false;
+  els['diag-section'].fire('toggle');
+  const n = reqs(sets).length;
+  tick();
+  assert.strictEqual(reqs(sets).length, n, '닫으면 요청 중단');
+});
+
+test('Blob은 JSON 저장 클릭 시에만 만들고 최신 진단을 담는다 (FIX_GUIDE T4)', async () => {
+  const { els, blobs, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
+  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
+  assert.strictEqual(blobs.length, 0);
+  els.save.fire('click');
+  assert.strictEqual(blobs.length, 1);
+  assert.ok(blobs[0].includes('probing'));
 });
