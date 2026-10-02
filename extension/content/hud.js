@@ -290,7 +290,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 10,
+      schemaVersion: 11,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -383,7 +383,7 @@
   const PRESET_LABELS = {
     accurate: '정확',
     balanced: '균형',
-    vivid: '선명',
+    vivid: '강조',
     custom: '사용자 지정',
   };
 
@@ -404,15 +404,15 @@
     return [
       state + skip + '  경로 ' + text(i.path),
       label +
-        ' 강도 ' +
+        ' · 강도 ' +
         pct(i.strength) +
-        '%  선명 ' +
+        '%  선명도 ' +
         pct(i.sharpness) +
         '%  채도 ' +
         pct(i.saturation) +
         '%',
       '유효 피크 ×' + fixed(i.effectivePeak, 2),
-      'fps ' +
+      '렌더 fps ' +
         fixed(i.loopFps, 1) +
         '  JS p95 ' +
         fixed(i.jsP95, 1) +

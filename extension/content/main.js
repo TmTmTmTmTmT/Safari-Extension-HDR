@@ -131,10 +131,10 @@
     const sum = ns.hud.summarize(st.frameTimesMs, st.loopTimestamps);
     const loopTs = Array.isArray(st.loopTimestamps) ? st.loopTimestamps : [];
     const hz = ns.hud.estimateDisplayHz(loopTs);
-    const miss =
-      hz === null
-        ? null
-        : ns.hud.displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], hz) * 100;
+    // 측정 불가(null)를 0%로 바꾸지 않는다 (PLAN M7-2).
+    const missRate =
+      hz === null ? null : ns.hud.displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], hz);
+    const miss = missRate === null ? null : missRate * 100;
     return {
       state: lc.state,
       skipReason: lc.skip,
@@ -545,6 +545,8 @@
   }
 
   function writeDiagIfChanged() {
+    // 보이지 않는 탭은 다른 탭의 진단을 덮어쓰지 않는다 (PLAN M7-2, GUIDELINES 2.6-2).
+    if (document.visibilityState !== 'visible') return;
     pollMode();
     const diag = ns.hud.buildDiag(collectState());
     const key = JSON.stringify(Object.assign({}, diag, { createdAt: null }));
@@ -565,6 +567,17 @@
       document.addEventListener('fullscreenchange', pollMode);
       document.addEventListener('webkitfullscreenchange', pollMode);
       if (settings.enabled) scheduleAttach();
+      else dispatch('disable', true); // 꺼진 채 시작하면 idle이 아니라 skipped(disabled)로 기록 (PLAN M7-2)
+      // 탭이 다시 보이면 비교 키를 비우고 즉시 1회 기록한다.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        lastDiagKey = null;
+        try {
+          writeDiagIfChanged();
+        } catch (e) {
+          // 진단 실패는 무시한다.
+        }
+      });
       setInterval(() => {
         try {
           writeDiagIfChanged();
