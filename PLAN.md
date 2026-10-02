@@ -180,6 +180,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M5 | popup + HUD (상세: D-M5) | 기본값 갱신, 상세 슬라이더 6개("하이라이트 밝기" = P, 사용자 지정 프리셋), 진단 영역 정리, 페이지 HUD, 진단 v9 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 (상세: D-M6) | frameProbe 비용 절감(HDR 조기 판정·정상 상태 단일 경로), install.md, 측정 절차(soak·전체화면·60Hz·비60fps), 이월 항목 정리, 버전 1.0.0 | Sonnet 본 세션 + impl-worker(renderer ↔ docs 병렬) | → verify: 단위 테스트(프로브 순서), 사용자 Mac 2160p60 30분 soak 드롭 < 1%·메모리 증가 < 15%, 4K HDR 첫 attach 끊김 없음 |
 | M7 | UX 1단계 (상세: D-M7) | 진단 모드 잠금 안내, 유효 피크 공식 교정, 사용자 지정 곡선 백업·되돌리기, 기본값 복원, 켜기 스위치, 용어 정리, popup 레이아웃·다크 모드, 진단 영역 다듬기, HUD 라벨, 문서 정리, 진단 v11, 1.1.0 | Sonnet 본 세션(params·main·hud) → impl-worker(popup ↔ docs 병렬) | → verify: 단위·DOM·pytest 통과 + 사용자 Mac 체크리스트 M7 절 |
+| M8 | UX 2단계 (상세: D-M8) | 현재 탭 상태(popup 상태 줄), background 배지, HUD 수명 분리·한국어 상태, 상태 알림 칩, 단축키(원본 보기·켜기 토글), 툴바·앱 아이콘, 1.2.0 | 본 세션(params·renderer·overlay) → impl-worker 3개(content ↔ popup ↔ background·아이콘) | → verify: 단위·DOM·pytest + 사용자 Mac 체크리스트 M8 절 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
@@ -315,6 +316,76 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
 - 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
 - M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
+
+### D-M8. UX 2단계: 현재 탭 상태·배지·단축키·아이콘 (2026-10-02, Opus)
+
+목적: popup·툴바·페이지 어디서든 "지금 이 탭에서 변환 중인지, 아니면 왜 원본인지"를 바로 알게 하고, 원본 비교와 켜고 끄기를 popup 없이 하게 한다. 근거: `docs/ux-review.md` UX-02·09(2단계)·13·14·15·20·22·23·24·38·44·45. 사용자 결정(2026-10-02): 권한·background 추가, 단축키 추가, 아이콘 제작, 컨테이너 앱 한국어화는 하지 않음.
+
+**M8-0. 결정 (Opus)**
+- (a) **새 권한은 추가하지 않는다.** popup은 `tabs.query({active:true,currentWindow:true})`로 탭 id만 얻고 `tabs.sendMessage`로 content script에 묻는다. URL은 읽지 않는다. 응답이 없으면(content script 없음) "대상 페이지가 아니거나 사이트 접근이 허용되지 않음"으로 본다. Safari에서 권한 없이 `tabs.sendMessage`가 거부되면 그때만 `"activeTab"`을 추가한다(Sonnet 허용, STATUS에 기록).
+- (b) **background는 상태를 저장하지 않는 배지 전용**이다. 파일은 `extension/content/background.js`. Xcode 프로젝트가 `extension/popup`·`extension/content`·`manifest.json`만 폴더 참조로 번들하므로(project.xcproj 65~67행) 새 최상위 폴더를 만들지 않는다(재생성 불필요). manifest는 `"background": {"service_worker": "content/background.js"}`. Safari 27.2에서 로드되지 않으면 `{"scripts": ["content/background.js"], "persistent": false}`로 바꾼다(Sonnet 허용, STATUS 기록).
+- (c) **DRM 페이지에 텍스트 표시는 허용**한다. no-op 원칙(CLAUDE.md, GUIDELINES 1-1)은 영상 처리(GPU·캔버스·프레임 접근)를 하지 않는 것이며, HUD·상태 칩의 텍스트 DOM은 영상과 무관하다. DRM 판정·해제·재attach 로직은 바꾸지 않는다(2.4-2, 2.4-4). GUIDELINES 2.4-5 추가.
+- (d) UX-20은 **방안 B**(스키마 변경 없음): renderer `getStats().undecided`를 상태 문구에만 쓴다. lifecycle 상태표·진단 스키마 불변(schemaVersion 11 유지).
+- (e) 단축키는 **content script keydown**(manifest `commands` 미사용, YouTube 탭에서만 동작). `Option+H` 누르는 동안 **원본 보기**(현재 탭만, 캔버스만 숨기고 렌더 유지), `Option+Shift+H` **HDR 변환 켜기/끄기**(전역 `sdrhdr.enabled`). 판정은 `e.code === 'KeyH' && e.altKey`. 입력창·textarea·contenteditable 포커스 중이면 무시, `e.repeat` 무시. keyup·window blur·visibilitychange(hidden)에서 원본 보기 해제.
+- (f) 상태 알림 칩: 새 키 `sdrhdr.notify`(기본 true). 상태가 바뀔 때 플레이어 오른쪽 위에 2.5초 표시. HUD(`sdrhdr.hud`)와 별개.
+- (g) 아이콘: 기하 도형만(글자 없음). 둥근 사각형, 왼쪽 절반 회색(SDR)·오른쪽 절반 밝은 흰-노랑 그라데이션(EDR), 가운데 위로 휘는 곡선 1개. 꺼짐용 회색 변형. 저장소에 **생성 스크립트**(`scripts/make-icons.py`, 표준 라이브러리만: zlib PNG 직접 작성, 4배 슈퍼샘플링 안티앨리어싱)와 결과 PNG를 함께 커밋한다. 확장: `extension/popup/icons/icon-{16,19,32,38,48,64,96,128,256,512}.png`, 꺼짐 `icon-off-{16,19,32,38}.png`. 앱: `xcode/SDRHDR/SDRHDR/Assets.xcassets/AppIcon.appiconset`에 mac 슬롯 10개 PNG + Contents.json `filename`(asset catalog는 pbxproj가 아니므로 GUIDELINES 7-5 대상 아님). 컨테이너 앱 `Resources/Icon.png`도 같은 그림 256px로 교체(문구는 그대로).
+- (h) 버전 1.2.0.
+
+**M8-1. 공통 상태 모델 (본 세션, `params.js`)**
+- 순수 함수 `statusOf(st)`: 입력 `{enabled, mode, state, skip, path, undecided, errorName, drmNow, paused, bypass}`(모두 선택), 출력 `{level: 'ok'|'wait'|'skip'|'error'|'off'|'diag', text, hint, badge: {text, color}}`. 매핑(문구 그대로 사용):
+  - enabled false → off, '꺼짐', 'Option+Shift+H 또는 위 스위치로 켜기', 배지 없음
+  - mode ≠ itm → diag, '진단 모드: HDR 변환 안 함', '진단 영역에서 정상 모드로', 배지 'D' 회색
+  - bypass → ok, '원본 보기 중', 'Option+H를 떼면 복귀', 배지 없음
+  - active → ok, 'HDR 변환 중', '', 배지 없음(아이콘이 켜짐 상태)
+  - probing·undecided false → wait, '판정 중(원본 표시)', '', 배지 '…' 회색
+  - probing·undecided true → error, '입력 경로를 찾지 못해 원본 표시', '다른 영상으로 이동하거나 HDR 변환을 껐다 켜기', 배지 '!' 주황
+  - skipped/drm·drmNow true → skip, 'DRM 영상: 변환하지 않음', '', 배지 '–' 회색
+  - skipped/drm·drmNow false → skip, '이전 DRM 영상 때문에 이 탭에서는 변환 중지', '새로고침(⌘R)하면 다시 동작', 배지 '–' 회색
+  - hdrSource → skip, '이미 HDR 영상: 원본 표시', '', 배지 'HDR' 회색
+  - pip → skip, 'PiP 중: 원본 표시', '', 배지 '–' 회색
+  - blackFrame → error, '입력이 검게 읽혀 중단', '다른 영상으로 이동하거나 HDR 변환을 껐다 켜기', 배지 '!' 주황
+  - noGpu → error, '렌더 오류(' + errorName + ')', 'HDR 변환을 껐다 켜거나 새로고침, 반복되면 Safari 재시작', 배지 '!' 빨강
+  - disabled → off(위와 같음)
+  - idle → wait, '대상 영상을 찾는 중', 'YouTube 영상 페이지에서 재생', 배지 없음
+- 각 문구 뒤에 원래 id를 괄호로 붙이는 것은 HUD에서만(진단 대조용). popup·칩·배지는 붙이지 않는다.
+- 키 추가 `KEYS.notify`, `DEFAULTS.notify = true`, `SETTING_KEYS`·`normalizeSettings`·`RESETTABLE_KEYS`에 포함. 함수 `setEnabled(v)`(storage 쓰기, 단축키용).
+- 메시지 타입 상수 `MSG = {getState: 'sdrhdr:getState', state: 'sdrhdr:state'}`.
+
+**M8-2. renderer·overlay (본 세션)**
+- `getStats()`에 `undecided`(boolean) 추가. 진단 buildDiag는 이 필드를 쓰지 않는다(스키마 불변).
+- 원본 보기: renderer `setBypass(on)`. on이면 캔버스 `visibility:hidden`, `updateVisibility()`는 bypass 중 숨김을 유지, off면 `pathReady()` 기준 복원. 렌더 루프·GPU는 그대로(즉시 복귀).
+
+**M8-3. content (W-A, impl-worker, `main.js`·`hud.js`·`detect.js`(필요 시 칩 위치 상수만)·관련 테스트)**
+- `currentStatusInput()`: lc·settings·cur·renderer stats·`drmNow`(현재 video에 DRM 신호가 있는지 **읽기만**: `detect.isDrm`에 현재 mediaKeys/webkitKeys 전달, sawEncrypted는 false) → M8-1 입력 객체. URL·제목 없음.
+- 메시지: `runtime.onMessage`에서 `MSG.getState`를 받으면 `{status: statusOf(입력), input: 입력}`로 응답. 상태 텍스트가 바뀔 때마다(dispatch, 설정 변경, undecided 전환, bypass) `runtime.sendMessage({type: MSG.state, badge})`로 background에 알림(실패 무시). 탭이 다시 보일 때 1회 재전송.
+- HUD 수명 분리(UX-13): HUD를 attach 객체가 아닌 모듈 변수로. `settings.hud`가 켜져 있고 `detect.findMainVideo`가 container를 주면 cur가 없어도(DRM·오류·꺼짐) 유지, container가 바뀔 때만 재생성. 1줄 = `statusOf` text + ' (' + id + ')' + 경로(UX-38), 5줄 '영상 1920×1080'. mode≠itm이면 2·3줄 끝에 ' (미적용)', paused면 4줄 앞에 '일시정지: 정지 직전 값 · '(UX-15).
+- 상태 칩(UX-23): `hud.js`에 `createChip(container)` → `{show(text), destroy}`. HUD와 같은 삽입 방식(container 다음 형제, pointer-events:none, z-index 없음), 위치 right:8px top:8px, 2.5초 후 사라짐(이전 타이머 취소). `settings.notify`가 true이고 상태 text가 바뀔 때 표시. 첫 attach 직후 'HDR 변환 중'도 표시. 같은 text 연속은 표시하지 않음.
+- 단축키(UX-22): M8-0 (e). 원본 보기 시작·끝, 켜기 토글 때 칩 표시('원본 보기 중'·'HDR 변환 켜짐/꺼짐'; notify가 꺼져 있어도 단축키 피드백은 표시). DRM·skipped·cur 없음이면 원본 보기는 무시(토글은 동작).
+- 테스트: statusOf 입력 생성, getState 응답, HUD가 DRM·꺼짐에서도 유지, 칩 표시 조건, 단축키(입력창 무시·repeat 무시·blur 해제·토글 storage 쓰기), 메시지 전송 실패 무시.
+
+**M8-4. popup (W-B, impl-worker, `extension/popup/*`·popup 테스트)**
+- 헤더 아래 상태 줄(UX-02/24): `<div id="status" role="status">` 큰 글자 text + 작은 글자 hint, level별 색(ok 초록·wait 회색·skip 회색·error 주황/빨강·off 회색·diag 보라, 라이트·다크 변수). popup 열 때 `tabs.query`→`tabs.sendMessage(getState)`, 1초 간격 재요청(popup 열린 동안). 실패 시 '이 탭에서는 동작하지 않음' + hint '대상: www.youtube.com 영상 페이지(임베드·music 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근 허용 후 새로고침'.
+- M7의 진단 영역 출처 줄은 유지(진단 JSON 기준). 상태 줄은 현재 탭 기준임을 툴팁(title)으로 명시.
+- 체크박스 '상태 알림'(notify), HUD 체크박스 옆. 단축키 안내 한 줄: 'Option+H 누르는 동안 원본 · Option+Shift+H 켜기/끄기'.
+- 진단 없음 문구(UX-24 (1)) 개정.
+- 테스트: getState 성공·실패 문구, level 클래스, notify 저장, 재요청 타이머 정리.
+
+**M8-5. background·manifest·아이콘 (W-C, impl-worker, `extension/content/background.js`·`manifest.json`·`scripts/make-icons.py`·`extension/popup/icons/*`·`xcode/SDRHDR/SDRHDR/Assets.xcassets/AppIcon.appiconset/*`·`xcode/SDRHDR/SDRHDR/Resources/Icon.png`·manifest 테스트)**
+- background.js(classic, 상태 없음): `runtime.onMessage`에서 `MSG.state`(문자열 직접 비교, params 미로드)이고 `sender.tab`이 있으면 `action.setBadgeText({tabId, text})`, `setBadgeBackgroundColor({tabId, color})`. 전역 꺼짐은 `storage.onChanged`의 `sdrhdr.enabled`로 `action.setIcon({path: off/on})`(탭 무관), 시작 시 1회 읽어 반영. 모든 API 호출은 존재 확인·catch(미지원이면 조용히 무시).
+- manifest: `background`, `icons`(48·96·128·256·512), `action.default_icon`(16·19·32·38), `action.default_title: 'SDR HDR'`, version 1.2.0. permissions는 `storage` 그대로.
+- manifest 테스트: 금지 목록에서 `background`·`icons` 제거, 대신 경로 존재·크기(PNG 헤더의 폭·높이) 검사, permissions가 `['storage']`(또는 M8-0 (a) 예외 시 `activeTab` 추가)인지.
+- make-icons.py: 결정적 출력(같은 입력 → 같은 바이트), `python3 scripts/make-icons.py`로 모든 PNG 재생성. 단위 테스트(pytest, `sim/` 밖이면 `tests/unit`에서 node로 PNG 헤더만 검사).
+
+**M8-6. 규칙 개정 (Opus, 이 커밋에 포함)**: GUIDELINES 1-3(background는 `content/background.js` 하나, 상태 저장·네트워크 금지), 2.1-5(허용 메시지 2종과 `browser.*` 접근 파일 목록), 2.4-5(DRM 페이지 텍스트 표시 허용 범위).
+
+**M8-7. 작업 순서·검증**
+- 1단계(본 세션): M8-1, M8-2 + 단위 테스트.
+- 2단계(impl-worker 3개 병렬, 파일 비중첩): W-A M8-3, W-B M8-4, W-C M8-5.
+- 본 세션: install.md(단축키·상태 줄·배지·아이콘·[확인 필요] 갱신), 체크리스트 M8 절, STATUS.
+- 체크리스트 M8 절(사용자 Mac): (1) 툴바·Dock 아이콘 표시, 밝은·어두운 툴바 가독성 (2) popup 상태 줄: YouTube 재생 중 'HDR 변환 중', 다른 사이트 탭 '이 탭에서는 동작하지 않음', HDR 영상 '이미 HDR 영상' (3) 툴바 배지: HDR 영상 탭 'HDR', 진단 모드 'D', 일반 재생 탭 배지 없음 (4) HDR 변환을 끄면 툴바 아이콘이 회색 (5) Option+H 누르는 동안 원본, 떼면 즉시 복귀(다른 탭 영향 없음) (6) Option+Shift+H 켜기/끄기와 칩 표시 (7) 영상 바꿀 때 상태 칩 2.5초 표시, '상태 알림' 끄면 안 뜸 (8) HUD 켠 채 DRM 영상: HUD에 'DRM 영상' 문구 (9) 진단 JSON 1개 회신.
+- verify: (1) lint, npm test, test:dom, pytest sim (2) CI (3) 체크리스트 M8 절. 판정: (2)(3)(5)(6)이 예이면 M8 완료. 배지 색·아이콘 모양은 기록.
+
+**M8-8. 범위 밖**: 컨테이너 앱 문구·한국어화(사용자 결정), UX-16·31 설명 보강, UX-21·42·43 페이지 동작, UX-25 7일 만료 안내, UX-27~29 측정 조건·파일명, UX-46~48, UX-51(나머지)~54. manifest `commands`, 임베드·music.youtube.com 지원.
 
 ### D-M7. UX 1단계 (2026-10-02, Opus)
 
