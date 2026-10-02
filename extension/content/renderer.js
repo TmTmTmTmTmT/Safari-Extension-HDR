@@ -83,6 +83,7 @@
     let noneStreak = 0;
     let vfCreateFails = 0;
     let undecided = false; // 보류 상한 도달: 더 시도하지 않고 캔버스를 숨긴 채 둔다
+    let bypass = false; // 원본 보기: 캔버스만 숨기고 렌더는 유지한다 (PLAN D-M8 M8-2)
     let copyTex = null;
     let copyView = null;
     let copySize = null;
@@ -114,7 +115,12 @@
 
     // 결정 전 video 모드와 baseline에서는 캔버스를 숨겨 원본 video가 보이게 한다.
     function updateVisibility() {
-      if (canvas && canvas.style) canvas.style.visibility = pathReady() ? '' : 'hidden';
+      if (canvas && canvas.style) canvas.style.visibility = pathReady() && !bypass ? '' : 'hidden';
+    }
+
+    function setBypass(on) {
+      bypass = !!on;
+      updateVisibility();
     }
 
     // baseline은 렌더 없이 rAF 루프만 돈다 (FIX_GUIDE S1).
@@ -878,6 +884,8 @@
             ? globalThis.__sdrhdr.params.effectivePeak(shaderSettings)
             : null,
         path,
+        undecided,
+        bypass,
         frames,
         copyTimesMs: copyTimes.slice(),
         copySkipped,
@@ -895,7 +903,7 @@
       };
     }
 
-    return { start, stop, setMode, setParams, restartSource, destroy, getStats };
+    return { start, stop, setMode, setParams, setBypass, restartSource, destroy, getStats };
   }
 
   globalThis.__sdrhdr.renderer = { createRenderer };

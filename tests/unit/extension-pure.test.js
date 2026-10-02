@@ -88,6 +88,7 @@ test('normalizeSettings: 잘못된 값은 기본값', () => {
     saturation: 1.05,
     custom: { P: 2, k: 0.4, n: 2, g: 1.22, s: 1.03, hs: 1.03 },
     hud: false,
+    notify: true,
   };
   assert.deepStrictEqual(plain(normalizeSettings(undefined)), def);
   assert.deepStrictEqual(plain(normalizeSettings(null)), def);
@@ -1025,4 +1026,68 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
   assert.strictEqual(e.render.custom, null);
   assert.strictEqual(e.render.effectivePeak, null);
   assert.strictEqual(e.flags.hud, false);
+});
+
+test('statusOf: 상태별 level·문구·배지 (M8-1)', () => {
+  const st = (o) => plain(ns.params.statusOf({ enabled: true, mode: 'itm', ...o }));
+  assert.deepStrictEqual(Object.keys(st({})), ['level', 'text', 'hint', 'badge']);
+  assert.strictEqual(st({ enabled: false }).level, 'off');
+  assert.strictEqual(st({ enabled: false }).text, '꺼짐');
+  assert.strictEqual(st({ state: 'skipped', skip: 'disabled' }).level, 'off');
+  // 꺼짐이 진단 모드보다 먼저다.
+  assert.strictEqual(st({ enabled: false, mode: 'baseline' }).level, 'off');
+  const d = st({ mode: 'baseline', state: 'active' });
+  assert.strictEqual(d.level, 'diag');
+  assert.strictEqual(d.badge.text, 'D');
+  assert.ok(!d.text.includes('baseline'), '모드 이름은 일반 문구에 쓰지 않는다 (GUIDELINES 2.6-3)');
+  assert.strictEqual(st({ state: 'active', bypass: true }).text, '원본 보기 중');
+  assert.deepStrictEqual(st({ state: 'active' }), {
+    level: 'ok',
+    text: 'HDR 변환 중',
+    hint: '',
+    badge: { text: '' },
+  });
+  assert.strictEqual(st({ state: 'probing' }).text, '판정 중(원본 표시)');
+  assert.strictEqual(st({ state: 'probing' }).level, 'wait');
+  const u = st({ state: 'probing', undecided: true });
+  assert.strictEqual(u.level, 'error');
+  assert.strictEqual(u.badge.text, '!');
+  assert.strictEqual(
+    st({ state: 'skipped', skip: 'drm', drmNow: true }).text,
+    'DRM 영상: 변환하지 않음',
+  );
+  const old = st({ state: 'skipped', skip: 'drm', drmNow: false });
+  assert.ok(old.text.includes('이전 DRM 영상'));
+  assert.ok(old.hint.includes('새로고침'));
+  assert.strictEqual(st({ state: 'skipped', skip: 'hdrSource' }).badge.text, 'HDR');
+  assert.strictEqual(st({ state: 'skipped', skip: 'pip' }).text, 'PiP 중: 원본 표시');
+  assert.strictEqual(st({ state: 'skipped', skip: 'blackFrame' }).level, 'error');
+  const g = st({ state: 'skipped', skip: 'noGpu', errorName: 'OperationError' });
+  assert.strictEqual(g.text, '렌더 오류(OperationError)');
+  assert.strictEqual(g.badge.color, '#ff3b30');
+  assert.strictEqual(st({ state: 'skipped', skip: 'noGpu' }).text, '렌더 오류(?)');
+  assert.strictEqual(st({ state: 'idle' }).text, '대상 영상을 찾는 중');
+  assert.strictEqual(st({ state: 'skipped', skip: 'nope' }).level, 'wait');
+  // 잘못된 입력에도 죽지 않는다. URL·제목 같은 필드는 결과에 나오지 않는다.
+  assert.strictEqual(plain(ns.params.statusOf(null)).level, 'wait');
+  assert.ok(
+    !JSON.stringify(st({ state: 'active', url: '/watch?v=x', title: 'T' })).includes('watch'),
+  );
+});
+
+test('MSG·notify·setEnabled (M8-1)', () => {
+  const P = ns.params;
+  assert.deepStrictEqual(plain(P.MSG), { getState: 'sdrhdr:getState', state: 'sdrhdr:state' });
+  assert.strictEqual(P.normalizeSettings({}).notify, true);
+  assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: false }).notify, false);
+  assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: 'x' }).notify, true);
+  assert.ok(P.RESETTABLE_KEYS.includes(P.KEYS.notify));
+  // setEnabled는 storage에 enabled만 쓴다.
+  const sets = [];
+  const c2 = vm.createContext({ browser: { storage: { local: { set: (o) => sets.push(o) } } } });
+  for (const f of ['ns.js', 'params.js'])
+    vm.runInContext(fs.readFileSync(path.join(root, 'content', f), 'utf8'), c2, { filename: f });
+  c2.__sdrhdr.params.setEnabled(0);
+  c2.__sdrhdr.params.setEnabled(true);
+  assert.deepStrictEqual(plain(sets), [{ 'sdrhdr.enabled': false }, { 'sdrhdr.enabled': true }]);
 });

@@ -424,7 +424,9 @@ test('기본값 복원: 첫 클릭은 확인 대기, 3초 후 원상, 두 번째
   assert.deepStrictEqual(removes, [plain(params.RESETTABLE_KEYS)]);
   assert.deepStrictEqual(
     removes[0],
-    ['preset', 'custom', 'strength', 'sharpness', 'saturation', 'hud'].map((k) => 'sdrhdr.' + k),
+    ['preset', 'custom', 'strength', 'sharpness', 'saturation', 'hud', 'notify'].map(
+      (k) => 'sdrhdr.' + k,
+    ),
   );
   // 기본값으로 다시 그리되 enabled·mode는 유지
   assert.strictEqual(els.preset.value, 'custom');
