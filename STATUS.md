@@ -162,6 +162,12 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 테스트: `tonecurve.js`가 manifest에 없으므로 curveY 미러 테스트는 따로 로드. popup 테스트에 진단 요청 3건 포함
 - → verify: lint 통과, npm test 301/301, test:dom 18/18, pytest sim 157/157 / (1) 로컬 Mac
 
+## 조사: 메모리 증가·재부팅 후 설정 초기화 (2026-10-03, Sonnet, 코드 읽기만, 변경 없음)
+
+- **메모리**: 코드상 누수 경로는 찾지 못함. 확인한 것: VideoFrame은 모든 경로에서 `finally`로 close, probe 텍스처·버퍼는 destroy, `destroy()`는 `device.destroy`·`ctx.unconfigure`, 오버레이·main의 ResizeObserver·MutationObserver·리스너·타이머는 detach 때 해제, 통계 링 버퍼와 `errors`·`events`는 상한 있음, setInterval은 start() 1회만 등록, HUD·칩 DOM은 container 변경·끄기 때 제거. 프레임마다 bindGroup·encoder·외부 텍스처를 새로 만드는 것은 설계(GUIDELINES 2.5-1)라 GC 대기 중 WebContent 메모리가 오르내리는 것은 정상 범위일 수 있으나 Safari에서 실제 회수 속도는 **미검증**. M6 soak는 메모리 수치 없이 사용자 판단으로 통과했으므로 증가 여부 자체가 수치로 확인된 적 없음
+- **설정 초기화**: 코드에서 설정을 지우는 경로는 popup '기본값으로 되돌리기'의 `storage.local.remove` 하나뿐이고, 저장소는 `storage.local`(session·sync 미사용)이라 재부팅만으로 코드가 지우지는 않음. 가능한 원인은 Safari 쪽: ① 서명되지 않은 확장은 Safari 재시작마다 꺼져 다시 켜야 함(사용자 확인) → 이때 확장 저장소가 지워지는지 **미확인**, ② Xcode Run으로 다시 설치하면 저장소가 새로 시작되는지 **미확인**, ③ 사용자가 '초기화'라 느끼는 것이 실제로는 '켜기 꺼짐/사이트 접근 허용 초기화'일 가능성
+- Opus 확인 필요: 두 건 모두 원인 특정에 측정이 필요함. 제안(계획 문서 필요): (a) background.js `onStartup`/`onInstalled`에서 저장소 기존 키 유무만 `sdrhdr.boot`에 기록해 재부팅 후 저장소가 비었는지 코드 버그인지 가름, (b) 체크리스트에 메모리 측정 절차 재수행(5·30분 Activity Monitor 수치 기록)과 설정 초기화 재현 절차 추가
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
