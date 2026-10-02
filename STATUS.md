@@ -137,6 +137,15 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - 해석(Opus 확인 요청): ① 같은 편집 세션에서 프리셋을 바꿔 다시 편집하면 되돌리기 안내의 프리셋 이름이 처음 것으로 남음. ② W-B가 보관 파일에서 M3·M4a·M4 전제의 make-xcode 문구와 M4 '(당시 기본값)'을 한 줄씩 고침(줄 수 불변). ③ 상세 슬라이더 저장 throttler를 6개에서 1개로 합침. ④ PLAN M7-3 '진단 영역 고정 토글' 없이 포커스·선택 중 갱신 보류로 대체(계획대로)
 - 이월: [확인 필요] install.md 항목(메뉴 이름·두 타깃 서명 필요 여부·확장 데이터 삭제 등), 2·3단계 UX 항목(ux-review 참조)
 
+## M8 구현 (브랜치 claude/m8-plan, 2026-10-02, Sonnet)
+
+- 계획: PLAN D-M8(UX 2단계). 사용자 결정: 권한·background·단축키·아이콘 추가, 컨테이너 앱 한국어화 제외. install.md [확인 필요] 5건 해소(두 타깃 서명 필요, 서명되지 않은 확장 허용은 재시작마다, 사이트 접근 선택지, 메뉴 이름, 빌드 폴더)
+- 본 세션: `params.js`(`statusOf`·`MSG`·`setEnabled`·`notify` 키), `renderer.js`(`setBypass`·`getStats().undecided/bypass`), popup 버전 v1.2.0, install.md·체크리스트 M8 절
+- W-A: `main.js`(현재 탭 상태 입력, getState 응답, background 알림, HUD 수명 분리, 상태 칩, 단축키)·`hud.js`(한국어 상태 문구·`createChip`) + 테스트·DOM 테스트. W-B: popup 상태 줄·상태 알림 체크박스·단축키 안내. W-C: `background.js`, manifest 1.2.0(background·icons·default_icon), `scripts/make-icons.py`와 PNG(확장 14개·앱 10개·Icon.png), 테스트
+- → verify: lint 통과, npm test 282/282, test:dom 18/18, pytest sim 157/157 / (1) 로컬 Mac. **Safari의 tabs.sendMessage·background service_worker 로드·배지·아이콘·단축키·칩·화면은 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 상태 칩이 영상 전환마다 '판정 중(원본 표시)'을 잠깐 띄움 → wait 레벨을 칩에서 제외할지. ② Option+Shift+H 직후 'HDR 변환 켜짐' 칩 뒤에 storage 반영으로 상태 칩이 이어서 뜰 수 있음. ③ `drmNow`는 mediaKeys/webkitKeys만 읽음(encrypted 이벤트만 있으면 '이전 DRM 영상' 문구로 표시될 수 있음). ④ 앱 아이콘 슬롯만 여백 약 9.8%(macOS 규격), 확장·Icon.png는 꽉 채움. ⑤ popup 켜기 스위치가 `cur.enabled`를 갱신하지 않아 기본값 복원 때 옛 enabled가 되살아나던 M7 결함을 W-B가 한 줄 수정
+- 이월: manifest background 형식이 Safari에서 로드되지 않으면 `{"scripts":[…],"persistent":false}`로 교체(사용자 Mac 확인 후), `tabs.sendMessage`가 거부되면 `activeTab` 권한 추가
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

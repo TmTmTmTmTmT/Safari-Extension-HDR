@@ -9,11 +9,17 @@
         color-scheme: light dark;
         --warn: #b3261e;
         --dim: #6e6e73;
+        --ok: #1e7e34;
+        --err: #b45309;
+        --diag: #7b3fb5;
       }
       @media (prefers-color-scheme: dark) {
         :root {
           --warn: #ff8a80;
           --dim: #a1a1a6;
+          --ok: #6fcf8a;
+          --err: #ffb74d;
+          --diag: #c9a4f2;
         }
       }
       [hidden] {
@@ -79,6 +85,42 @@
         margin: 4px 0;
         color: var(--warn);
       }
+      #status {
+        margin: 6px 0;
+        padding: 4px 0 4px 8px;
+        border-left: 3px solid var(--dim);
+      }
+      #status-text {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      #status-hint {
+        color: var(--dim);
+      }
+      #status.status-ok {
+        border-left-color: var(--ok);
+      }
+      #status.status-ok #status-text {
+        color: var(--ok);
+      }
+      #status.status-error {
+        border-left-color: var(--err);
+      }
+      #status.status-error #status-text {
+        color: var(--err);
+      }
+      #status.status-diag {
+        border-left-color: var(--diag);
+      }
+      #status.status-diag #status-text {
+        color: var(--diag);
+      }
+      #status.status-wait #status-text,
+      #status.status-skip #status-text,
+      #status.status-off #status-text,
+      #status.status-none #status-text {
+        color: var(--dim);
+      }
       #peak-warn {
         min-height: 2.6em;
         margin: 2px 0 6px;
@@ -102,12 +144,16 @@
   <body>
     <header>
       <h1>SDR HDR</h1>
-      <span class="ver" id="version">v1.1.0</span>
+      <span class="ver" id="version">v1.2.0</span>
       <label class="switch"
         ><span id="enabled-state">켜짐</span>
         <input type="checkbox" id="enabled" switch checked aria-label="HDR 변환" />
       </label>
     </header>
+    <div id="status" class="status-wait" role="status" title="현재 탭 기준 상태">
+      <div id="status-text">확인 중…</div>
+      <div id="status-hint"></div>
+    </div>
     <div id="init-error" class="error" role="alert" hidden></div>
     <div id="save-status" class="error" role="status"></div>
     <div id="off-note" class="note" hidden>꺼짐: 값은 저장되며 모든 YouTube 탭에서 원본 표시</div>
@@ -197,6 +243,10 @@
         </label>
       </details>
       <label><input type="checkbox" id="hud" /> 페이지 HUD 표시</label>
+      <label><input type="checkbox" id="notify" checked /> 상태 알림</label>
+      <div id="shortcut-note" class="note">
+        Option+H 누르는 동안 원본 · Option+Shift+H 켜기/끄기
+      </div>
       <button id="reset" type="button">기본값으로 되돌리기</button>
     </div>
     <details id="diag-section">

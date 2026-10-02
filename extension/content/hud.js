@@ -393,16 +393,30 @@
   const text = (v) => (typeof v === 'string' && v !== '' ? v : '-');
 
   // 순수: 페이지 HUD 5줄. URL·제목 같은 개인정보 필드는 입력에 없다 (GUIDELINES 2.6).
+  // 1줄은 사용자 문구(statusOf 한 곳) 뒤에 원래 id를 붙여 진단 대조를 남긴다 (PLAN M8-3, UX-38).
   function hudLines(info) {
     const i = info && typeof info === 'object' ? info : {};
-    const state = text(i.state);
-    const skip =
-      typeof i.skipReason === 'string' && i.skipReason !== '' ? '(' + i.skipReason + ')' : '';
+    const params = globalThis.__sdrhdr.params;
+    const st = params.statusOf({
+      enabled: i.enabled,
+      mode: i.mode,
+      state: i.state,
+      skip: i.skipReason,
+      undecided: i.undecided,
+      errorName: i.errorName,
+      drmNow: i.drmNow,
+      bypass: i.bypass,
+    });
+    const id = text(
+      typeof i.skipReason === 'string' && i.skipReason !== '' ? i.skipReason : i.state,
+    );
+    // 진단 모드(itm 외)에서는 프리셋 값이 화면에 적용되지 않는다 (UX-15).
+    const unapplied = typeof i.mode === 'string' && i.mode !== 'itm' ? ' (미적용)' : '';
     const label = Object.prototype.hasOwnProperty.call(PRESET_LABELS, i.preset)
       ? PRESET_LABELS[i.preset]
       : '-';
     return [
-      state + skip + '  경로 ' + text(i.path),
+      st.text + ' (' + id + ')  경로 ' + text(i.path),
       label +
         ' · 강도 ' +
         pct(i.strength) +
@@ -410,16 +424,18 @@
         pct(i.sharpness) +
         '%  채도 ' +
         pct(i.saturation) +
-        '%',
-      '유효 피크 ×' + fixed(i.effectivePeak, 2),
-      '렌더 fps ' +
+        '%' +
+        unapplied,
+      '유효 피크 ×' + fixed(i.effectivePeak, 2) + unapplied,
+      (i.paused === true ? '일시정지: 정지 직전 값 · ' : '') +
+        '렌더 fps ' +
         fixed(i.loopFps, 1) +
         '  JS p95 ' +
         fixed(i.jsP95, 1) +
         'ms  누락 ' +
         fixed(i.missPct, 1) +
         '%',
-      'video ' + (isNum(i.videoW) ? i.videoW : '-') + 'x' + (isNum(i.videoH) ? i.videoH : '-'),
+      '영상 ' + (isNum(i.videoW) ? i.videoW : '-') + '×' + (isNum(i.videoH) ? i.videoH : '-'),
     ];
   }
 
@@ -458,6 +474,54 @@
     };
   }
 
+  const CHIP_DEFAULT_MS = 2500;
+  const CHIP_STYLE = [
+    'position:absolute',
+    'right:8px',
+    'top:8px',
+    'pointer-events:none',
+    'font:12px system-ui,sans-serif',
+    'color:#fff',
+    'background:rgba(0,0,0,0.55)',
+    'padding:4px 8px',
+    'border-radius:6px',
+    'display:none',
+  ].join(';');
+
+  // DOM: 상태 알림 칩 (PLAN M8-3, UX-23). HUD와 같이 container 바로 뒤 형제로 넣고 z-index는 지정하지 않는다.
+  // show는 이전 타이머를 취소하고 ms 뒤 숨긴다. 텍스트만 다루며 영상 프레임에는 접근하지 않는다 (GUIDELINES 2.4-5).
+  function createChip(container) {
+    const parent = container && container.parentNode;
+    if (!parent) return { show() {}, destroy() {} };
+    const el = container.ownerDocument.createElement('div');
+    el.style.cssText = CHIP_STYLE;
+    parent.insertBefore(el, container.nextSibling);
+    let timer = null;
+    const clear = () => {
+      if (timer !== null) globalThis.clearTimeout(timer);
+      timer = null;
+    };
+    return {
+      show(label, ms) {
+        clear();
+        el.textContent = String(label);
+        el.style.display = 'block';
+        timer = globalThis.setTimeout(
+          () => {
+            timer = null;
+            el.textContent = '';
+            el.style.display = 'none';
+          },
+          isNum(ms) && ms > 0 ? ms : CHIP_DEFAULT_MS,
+        );
+      },
+      destroy() {
+        clear();
+        if (el.parentNode) el.parentNode.removeChild(el);
+      },
+    };
+  }
+
   globalThis.__sdrhdr.hud = {
     summarize,
     sanitizePageUrl,
@@ -472,5 +536,6 @@
     buildDiag,
     hudLines,
     createHud,
+    createChip,
   };
 })();

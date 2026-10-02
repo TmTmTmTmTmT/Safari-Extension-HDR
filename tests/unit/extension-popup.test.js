@@ -50,7 +50,7 @@ function makeEl() {
   };
 }
 
-// opts: getFails, clipboard, setResult(o) -> 반환값, now(ms)
+// opts: getFails, clipboard, setResult(o) -> 반환값, now(ms), tabs({query, sendMessage}), noInterval
 async function setup(stored = {}, opts = {}) {
   // 없는 id는 처음 접근할 때 만든다(테스트와 popup이 같은 객체를 본다).
   const els = new Proxy(
@@ -66,6 +66,7 @@ async function setup(stored = {}, opts = {}) {
   const removes = [];
   const timers = [];
   const intervals = [];
+  const intervalMs = [];
   const changed = [];
   const clock = { now: opts.now || Date.parse('2026-10-02T05:00:00Z') };
   const body = makeEl();
@@ -92,6 +93,7 @@ async function setup(stored = {}, opts = {}) {
       onChanged: { addListener: (fn) => changed.push(fn) },
     },
   };
+  if (opts.tabs) browser.tabs = opts.tabs;
   const FakeDate = class extends Date {
     static now() {
       return clock.now;
@@ -108,8 +110,12 @@ async function setup(stored = {}, opts = {}) {
     clearTimeout: (i) => {
       timers[i] = null;
     },
-    setInterval: (fn) => intervals.push(fn) - 1,
+    setInterval: (fn, ms) => {
+      intervalMs.push(ms);
+      return intervals.push(fn) - 1;
+    },
   });
+  if (opts.noInterval) delete ctx.setInterval;
   for (const f of ['content/ns.js', 'content/params.js', 'popup/popup.js']) {
     vm.runInContext(read(f), ctx, { filename: f });
   }
@@ -129,6 +135,7 @@ async function setup(stored = {}, opts = {}) {
     timers,
     runTimers,
     tick,
+    intervalMs,
     clock,
     document,
     body,
@@ -142,6 +149,27 @@ const pad = (n) => String(n).padStart(2, '0');
 const hms = (ms) => {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+const flushN = async (n = 5) => {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+};
+const NONE_TEXT = '이 탭에서는 동작하지 않음';
+const NONE_HINT =
+  '대상: www.youtube.com 영상 페이지(임베드·music.youtube.com 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근을 허용한 뒤 새로고침하세요';
+const okStatus = { level: 'ok', text: 'HDR 변환 중', hint: '', badge: null };
+const tabsStub = (res, tabList = [{ id: 7 }]) => {
+  const calls = { query: [], send: [] };
+  return {
+    calls,
+    query: async (q) => {
+      calls.query.push(q);
+      return tabList;
+    },
+    sendMessage: async (id, msg) => {
+      calls.send.push([id, msg]);
+      return typeof res === 'function' ? res() : res;
+    },
+  };
 };
 const WARN_TAIL = '에서 하이라이트가 잘릴 수 있음(화면 밝기를 낮추거나 강도를 줄이세요)';
 const DETAIL_IDS = ['d-P', 'd-k', 'd-n', 'd-g', 'd-s', 'd-hs'];
@@ -306,6 +334,8 @@ test('popup.html 버전 문자열은 manifest.version과 같고, 정적 초기�
   const { params } = await setup();
   const d = params.DEFAULTS;
   assert.ok(/id="enabled"[^>]*\bchecked\b/.test(html));
+  assert.strictEqual(d.notify, true);
+  assert.ok(/id="notify"[^>]*\bchecked\b/.test(html));
   assert.ok(new RegExp(`<option value="${d.preset}" selected>`).test(html));
   const val = (id) => html.match(new RegExp(`id="${id}"[^>]*value="([^"]*)"`))[1];
   assert.strictEqual(Number(val('strength')), Math.round(d.strength * 100));
@@ -549,4 +579,169 @@ test('textarea 포커스 중에는 진단 갱신 보류, 갱신 버튼으로 반
   els.diag.selectionEnd = 0;
   emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'active', n: 2 } }));
   assert.ok(els.diag.value.includes('"n": 2'));
+});
+
+test('상태 줄: 성공 응답은 level 클래스·text·hint를 표시, 탭 id만 질의', async () => {
+  const st = { level: 'skip', text: '이미 HDR 영상: 원본 표시', hint: '힌트', badge: null };
+  const tabs = tabsStub({ status: st, input: {} });
+  const { els, params } = await setup({}, { tabs });
+  await flushN();
+  assert.deepStrictEqual(plain(tabs.calls.query), [{ active: true, currentWindow: true }]);
+  assert.deepStrictEqual(plain(tabs.calls.send), [[7, { type: params.MSG.getState }]]);
+  assert.strictEqual(els['status-text'].textContent, '이미 HDR 영상: 원본 표시');
+  assert.strictEqual(els['status-hint'].textContent, '힌트');
+  assert.strictEqual(els.status.cls.has('status-skip'), true);
+  assert.strictEqual(els.status.cls.has('status-none'), false);
+  assert.ok(/id="status"[^>]*role="status"/.test(read('popup/popup.html')));
+  assert.ok(/id="status"[^>]*title="현재 탭 기준 상태"/.test(read('popup/popup.html')));
+});
+
+test('상태 줄: level이 바뀌면 이전 클래스를 지운다', async () => {
+  let res = { status: okStatus };
+  const tabs = tabsStub(() => res);
+  const { els, tick } = await setup({}, { tabs });
+  await flushN();
+  assert.strictEqual(els.status.cls.has('status-ok'), true);
+  res = { status: { level: 'error', text: 'x', hint: 'y' } };
+  tick();
+  await flushN();
+  assert.strictEqual(els.status.cls.has('status-ok'), false);
+  assert.strictEqual(els.status.cls.has('status-error'), true);
+});
+
+test('상태 줄: 요청 거부·무응답·잘못된 응답은 동작하지 않음 + 권한 안내', async () => {
+  const cases = [
+    {
+      query: async () => [{ id: 1 }],
+      sendMessage: async () => {
+        throw new Error('Could not establish connection');
+      },
+    },
+    tabsStub(undefined),
+    tabsStub({ status: 'oops' }),
+    tabsStub({ status: { level: 'bogus', text: 'x' } }),
+  ];
+  for (const tabs of cases) {
+    const { els } = await setup({}, { tabs });
+    await flushN();
+    assert.strictEqual(els['status-text'].textContent, NONE_TEXT);
+    assert.strictEqual(els['status-hint'].textContent, NONE_HINT);
+    assert.strictEqual(els.status.cls.has('status-none'), true);
+    assert.strictEqual(els.status.cls.has('status-off'), false);
+  }
+});
+
+test('상태 줄: 탭 없음·id 없음·browser.tabs 없음에서도 죽지 않음', async () => {
+  for (const tabs of [
+    tabsStub({ status: okStatus }, []),
+    tabsStub({ status: okStatus }, [{}]),
+    null,
+  ]) {
+    const { els } = await setup({}, tabs ? { tabs } : {});
+    await flushN();
+    assert.strictEqual(els['status-text'].textContent, NONE_TEXT);
+    assert.strictEqual(els.status.cls.has('status-none'), true);
+  }
+});
+
+test('상태 줄: 늦게 도착한 이전 응답은 새 결과를 덮지 않음', async () => {
+  const resolvers = [];
+  const tabs = {
+    query: async () => [{ id: 3 }],
+    sendMessage: () => new Promise((r) => resolvers.push(r)),
+  };
+  const { els, tick } = await setup({}, { tabs });
+  await flushN();
+  tick();
+  await flushN();
+  assert.strictEqual(resolvers.length, 2);
+  resolvers[1]({ status: { level: 'ok', text: '새 결과', hint: '' } });
+  await flushN();
+  resolvers[0]({ status: { level: 'wait', text: '옛 결과', hint: '' } });
+  await flushN();
+  assert.strictEqual(els['status-text'].textContent, '새 결과');
+  assert.strictEqual(els.status.cls.has('status-ok'), true);
+});
+
+test('상태 줄: URL은 읽지 않고 DOM 어디에도 나오지 않음', async () => {
+  const tabs = tabsStub({ status: okStatus }, [
+    { id: 7, url: 'https://www.youtube.com/watch?v=SECRET', title: 'SECRET_TITLE' },
+  ]);
+  const { els } = await setup({}, { tabs });
+  await flushN();
+  for (const id of Object.keys(els)) {
+    assert.ok(!/SECRET|youtube\.com\/watch/.test(String(els[id].textContent)), id);
+  }
+  const src = read('popup/popup.js');
+  assert.ok(!/\.url\b|\.title\b/.test(src));
+});
+
+test('켜기 스위치 직후: 응답 전에 꺼짐·켜는 중을 즉시 표시, 다음 폴링에서 확정', async () => {
+  const tabs = tabsStub({ status: okStatus });
+  const { els, tick, params } = await setup({}, { tabs });
+  await flushN();
+  els.enabled.checked = false;
+  els.enabled.fire('change');
+  const off = params.statusOf({ enabled: false });
+  assert.strictEqual(els['status-text'].textContent, off.text);
+  assert.strictEqual(els['status-hint'].textContent, off.hint);
+  assert.strictEqual(els.status.cls.has('status-off'), true);
+  els.enabled.checked = true;
+  els.enabled.fire('change');
+  assert.strictEqual(els['status-text'].textContent, '켜는 중…');
+  assert.strictEqual(els.status.cls.has('status-wait'), true);
+  tick();
+  await flushN();
+  assert.strictEqual(els['status-text'].textContent, 'HDR 변환 중');
+  assert.strictEqual(els.status.cls.has('status-ok'), true);
+});
+
+test('켜기 스위치 직후: 진행 중이던 이전 응답이 즉시 표시를 덮지 않음', async () => {
+  const resolvers = [];
+  const tabs = {
+    query: async () => [{ id: 3 }],
+    sendMessage: () => new Promise((r) => resolvers.push(r)),
+  };
+  const { els } = await setup({}, { tabs });
+  await flushN();
+  els.enabled.checked = false;
+  els.enabled.fire('change');
+  resolvers[0]({ status: okStatus });
+  await flushN();
+  assert.strictEqual(els.status.cls.has('status-off'), true);
+});
+
+test('상태 폴링: 1초 간격으로 등록, setInterval이 없으면 건너뜀', async () => {
+  const tabs = tabsStub({ status: okStatus });
+  const { intervalMs } = await setup({}, { tabs });
+  assert.deepStrictEqual(intervalMs, [1000, 1000]);
+  const none = await setup({}, { tabs: tabsStub({ status: okStatus }), noInterval: true });
+  assert.deepStrictEqual(none.intervalMs, []);
+  assert.ok(none.els['status-text']);
+});
+
+test('상태 알림 체크박스: 초기값 cur.notify, 변경 시 boolean 저장, 복원 후 true', async () => {
+  const { els, sets, flush } = await setup({ 'sdrhdr.notify': false });
+  assert.strictEqual(els.notify.checked, false);
+  els.notify.checked = true;
+  els.notify.fire('change');
+  assert.deepStrictEqual(sets, [{ 'sdrhdr.notify': true }]);
+  els.notify.checked = false;
+  els.notify.fire('change');
+  assert.deepStrictEqual(sets[1], { 'sdrhdr.notify': false });
+  els.reset.fire('click');
+  els.reset.fire('click');
+  await flush();
+  assert.strictEqual(els.notify.checked, true);
+  assert.strictEqual((await setup()).els.notify.checked, true);
+});
+
+test('단축키 안내 문구와 진단 없음 개정 문구', async () => {
+  const html = read('popup/popup.html');
+  assert.ok(html.includes('Option+H 누르는 동안 원본 · Option+Shift+H 켜기/끄기'));
+  const { els } = await setup();
+  assert.strictEqual(
+    els.diag.value,
+    '아직 상태 정보가 없습니다. ① www.youtube.com 영상 페이지에서 재생 ② Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근 허용 ③ 새로고침. 이 창은 자동으로 갱신됩니다',
+  );
 });

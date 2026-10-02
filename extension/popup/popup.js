@@ -6,6 +6,7 @@
   const SAVE_MS = 100; // 슬라이더 드래그 중 저장 간격
   const CONFIRM_MS = 3000; // 기본값 복원 확인 대기
   const COPY_MS = 2000; // '복사됨' 표시 시간
+  const POLL_MS = 1000; // 현재 탭 상태 재요청 간격
   const STALE_S = 30; // 진단 출처 줄을 흐리게 하는 경과(초)
   // 프리셋 한글명(저장 id는 그대로). 백업 안내 문구에 쓴다.
   const PRESET_LABEL = { accurate: '정확', balanced: '균형', vivid: '강조' };
@@ -17,6 +18,14 @@
   let shownDiag = null; // textarea에 표시 중인 진단
   let pendingDiag = null; // 포커스·선택 때문에 보류한 새 진단 {diag}
   const throttlers = [];
+  let statusSeq = 0; // 늦게 도착한 이전 응답이 새 결과를 덮지 않게 하는 요청 번호
+  const STATUS_LEVELS = ['ok', 'wait', 'skip', 'error', 'off', 'diag', 'none'];
+  // 대상 페이지가 아니거나 content script가 없을 때(응답 없음)의 표시. 이 문구만 popup이 가진다.
+  const NONE_STATUS = {
+    level: 'none',
+    text: '이 탭에서는 동작하지 않음',
+    hint: '대상: www.youtube.com 영상 페이지(임베드·music.youtube.com 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근을 허용한 뒤 새로고침하세요',
+  };
 
   // 슬라이더(강도·선명도·채도). 표시값은 %이고 저장값은 params 범위의 숫자다.
   const SLIDERS = [
@@ -32,6 +41,7 @@
     ...LOCKABLE,
     'enabled',
     'hud',
+    'notify',
     'mode',
     'reset',
     'copy',
@@ -69,7 +79,7 @@
     $('diag-refresh').hidden = true;
     const text = diag
       ? JSON.stringify(diag, null, 2)
-      : '(진단 없음: youtube.com 탭을 연 뒤 다시 열기)';
+      : '아직 상태 정보가 없습니다. ① www.youtube.com 영상 페이지에서 재생 ② Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근 허용 ③ 새로고침. 이 창은 자동으로 갱신됩니다';
     const ta = $('diag');
     const top = ta.scrollTop;
     ta.value = text;
@@ -292,6 +302,41 @@
     document.body.classList.toggle('off', !on);
   }
 
+  // 상태 줄 표시. level별 클래스로 색을 바꾼다.
+  function showStatus(st) {
+    $('status-text').textContent = st.text;
+    $('status-hint').textContent = st.hint || '';
+    for (const l of STATUS_LEVELS) $('status').classList.toggle('status-' + l, l === st.level);
+  }
+  const validStatus = (s) =>
+    !!s && typeof s === 'object' && STATUS_LEVELS.includes(s.level) && typeof s.text === 'string';
+
+  // 현재 탭에 상태를 묻는다. 탭 id만 쓰고 URL은 읽지 않는다. 실패·무응답은 '동작하지 않음'으로 본다.
+  async function pollStatus() {
+    const seq = ++statusSeq;
+    let st = NONE_STATUS;
+    try {
+      const tabs = browser.tabs;
+      if (!tabs || typeof tabs.query !== 'function' || typeof tabs.sendMessage !== 'function')
+        throw new Error('no tabs api');
+      const list = await tabs.query({ active: true, currentWindow: true });
+      const id = list && list[0] ? list[0].id : undefined;
+      if (typeof id !== 'number') throw new Error('no tab');
+      const res = await tabs.sendMessage(id, { type: params.MSG.getState });
+      if (res && validStatus(res.status)) st = res.status;
+    } catch (e) {
+      st = NONE_STATUS;
+    }
+    if (seq === statusSeq) showStatus(st);
+  }
+
+  // 켜기 스위치 직후: 응답을 기다리지 않고 예상 상태를 보인다. 진행 중인 요청은 무효화하고 다음 폴링에서 확정한다.
+  function showSwitchStatus(on) {
+    statusSeq++;
+    if (on) showStatus({ level: 'wait', text: '켜는 중…', hint: '' });
+    else showStatus(params.statusOf({ enabled: false }));
+  }
+
   // init과 기본값 복원이 같은 표시 경로를 쓴다.
   function render(openDiag) {
     $('enabled').checked = cur.enabled;
@@ -299,6 +344,7 @@
     $('mode').value = cur.mode;
     $('preset').value = cur.preset;
     $('hud').checked = cur.hud;
+    $('notify').checked = cur.notify;
     for (const sl of SLIDERS) showSlider(sl, cur[sl.id]);
     showDetail();
     showPeak();
@@ -378,8 +424,10 @@
     showDiag(raw[K.diag]);
 
     $('enabled').addEventListener('change', () => {
+      cur.enabled = $('enabled').checked;
       showEnabled();
-      save({ [K.enabled]: $('enabled').checked });
+      save({ [K.enabled]: cur.enabled });
+      showSwitchStatus(cur.enabled);
     });
     $('mode').addEventListener('change', () => {
       cur.mode = $('mode').value;
@@ -401,6 +449,9 @@
     $('hud').addEventListener('change', () => {
       save({ [K.hud]: $('hud').checked });
     });
+    $('notify').addEventListener('change', () => {
+      save({ [K.notify]: $('notify').checked });
+    });
     for (const sl of SLIDERS) bindSlider(sl);
     $('backup-undo').addEventListener('click', undoBackup);
     $('reset').addEventListener('click', onResetClick);
@@ -412,7 +463,11 @@
       if (area === 'local' && K.diag in changes) onDiag(changes[K.diag].newValue);
     });
     // 경과 시간 갱신(타이머가 없는 환경에서는 건너뜀)
-    if (typeof setInterval === 'function') setInterval(showSource, 1000);
+    if (typeof setInterval === 'function') {
+      setInterval(showSource, 1000);
+      pollStatus();
+      setInterval(pollStatus, POLL_MS);
+    }
   }
 
   init().catch(showInitError);
