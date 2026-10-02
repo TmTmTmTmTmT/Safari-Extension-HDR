@@ -37,9 +37,9 @@ const full = {
 test('hudLines: 정상값', () => {
   assert.deepStrictEqual(hudLines(full), [
     'active  경로 vf',
-    '정확 강도 53%  선명 0%  채도 105%',
+    '정확 · 강도 53%  선명도 0%  채도 105%',
     '유효 피크 ×1.53',
-    'fps 60.0  JS p95 1.2ms  누락 0.0%',
+    '렌더 fps 60.0  JS p95 1.2ms  누락 0.0%',
     'video 1920x1080',
   ]);
 });
@@ -54,9 +54,9 @@ test('hudLines: skipReason 표시', () => {
 test('hudLines: 전부 null/undefined/비객체', () => {
   const want = [
     '-  경로 -',
-    '- 강도 -%  선명 -%  채도 -%',
+    '- · 강도 -%  선명도 -%  채도 -%',
     '유효 피크 ×-',
-    'fps -  JS p95 -ms  누락 -%',
+    '렌더 fps -  JS p95 -ms  누락 -%',
     'video -x-',
   ];
   assert.deepStrictEqual(hudLines({}), want);
@@ -83,19 +83,19 @@ test('hudLines: NaN·문자열·Infinity는 -', () => {
   };
   assert.deepStrictEqual(hudLines(bad), [
     '-  경로 -',
-    '정확 강도 -%  선명 -%  채도 -%',
+    '정확 · 강도 -%  선명도 -%  채도 -%',
     '유효 피크 ×-',
-    'fps -  JS p95 -ms  누락 -%',
+    '렌더 fps -  JS p95 -ms  누락 -%',
     'video -x-',
   ]);
 });
 
 test('hudLines: 프리셋 라벨 4종과 그 외', () => {
   const label = (preset) => hudLines({ preset })[1].split(' ')[0];
-  assert.strictEqual(hudLines({ preset: 'accurate' })[1].startsWith('정확 '), true);
-  assert.strictEqual(hudLines({ preset: 'balanced' })[1].startsWith('균형 '), true);
-  assert.strictEqual(hudLines({ preset: 'vivid' })[1].startsWith('선명 강도'), true);
-  assert.strictEqual(hudLines({ preset: 'custom' })[1].startsWith('사용자 지정 강도'), true);
+  assert.strictEqual(hudLines({ preset: 'accurate' })[1].startsWith('정확 · '), true);
+  assert.strictEqual(hudLines({ preset: 'balanced' })[1].startsWith('균형 · '), true);
+  assert.strictEqual(hudLines({ preset: 'vivid' })[1].startsWith('강조 · 강도'), true);
+  assert.strictEqual(hudLines({ preset: 'custom' })[1].startsWith('사용자 지정 · 강도'), true);
   assert.strictEqual(label('toString'), '-');
   assert.strictEqual(label('nope'), '-');
 });
@@ -109,11 +109,11 @@ test('hudLines: 반올림', () => {
     loopFps: 29.95,
     jsP95: 0.05,
   });
-  assert.match(l[1], /강도 50%  선명 51%  채도 100%/);
+  assert.match(l[1], /강도 50%  선명도 51%  채도 100%/);
   assert.strictEqual(l[2], '유효 피크 ×' + (1.005).toFixed(2));
   assert.strictEqual(
     l[3],
-    'fps ' + (29.95).toFixed(1) + '  JS p95 ' + (0.05).toFixed(1) + 'ms  누락 -%',
+    '렌더 fps ' + (29.95).toFixed(1) + '  JS p95 ' + (0.05).toFixed(1) + 'ms  누락 -%',
   );
   assert.strictEqual(hudLines(full).length, 5);
 });

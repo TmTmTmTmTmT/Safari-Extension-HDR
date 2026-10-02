@@ -128,6 +128,15 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 
 - M6 사용자 회신(2026-10-01, 수치 JSON 없음, 사용자 보고): 재빌드·실행 후 30분 soak "문제없음", 4K HDR 첫 attach "문제없음, `frameProbe.hdrEarly` true 확인", 전체화면·60Hz·비60fps "문제없음". 드롭률·메모리 수치와 진단 JSON은 제출되지 않아 PLAN D-M6 기준(드롭 < 1%, 메모리 증가 < 15%)의 수치 검증은 [미확인]이며 사용자 판단으로 통과로 본다. M6 판정은 Opus가 게이트 판정 기록에 한다
 
+## M7 구현 (브랜치 claude/m7-ux, 2026-10-02, Sonnet)
+
+- 계획: PLAN D-M7(UX 1단계), 근거 `docs/ux-review.md`. 사용자 결정: 프리셋 `vivid` 표시명 **'강조'**(저장 id 불변)
+- 본 세션: `params.js`(`curveY`·새 `effectivePeak` = 1 + t(f(g) − 1), `HEADROOM_STEPS`·`peakAdvice`·`RESETTABLE_KEYS`·`KEYS.customPrev`), `main.js`(꺼진 채 시작 → skipped(disabled), 보이지 않는 탭은 진단 미기록 + visibilitychange 즉시 1회, HUD 누락률 null 보존), `hud.js`(라벨 '렌더 fps'·'선명도'·'강조', 2줄 구분자, 진단 schemaVersion 11), 스키마 설명·parse-result 주의 문구, manifest 1.1.0, 체크리스트 M7 절. 테스트 추가(curveY 미러 일치, 기본값 ×1.90, M5 회신 설정 ×2.25, main 2건)
+- W-A(impl-worker): popup 전면 개편(M7-3 전체) + 테스트 24건. W-B(impl-worker): install.md(설치 순서·끄기·제거·회복 방법), 체크리스트 구조 개편(완료 절은 `docs/archive/manual-checklist-m1-m6.md`로 이동), make-xcode.sh 안내 1줄
+- → verify: lint 통과, npm test 226/226, test:dom 15/15, pytest sim 157/157, 과거 results parse-result 통과 / (1) 로컬 Mac. **popup 화면·다크 모드·스위치·되돌리기·기본값 복원·복사·HUD 표시는 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 같은 편집 세션에서 프리셋을 바꿔 다시 편집하면 되돌리기 안내의 프리셋 이름이 처음 것으로 남음. ② W-B가 보관 파일에서 M3·M4a·M4 전제의 make-xcode 문구와 M4 '(당시 기본값)'을 한 줄씩 고침(줄 수 불변). ③ 상세 슬라이더 저장 throttler를 6개에서 1개로 합침. ④ PLAN M7-3 '진단 영역 고정 토글' 없이 포커스·선택 중 갱신 보류로 대체(계획대로)
+- 이월: [확인 필요] install.md 항목(메뉴 이름·두 타깃 서명 필요 여부·확장 데이터 삭제 등), 2·3단계 UX 항목(ux-review 참조)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

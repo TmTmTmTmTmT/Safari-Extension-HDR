@@ -118,7 +118,7 @@
         },
         "effectivePeak": {
           "type": ["number", "null"],
-          "description": "schemaVersion 9 이상. 유효 피크 = 1 + t (P g - 1) (PLAN D-M5 M5-1)."
+          "description": "schemaVersion 9 이상. 유효 피크. v11부터 1 + t (f(g) - 1)로 셰이더와 같은 곡선 f를 쓴다(PLAN D-M7 M7-1). v10 이하의 1 + t (P g - 1)과 g≠1에서 값이 달라 직접 비교하지 않는다."
         },
         "sharpness": {
           "type": ["number", "null"],

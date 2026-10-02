@@ -31,10 +31,13 @@ function makeVideo(src) {
   return v;
 }
 
-async function setup(mode = 'itm') {
+async function setup(mode = 'itm', enabled = true) {
   const calls = [];
   const intervals = [];
-  const doc = Object.assign(emitter(), { fullscreenElement: null });
+  const doc = Object.assign(emitter(), {
+    fullscreenElement: null,
+    visibilityState: 'visible',
+  });
   const dom = { video: makeVideo('blob:a'), container: { id: 'c' }, player: { id: 'p' } };
   doc.querySelector = (sel) => {
     if (!dom.player) return null;
@@ -70,7 +73,7 @@ async function setup(mode = 'itm') {
   }
   const ns = ctx.__sdrhdr;
   ns.params.readSettings = async () => ({
-    enabled: true,
+    enabled,
     mode,
     preset: 'balanced',
     strength: 0.5,
@@ -380,4 +383,35 @@ test('HUD: 설정이 켜져 있으면 attach 시 만들고 1초 주기로 갱신
   t.dom.video.fire('encrypted'); // detach
   assert.strictEqual(t.huds[1].destroyed, 1);
   t.intervals.forEach((fn) => fn()); // detach 후 갱신 시도는 예외 없이 무시
+});
+
+test('꺼진 채 시작하면 lifecycle은 idle이 아니라 skipped(disabled) (M7-2)', async () => {
+  const t = await setup('itm', false);
+  assert.strictEqual(t.renderers.length, 0);
+  const d = await diagOf(t);
+  assert.strictEqual(d.lifecycle.state, 'skipped');
+  assert.strictEqual(d.lifecycle.skipReason, 'disabled');
+  // 켜면 idle로 돌아와 attach한다.
+  t.settings({
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+  });
+  assert.strictEqual((await diagOf(t)).lifecycle.state === 'skipped', false);
+});
+
+test('보이지 않는 탭은 진단을 쓰지 않고, 다시 보이면 즉시 1회 기록한다 (M7-2)', async () => {
+  const t = await setup();
+  t.doc.visibilityState = 'hidden';
+  t.intervals.forEach((fn) => fn());
+  await Promise.resolve();
+  assert.strictEqual(t.diag, null);
+  t.doc.visibilityState = 'visible';
+  t.doc.fire('visibilitychange');
+  await Promise.resolve();
+  assert.notStrictEqual(t.diag, null);
+  assert.strictEqual(t.diag.lifecycle.state, 'probing');
 });

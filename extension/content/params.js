@@ -30,6 +30,7 @@
     mode: 'sdrhdr.mode',
     preset: 'sdrhdr.preset',
     custom: 'sdrhdr.custom',
+    customPrev: 'sdrhdr.customPrev', // 프리셋에서 상세 편집을 시작할 때 덮어쓴 사용자 지정 곡선 백업 (PLAN M7-3)
     hud: 'sdrhdr.hud',
     strength: 'sdrhdr.strength',
     sharpness: 'sdrhdr.sharpness',
@@ -87,11 +88,33 @@
     return normalizeCustom(s.custom);
   }
 
-  // 순수: 유효 피크 = 1 + t (P g - 1) (PLAN M5-1). 밝기 최대 헤드룸(약 2)을 넘으면 하이라이트가 잘릴 수 있다.
+  // 순수: 곡선 f(y). WGSL `curve`와 같은 식이며 y>1(게인 g>1 뒤)에서도 같은 다항식을 쓴다 (PLAN M7-1, GUIDELINES 3-1).
+  function curveY(y, c) {
+    if (y <= c.k) return y;
+    const pp = (c.P - c.k) / (1 - c.k);
+    const u = (y - c.k) / (1 - c.k);
+    return c.k + (1 - c.k) * (u + (pp - 1) * Math.pow(u, c.n));
+  }
+
+  // 순수: 유효 피크 = 1 + t (f(g) - 1). 셰이더가 g를 곡선 앞에서 곱하므로 흰색(1.0)의 출력은 f(g)다 (PLAN M7-1).
+  // g=1이면 f(1) = P라 기존 1 + t (P - 1)과 같다. 화면 밝기 헤드룸을 넘으면 하이라이트가 잘릴 수 있다.
   function effectivePeak(settings) {
     const c = curveOf(settings);
     const t = normalizeRange(STRENGTH, (settings || {}).strength);
-    return 1 + t * (c.P * c.g - 1);
+    return 1 + t * (curveY(c.g, c) - 1);
+  }
+
+  // 고정 헤드룸 표 (PLAN A18 실측: 화면 밝기 낮음 4 / 중간 3 / 최대 2). JS에서 헤드룸은 조회할 수 없다 (A17).
+  const HEADROOM_STEPS = [
+    { label: '최대', h: 2 },
+    { label: '중간', h: 3 },
+    { label: '낮음', h: 4 },
+  ];
+
+  // 순수: 유효 피크가 어느 화면 밝기 단계에서 잘리는지. clipAt은 잘리는 단계 라벨(밝은 쪽부터), ok는 모든 단계에서 여유.
+  function peakAdvice(peak) {
+    const clipAt = HEADROOM_STEPS.filter((st) => peak > st.h).map((st) => st.label);
+    return { clipAt, ok: clipAt.length === 0 };
   }
 
   // 순수: storage 원본 객체(저장 키 기준) -> 유효한 설정. 잘못된 값은 기본값.
@@ -143,6 +166,16 @@
     KEYS.hud,
   ];
 
+  // 기본값 복원 대상 (PLAN M7-0 (d)). enabled·mode·diag·customPrev는 건드리지 않는다. 값은 DEFAULTS에서 읽는다.
+  const RESETTABLE_KEYS = [
+    KEYS.preset,
+    KEYS.custom,
+    KEYS.strength,
+    KEYS.sharpness,
+    KEYS.saturation,
+    KEYS.hud,
+  ];
+
   // 아래 함수는 호출 시점에만 browser.storage에 접근한다.
   async function readSettings() {
     const raw = await browser.storage.local.get(SETTING_KEYS);
@@ -179,12 +212,16 @@
     SHARPNESS,
     SATURATION,
     DETAIL_STEPS,
+    HEADROOM_STEPS,
+    RESETTABLE_KEYS,
     UNIFORM_ORDER,
     UNIFORM_FLOATS,
     normalizeRange,
     normalizeCustom,
     curveOf,
+    curveY,
     effectivePeak,
+    peakAdvice,
     normalizeStrength,
     normalizeSettings,
     toUniformArray,

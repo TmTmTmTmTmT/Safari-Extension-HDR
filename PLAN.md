@@ -179,6 +179,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M4 | 알고리즘·프리셋 확정 (상세: D-M4) | 셰이더 최종(파라미터 유니폼화), JS 미러, 프리셋 수치, 기본 강도, popup 프리셋 선택·선명도 슬라이더·채도 슬라이더(M5에서 앞당김) | Opus가 곡선·프리셋 결정(GUIDELINES 개정) → Sonnet 구현 | → verify: S1~S6 기준 통과, JS 미러 vs numpy 오차 < 1e-4, 사용자 Mac 컬러바/램프 확인 |
 | M5 | popup + HUD (상세: D-M5) | 기본값 갱신, 상세 슬라이더 6개("하이라이트 밝기" = P, 사용자 지정 프리셋), 진단 영역 정리, 페이지 HUD, 진단 v9 | impl-worker(popup ↔ hud 병렬) | → verify: params 직렬화 테스트, 사용자 Mac에서 슬라이더 반영 < 1초, export JSON 스키마 검증 통과 |
 | M6 | 성능·안정화·문서 (상세: D-M6) | frameProbe 비용 절감(HDR 조기 판정·정상 상태 단일 경로), install.md, 측정 절차(soak·전체화면·60Hz·비60fps), 이월 항목 정리, 버전 1.0.0 | Sonnet 본 세션 + impl-worker(renderer ↔ docs 병렬) | → verify: 단위 테스트(프로브 순서), 사용자 Mac 2160p60 30분 soak 드롭 < 1%·메모리 증가 < 15%, 4K HDR 첫 attach 끊김 없음 |
+| M7 | UX 1단계 (상세: D-M7) | 진단 모드 잠금 안내, 유효 피크 공식 교정, 사용자 지정 곡선 백업·되돌리기, 기본값 복원, 켜기 스위치, 용어 정리, popup 레이아웃·다크 모드, 진단 영역 다듬기, HUD 라벨, 문서 정리, 진단 v11, 1.1.0 | Sonnet 본 세션(params·main·hud) → impl-worker(popup ↔ docs 병렬) | → verify: 단위·DOM·pytest 통과 + 사용자 Mac 체크리스트 M7 절 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
@@ -314,6 +315,61 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
 - 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
 - M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
+
+### D-M7. UX 1단계 (2026-10-02, Opus)
+
+목적: 사용자가 기능 상태를 오해하거나, 수치를 잘못 읽거나, 실수를 되돌리지 못하는 지점을 없앤다. 권한·background·메시징은 추가하지 않는다(GUIDELINES 1-3, 2.1-5 유지). 근거와 항목별 상세는 `docs/ux-review.md`(UX-xx 번호)다. 이 절이 그 문서보다 우선한다. 2·3단계(UX-02 상태 줄, HUD 수명, 탭 메시징, 배지, 단축키, 컨테이너 앱 등)는 범위 밖이며 사용자 결정 후 별도 D-절로 계획한다.
+
+**M7-0. 결정 (Opus, ux-review 4장 질문 중 1단계에 걸린 것)**
+- (a) UX-01: 모드가 itm이 아닐 때 진단 영역을 자동으로 펼치고, 일반 영역에 **모드 이름 없이** 안내 한 줄을 두는 것은 GUIDELINES 2.6-3 위반이 아니다(모드 select는 여전히 진단 영역 안, 기본 접힘은 mode=itm일 때 유지). GUIDELINES 2.6-3에 이 해석을 추가한다.
+- (b) UX-03: 유효 피크 공식을 셰이더와 같게 바꾼다. 의미가 바뀌므로 진단 schemaVersion 11.
+- (c) UX-04: 편집 흐름(프리셋 값 복사 후 편집, M5-1)은 유지하고 백업 키 + 되돌리기로 보호한다. 사용자 지정 슬롯 추가는 하지 않는다(M5-7 유지).
+- (d) UX-06: 복원 대상은 preset·custom·strength·sharpness·saturation·hud. enabled·mode·diag·customPrev는 건드리지 않는다. 버튼은 일반 영역 끝.
+- (e) UX-17: 프리셋 `vivid`의 **표시명 변경은 사용자 답을 기다린다**(ux-review 질문 5). 1단계에서는 HUD의 선명도 라벨만 '선명도'로 고친다. 사용자가 이름을 주면 popup option·`hud.js` PRESET_LABELS·문서만 바꾼다(저장 id `vivid` 불변).
+- (f) UX-10: 재시도 버튼·키는 만들지 않는다. 문서와 문구로만 회복 방법을 안내한다.
+- (g) UX-26: popup 버전은 정적 문자열로 두고 manifest 버전과 같은지 단위 테스트로 묶는다(`runtime.getManifest`는 2.1-5상 쓰지 않음). 사용자에게 보이는 변경을 담은 PR마다 manifest minor 또는 patch를 올린다(GUIDELINES 7-7 추가). M7은 1.1.0.
+- (h) UX-50: 완료된 절(0a·0b·M2~M6)은 `docs/archive/manual-checklist-m1-m6.md`로 옮기고 원래 자리에는 링크만 남긴다. PLAN·STATUS·FIX_GUIDE의 기존 절 참조는 보관 파일에서 같은 제목으로 찾을 수 있으면 된다(참조 문구는 고치지 않는다).
+
+**M7-1. params.js (본 세션)**
+- `effectivePeak(settings)` = `1 + t·(curveY(g) − 1)`. `curveY(y)`: y ≤ k이면 y, 아니면 `k + (1−k)(u + (P'−1)uⁿ)`, u = (y−k)/(1−k), P' = (P−k)/(1−k), **y > 1에서도 같은 다항식**(WGSL `curve`와 동일, clamp 없음). 기준: 기본값(custom {P2.0,k0.40,n2,g1.22}, t0.43) → 약 1.898. 단위 테스트: (1) g=1이면 기존 공식과 같은 값, (2) 위 기본값 1.898±1e-3, (3) {P2.6,k0.4,n2,g1.11,t0.53} → 약 2.246, (4) `tonecurve.js`(테스트 전용 미러)의 `curveF`와 y∈[0,1.5] 오차 < 1e-6(GUIDELINES 3-1).
+- 키 추가: `KEYS.customPrev = 'sdrhdr.customPrev'`(UX-04). 정규화는 `normalizeCustom` 재사용.
+- `RESETTABLE_KEYS`(export): M7-0 (d) 목록. 값은 `DEFAULTS`에서만 읽는다(GUIDELINES 3-5).
+- `HEADROOM_STEPS`(export, 고정 표): `[{label:'화면 밝기 최대', h:2}, {label:'중간', h:3}, {label:'낮음', h:4}]`. A18 실측값(밝기 낮음 4 / 중간 3 / 최대 2)과 같다. 순수 함수 `peakAdvice(peak)` → `{clipAt: [label...], ok: boolean}`. 문구는 popup이 만든다.
+
+**M7-2. main.js·hud.js (본 세션)**
+- UX-41: `start()`에서 `settings.enabled === false`면 기존 `disable` 이벤트를 dispatch해 lifecycle을 `skipped(disabled)`로 맞춘다. 전이는 `detect.nextLifecycle`만 사용.
+- UX-09(1단계분): `writeDiagIfChanged()`는 `document.visibilityState !== 'visible'`이면 쓰지 않는다. `visibilitychange`로 다시 보이면 비교 키를 비우고 즉시 1회 기록한다. 탭별 키·메시징은 하지 않는다(2.6-2 유지).
+- UX-39: HUD 4줄 'fps' → '렌더 fps'. 누락률 계산 결과가 null이면 0으로 바꾸지 말고 null을 넘겨 '-'로 표시.
+- UX-17(최소): HUD 2줄 '선명' → '선명도'. 프리셋 라벨과 값 사이에 ' · ' 구분자.
+- 진단 schemaVersion 11: `render.effectivePeak`가 새 공식임을 스키마 description과 parse-result 출력 머리말에 적는다("v10 이하와 직접 비교 금지"). 필드 추가 없음.
+
+**M7-3. popup (W-A, impl-worker, `extension/popup/*`, `tests/unit/extension-popup.test.js`)**
+- 레이아웃(UX-18, UX-33, UX-07, UX-26): 헤더 행 = `SDR HDR` + 버전 `v1.1.0`(정적) + 오른쪽 스위치(체크박스 `#enabled` 유지, 라벨 'HDR 변환', 옆에 '켜짐/꺼짐'). 꺼지면 `body.off`로 조정 영역을 흐리게(disabled로 잠그지 않음) + '꺼짐: 값은 저장되며 모든 YouTube 탭에서 원본 표시' 한 줄. 슬라이더 label은 2행 그리드(1행 이름·값, 2행 전체 폭 트랙), 값은 tabular-nums. `<meta name="color-scheme" content="light dark">`, `body{background:Canvas;color:CanvasText}`, 경고색은 `--warn` 변수로 라이트·다크 각각.
+- 진단 모드 안내(UX-01, UX-37): mode ≠ itm이면 진단 `<details>` 자동 펼침, 그 안 맨 위에 '진단 모드 사용 중: HDR 효과 꺼짐' + [정상 모드로] 버튼(mode=itm 저장 후 컨트롤 재활성). 일반 영역 헤더 아래에 '진단 모드라 화질 조정이 잠겨 있습니다. 아래 진단에서 되돌리세요'(모드 이름 없음), 비활성 컨트롤에 `aria-describedby`. `label:has(:disabled){opacity:.45}`. 모드 option 표시는 'itm (정상)', 'identity (변환 없이 출력)', 'stripes (밝기 단계 줄무늬)', 'baseline (렌더 없음, 비교 기준)', value 불변.
+- 유효 피크(UX-08, UX-12, UX-03 연동): HDR 강도 바로 아래로 이동. `#peak-value` '유효 피크 ×1.90 (SDR 흰색 대비)' + `#peak-warn`(`role="status"`, min-height 고정). `peakAdvice` 결과로 '화면 밝기 최대에서 하이라이트가 잘릴 수 있음(화면 밝기를 낮추거나 강도를 줄이세요)' 또는 '모든 화면 밝기에서 여유'. 경고 앞에 '!' 기호와 `--warn` 색. 기존 `PEAK_WARN` 상수는 `HEADROOM_STEPS`로 대체.
+- 용어(UX-12, UX-05): 상세 g 라벨 '전체 밝기(g)', 나머지 상세 라벨에도 키를 괄호로(하이라이트 밝기(P), 확장 시작(k), 곡선 지수(n), 곡선 채도(s), 하이라이트 채도(hs)). 시스템 밝기는 항상 '화면 밝기'. vivid option 문구 '선명 (화면 밝기 중간 이하 권장)'(이름 변경은 M7-0 (e)).
+- 단위(UX-30): P·g '×2.0'·'×1.22', s·hs '103%', k·n 소수. 값이 현재 프리셋 기준값과 다르면 흐린 '(기본 …)' 표시. 기준값: 이름 있는 프리셋은 그 프리셋, custom은 `DEFAULT_CUSTOM`. 주 슬라이더 기준값은 `STRENGTH/SHARPNESS/SATURATION.default`.
+- 곡선 백업(UX-04): `cur.preset !== 'custom'` 상태의 첫 상세 input에서, 저장된 custom이 복사할 프리셋 값과 다르면 기존 custom을 `customPrev`에 저장하고 프리셋 select 아래에 '이전 사용자 지정 곡선을 「정확」 기준으로 바꿨습니다 [되돌리기]'를 표시. 되돌리기 = customPrev → custom, preset='custom' 저장(두 키 한 번의 set), 슬라이더 재표시, 안내 숨김. popup을 닫으면 안내는 사라지고 customPrev는 다음 백업 때 덮인다.
+- 기본값 복원(UX-06): 일반 영역 끝 '기본값으로 되돌리기' 버튼. 첫 클릭에 '한 번 더 눌러 확인'(3초 후 원상), 두 번째 클릭에 `storage.local.remove(RESETTABLE_KEYS)` 후 `normalizeSettings`로 init과 같은 경로로 다시 그림.
+- 정적 초기값·실패 처리(UX-34): HTML 정적 값을 `DEFAULTS`와 맞춤(enabled checked, custom selected). `init()` 실패 시 맨 위 '설정을 읽지 못했습니다. popup을 다시 열거나 Safari를 재시작하세요' + 컨트롤 disabled. `storage.set` 실패 시 '저장 실패' 표시.
+- 진단 영역(UX-19, UX-36, UX-09 표시): 출처 줄 '마지막 기록 14:03:41(12초 전) · 상태 active'(1초마다 경과 갱신, 30초 넘으면 흐리게, URL·제목 표시 없음). [복사] 성공 시 버튼 옆 `role="status"` '복사됨 (14:03:41 진단)' 2초, 실패 시 textarea 선택 후 'Command-C를 누르세요'. textarea 포커스·선택 중에는 갱신을 미루고 '새 진단 있음 — 갱신' 버튼, 갱신 시 scrollTop 복원. 별도 고정 토글은 두지 않는다(포커스 보류로 충분).
+- 테스트: 기존 popup 테스트 기대값 갱신 + 새 케이스(모드≠itm 자동 펼침·안내, 백업·되돌리기, 복원 키 목록, peakAdvice 문구, 버전 문자열 = manifest.version, 복사 실패 문구). 접근성: 모든 range에 `aria-valuetext`(표시 문자열과 같음, UX-51 중 비용 0인 부분만).
+
+**M7-4. 문서·스크립트 (W-B, impl-worker, `docs/*`, `scripts/make-xcode.sh`의 오류 메시지 1줄)**
+- UX-11: manual-checklist 각 절 전제의 `scripts/make-xcode.sh`를 'git pull → Xcode Run → Safari 완전 종료 후 재시작'(install.md 4장 참조)으로. make-xcode.sh 14행 오류 뒤에 '코드 업데이트에는 재생성이 필요 없습니다(docs/install.md 4장)' 출력. 스크립트 동작은 그대로.
+- UX-50: M7-0 (h)대로 보관 이동, 상단 요약·낡은 표기(HUD hdrSource/drm 표기, '클라우드' 문구, 채도 0% 설명) 수정, 맨 위 '공통 전제' 1회.
+- UX-10: install.md 문제 해결 표에 blackFrame·noGpu 회복 방법(다른 영상 이동 / 켜기 껐다 켜기 / 새로고침 / 반복되면 Safari 재시작, '코드 기준, 기기 미확인'), noGpu는 '렌더러 오류 전반(errors의 name 확인)'으로. DRM은 재시도 대상 아님을 명시.
+- UX-49: install.md 3장 설치 순서 재작성(두 타깃 서명, 서명되지 않은 확장 허용, 확장 켜기, youtube.com 접근 허용, 새로고침 후 popup 확인) + '9. 끄기·제거' 절. 메뉴 이름·제거 후 저장값 처리는 [확인 필요].
+- UX-05·UX-12·UX-03 문서 반영: install.md의 popup 사용법·유효 피크 공식·'밝기' 용어·선명 문구를 M7-1·M7-3과 같게. 초기화 [확인 필요]는 '기본값으로 되돌리기' 버튼 안내로 교체.
+
+**M7-5. 작업 순서·검증**
+- 1단계(본 세션): M7-1, M7-2, 스키마·parse-result v11, GUIDELINES는 Opus가 이미 개정(2.6-3 해석, 7-7 버전 규칙). 단위 테스트 통과 후 2단계.
+- 2단계(impl-worker 병렬, 파일 비중첩): W-A M7-3, W-B M7-4.
+- 본 세션: manifest 1.1.0, 체크리스트 M7 절, STATUS.
+- 체크리스트 M7 절(사용자 Mac): (1) 라이트·다크 popup 모양, 슬라이더 폭·값 흔들림 없음 (2) 켜기 스위치·꺼짐 흐림 (3) 모드 baseline으로 바꾸고 popup 다시 열기 → 자동 펼침·안내·[정상 모드로] (4) 정확 선택 → 상세 슬라이더 이동 → 되돌리기로 이전 곡선 복원 (5) 기본값으로 되돌리기 2단계 확인, 페이지 반영 < 1초 (6) 유효 피크 기본값 ×1.90 표시와 경고 문구 (7) 복사 '복사됨' 표시, 붙여넣은 JSON schemaVersion 11 (8) HUD '렌더 fps'·'선명도' (9) 진단 JSON 1개 회신(`results/result-M7-<YYYYMMDD>.json`).
+- verify: (1) lint, npm test, test:dom, pytest sim, 과거 results parse-result 통과 (2) CI (3) 체크리스트 M7 절. 판정: (1)(2) 통과 + (3)의 (3)(4)(5)(6) 예이면 M7 완료. 시각 항목은 사용자 판정이며 Claude가 검증했다고 쓰지 않는다.
+
+**M7-6. 범위 밖(2단계 이후)**: UX-02 popup 상태 줄, UX-13~15 HUD 수명·모드 표시, UX-20, UX-22 A/B 비교·단축키, UX-24, UX-25, UX-27~29 측정 조건·파일명, UX-31·UX-16 설명 보강, UX-21·UX-42·UX-43 페이지 동작, UX-44~48 아이콘·배지·컨테이너 앱, UX-51(aria-valuetext 외), UX-52~54. 사용자 결정(ux-review 4장) 후 계획한다.
 
 ### D-M6. M6 상세 계획 (2026-10-01, Opus)
 

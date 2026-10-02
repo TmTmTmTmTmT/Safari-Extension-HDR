@@ -2,22 +2,97 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
     <title>SDR HDR</title>
     <style>
+      :root {
+        color-scheme: light dark;
+        --warn: #b3261e;
+        --dim: #6e6e73;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --warn: #ff8a80;
+          --dim: #a1a1a6;
+        }
+      }
+      [hidden] {
+        display: none !important;
+      }
       body {
         font:
           13px -apple-system,
           sans-serif;
         width: 320px;
         margin: 8px;
+        background: Canvas;
+        color: CanvasText;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      header h1 {
+        font-size: 14px;
+        margin: 0;
+      }
+      .ver,
+      .dim {
+        color: var(--dim);
+      }
+      .switch {
+        margin: 0 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
       }
       label {
         display: block;
         margin: 6px 0;
       }
+      label:has(:disabled) {
+        opacity: 0.45;
+      }
+      label.slider {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 2px 8px;
+      }
+      label.slider input[type='range'] {
+        grid-column: 1 / -1;
+        width: 100%;
+        margin: 0;
+      }
+      .val {
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      body.off #controls {
+        opacity: 0.5;
+      }
+      .note {
+        margin: 4px 0;
+        color: var(--dim);
+      }
+      .error {
+        margin: 4px 0;
+        color: var(--warn);
+      }
+      #peak-warn {
+        min-height: 2.6em;
+        margin: 2px 0 6px;
+      }
+      #peak-warn.warn {
+        color: var(--warn);
+      }
+      #diag-source.stale {
+        opacity: 0.5;
+      }
       textarea {
         width: 100%;
         height: 160px;
+        box-sizing: border-box;
         font:
           11px ui-monospace,
           monospace;
@@ -25,73 +100,128 @@
     </style>
   </head>
   <body>
-    <label><input type="checkbox" id="enabled" /> 켜기</label>
-    <label
-      >프리셋
-      <select id="preset">
-        <option value="accurate">정확</option>
-        <option value="balanced">균형</option>
-        <option value="vivid">선명 (밝기 중간 이상 권장)</option>
-        <option value="custom">사용자 지정</option>
-      </select>
-    </label>
-    <label
-      >HDR 강도 <span id="strength-value">43%</span>
-      <input type="range" id="strength" min="0" max="100" step="1" value="43" />
-    </label>
-    <label
-      >선명도 <span id="sharpness-value">0%</span>
-      <input type="range" id="sharpness" min="0" max="100" step="1" value="0" />
-    </label>
-    <label
-      >채도 <span id="saturation-value">105%</span>
-      <input type="range" id="saturation" min="50" max="150" step="1" value="105" />
-    </label>
-    <div id="effective-peak"></div>
-    <details id="detail">
-      <summary>상세 설정</summary>
-      <label
-        >하이라이트 밝기 <span id="d-P-value"></span>
-        <input type="range" id="d-P" min="0" max="1" step="0.01" value="0" />
+    <header>
+      <h1>SDR HDR</h1>
+      <span class="ver" id="version">v1.1.0</span>
+      <label class="switch"
+        ><span id="enabled-state">켜짐</span>
+        <input type="checkbox" id="enabled" switch checked aria-label="HDR 변환" />
       </label>
+    </header>
+    <div id="init-error" class="error" role="alert" hidden></div>
+    <div id="save-status" class="error" role="status"></div>
+    <div id="off-note" class="note" hidden>꺼짐: 값은 저장되며 모든 YouTube 탭에서 원본 표시</div>
+    <div id="locked-note" class="note" hidden>
+      진단 모드라 화질 조정이 잠겨 있습니다. 아래 진단에서 되돌리세요
+    </div>
+    <div id="controls">
       <label
-        >확장 시작 <span id="d-k-value"></span>
-        <input type="range" id="d-k" min="0" max="1" step="0.01" value="0" />
+        >프리셋
+        <select id="preset">
+          <option value="accurate">정확</option>
+          <option value="balanced">균형</option>
+          <option value="vivid">강조 (화면 밝기 중간 이하 권장)</option>
+          <option value="custom" selected>사용자 지정</option>
+        </select>
       </label>
-      <label
-        >곡선 지수 <span id="d-n-value"></span>
-        <input type="range" id="d-n" min="0" max="1" step="0.01" value="0" />
+      <div id="backup-note" class="note" hidden>
+        <span id="backup-text"></span>
+        <button id="backup-undo" type="button">되돌리기</button>
+      </div>
+      <label class="slider"
+        ><span>HDR 강도</span
+        ><span class="val"
+          ><span id="strength-value">43%</span> <span id="strength-def" class="dim"></span
+        ></span>
+        <input type="range" id="strength" min="0" max="100" step="1" value="43" />
       </label>
-      <label
-        >밝기 <span id="d-g-value"></span>
-        <input type="range" id="d-g" min="0" max="1" step="0.01" value="0" />
+      <div id="peak-value">유효 피크 ×1.90 (SDR 흰색 대비)</div>
+      <div id="peak-warn" role="status"></div>
+      <label class="slider"
+        ><span>선명도</span
+        ><span class="val"
+          ><span id="sharpness-value">0%</span> <span id="sharpness-def" class="dim"></span
+        ></span>
+        <input type="range" id="sharpness" min="0" max="100" step="1" value="0" />
       </label>
-      <label
-        >곡선 채도 <span id="d-s-value"></span>
-        <input type="range" id="d-s" min="0" max="1" step="0.01" value="0" />
+      <label class="slider"
+        ><span>채도</span
+        ><span class="val"
+          ><span id="saturation-value">105%</span> <span id="saturation-def" class="dim"></span
+        ></span>
+        <input type="range" id="saturation" min="50" max="150" step="1" value="105" />
       </label>
-      <label
-        >하이라이트 채도 <span id="d-hs-value"></span>
-        <input type="range" id="d-hs" min="0" max="1" step="0.01" value="0" />
-      </label>
-    </details>
-    <label><input type="checkbox" id="hud" /> 페이지 HUD 표시</label>
+      <details id="detail">
+        <summary>상세 설정</summary>
+        <label class="slider"
+          ><span>하이라이트 밝기(P)</span
+          ><span class="val"
+            ><span id="d-P-value"></span> <span id="d-P-def" class="dim"></span
+          ></span>
+          <input type="range" id="d-P" min="0" max="1" step="0.01" value="0" />
+        </label>
+        <label class="slider"
+          ><span>확장 시작(k)</span
+          ><span class="val"
+            ><span id="d-k-value"></span> <span id="d-k-def" class="dim"></span
+          ></span>
+          <input type="range" id="d-k" min="0" max="1" step="0.01" value="0" />
+        </label>
+        <label class="slider"
+          ><span>곡선 지수(n)</span
+          ><span class="val"
+            ><span id="d-n-value"></span> <span id="d-n-def" class="dim"></span
+          ></span>
+          <input type="range" id="d-n" min="0" max="1" step="0.01" value="0" />
+        </label>
+        <label class="slider"
+          ><span>전체 밝기(g)</span
+          ><span class="val"
+            ><span id="d-g-value"></span> <span id="d-g-def" class="dim"></span
+          ></span>
+          <input type="range" id="d-g" min="0" max="1" step="0.01" value="0" />
+        </label>
+        <label class="slider"
+          ><span>곡선 채도(s)</span
+          ><span class="val"
+            ><span id="d-s-value"></span> <span id="d-s-def" class="dim"></span
+          ></span>
+          <input type="range" id="d-s" min="0" max="1" step="0.01" value="0" />
+        </label>
+        <label class="slider"
+          ><span>하이라이트 채도(hs)</span
+          ><span class="val"
+            ><span id="d-hs-value"></span> <span id="d-hs-def" class="dim"></span
+          ></span>
+          <input type="range" id="d-hs" min="0" max="1" step="0.01" value="0" />
+        </label>
+      </details>
+      <label><input type="checkbox" id="hud" /> 페이지 HUD 표시</label>
+      <button id="reset" type="button">기본값으로 되돌리기</button>
+    </div>
     <details id="diag-section">
       <summary>진단</summary>
+      <div id="diag-banner" class="note" hidden>
+        <span>진단 모드 사용 중: HDR 효과 꺼짐</span>
+        <button id="normal-mode" type="button">정상 모드로</button>
+      </div>
       <label
         >모드
         <select id="mode">
-          <option value="itm">itm</option>
-          <option value="identity">identity</option>
-          <option value="stripes">stripes</option>
-          <option value="baseline">baseline</option>
+          <option value="itm">itm (정상)</option>
+          <option value="identity">identity (변환 없이 출력)</option>
+          <option value="stripes">stripes (밝기 단계 줄무늬)</option>
+          <option value="baseline">baseline (렌더 없음, 비교 기준)</option>
         </select>
       </label>
+      <div id="diag-source" class="note"></div>
       <label
         >진단 JSON
         <textarea id="diag" readonly></textarea>
       </label>
+      <button id="diag-refresh" type="button" hidden>새 진단 있음 — 갱신</button>
       <button id="copy" type="button">복사</button>
+      <span id="copy-status" role="status"></span>
       <a id="save" download="sdrhdr-diag.json">JSON 저장</a>
     </details>
     <script src="../content/ns.js"></script>
