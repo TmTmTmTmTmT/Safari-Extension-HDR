@@ -11,7 +11,7 @@
 
 1. **[필수]** DRM(EME/FairPlay) 신호가 하나라도 있으면 즉시 no-op한다. DRM 회피, 화면 캡처 우회, CORS 우회 코드는 작성하지 않는다.
 2. **[필수]** 요청 없는 기능, 옵션, 설정 항목, 추상화 계층을 추가하지 않는다. PLAN.md C절 파일 구조 밖에 새 최상위 디렉터리를 만들지 않는다.
-3. **[필수]** 번들러, 런타임 의존성, 원격 코드 로드를 도입하지 않는다(필요하면 Opus 승인). background는 `extension/content/background.js` 하나만 두며(PLAN D-M8), 상태를 저장하지 않고 배지·아이콘 갱신만 한다. 네트워크 요청 금지.
+3. **[필수]** 번들러, 런타임 의존성, 원격 코드 로드를 도입하지 않는다(필요하면 Opus 승인). background는 `extension/content/background.js` 하나만 두며(PLAN D-M8), 상태를 저장하지 않고 배지·아이콘 갱신과 설정 백업·복원(FIX_GUIDE U1)만 한다. 네트워크 요청 금지.
 4. **[필수]** 네이티브 헬퍼(F-A) 코드는 PLAN.md "게이트 판정 기록"에 Opus의 착수 지시가 있기 전까지 작성하지 않는다.
 5. **[필수]** 클라우드 VM에서 WebGPU, EDR 출력, Safari 확장 동작, 성능을 "검증했다"고 기록하지 않는다. 해당 항목은 "미검증(사용자 Mac 필요)"으로 쓴다.
 
@@ -22,7 +22,7 @@
 2. **[필수]** 전역 이름은 `globalThis.__sdrhdr` 하나만 쓴다. `ns.js`가 첫 번째로 로드되어 객체를 만들고, 이후 파일은 자기 하위 키(`__sdrhdr.detect`, `__sdrhdr.params` 등)에만 할당한다.
 3. **[필수]** 각 파일은 IIFE로 감싸 지역 스코프를 유지한다. 파일 최상위에서 DOM 조회, `navigator.gpu` 접근, 이벤트 등록 같은 부작용을 실행하지 않는다. 부작용 시작점은 `main.js` 하나다.
 4. **[필수]** 파일 간 의존은 manifest 순서로만 해결한다. 뒤에 로드되는 파일의 심볼을 앞 파일이 로드 시점에 참조하지 않는다(호출 시점 참조는 허용).
-5. **[필수]** `browser.*` API 접근은 `params.js`(storage), `main.js`(수명주기·메시지), `popup.js`, `background.js`에만 둔다. 메시지는 두 종류만 쓴다(PLAN D-M8 M8-1 `MSG`): popup → 현재 탭 content `sdrhdr:getState`(응답: 상태 객체), content → background `sdrhdr:state`(배지 정보). 메시지·응답에 URL·제목을 넣지 않는다(2.6-1). 새 권한은 Opus 승인 없이 추가하지 않는다(D-M8 M8-0 (a)의 `activeTab` 예외만 허용).
+5. **[필수]** `browser.*` API 접근은 `params.js`(storage), `main.js`(수명주기·메시지), `popup.js`, `background.js`에만 둔다. 메시지는 두 종류만 쓴다(PLAN D-M8 M8-1 `MSG`): popup → 현재 탭 content `sdrhdr:getState`(응답: 상태 객체), content → background `sdrhdr:state`(배지 정보). 네이티브 메시지(`runtime.sendNativeMessage`)는 background만 쓰며 `backup:set`·`backup:get` 두 종류, 데이터는 설정 키(`params.BACKUP_KEYS`)뿐이다(FIX_GUIDE U1). 메시지·응답에 URL·제목을 넣지 않는다(2.6-1). 새 권한은 Opus 승인 없이 추가하지 않는다(D-M8 M8-0 (a)의 `activeTab` 예외와 FIX_GUIDE U1의 `nativeMessaging`만 허용).
 
 ### 2.2 순수 함수 / 부작용 분리
 1. **[필수]** 다음은 순수 함수로 작성한다. 입력은 인자로만 받고, DOM·GPU·`browser.*`·시간에 의존하지 않는다.
