@@ -181,6 +181,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | M6 | 성능·안정화·문서 (상세: D-M6) | frameProbe 비용 절감(HDR 조기 판정·정상 상태 단일 경로), install.md, 측정 절차(soak·전체화면·60Hz·비60fps), 이월 항목 정리, 버전 1.0.0 | Sonnet 본 세션 + impl-worker(renderer ↔ docs 병렬) | → verify: 단위 테스트(프로브 순서), 사용자 Mac 2160p60 30분 soak 드롭 < 1%·메모리 증가 < 15%, 4K HDR 첫 attach 끊김 없음 |
 | M7 | UX 1단계 (상세: D-M7) | 진단 모드 잠금 안내, 유효 피크 공식 교정, 사용자 지정 곡선 백업·되돌리기, 기본값 복원, 켜기 스위치, 용어 정리, popup 레이아웃·다크 모드, 진단 영역 다듬기, HUD 라벨, 문서 정리, 진단 v11, 1.1.0 | Sonnet 본 세션(params·main·hud) → impl-worker(popup ↔ docs 병렬) | → verify: 단위·DOM·pytest 통과 + 사용자 Mac 체크리스트 M7 절 |
 | M8 | UX 2단계 (상세: D-M8) | 현재 탭 상태(popup 상태 줄), background 배지, HUD 수명 분리·한국어 상태, 상태 알림 칩, 단축키(원본 보기·켜기 토글), 툴바·앱 아이콘, 1.2.0 | 본 세션(params·renderer·overlay) → impl-worker 3개(content ↔ popup ↔ background·아이콘) | → verify: 단위·DOM·pytest + 사용자 Mac 체크리스트 M8 절 |
+| M9 | 내 프리셋 (상세: D-M9) | 현재 설정 저장·불러오기·삭제(최대 20개), 네이티브 백업 포함, 1.3.0 | 본 세션(params) → impl-worker(popup) | → verify: 단위 + 사용자 Mac 체크리스트 M9 절 |
 | FA-0~3 | (G1/G2/G4 실패 시) 네이티브 헬퍼 | B절 F-A | Opus 재계획 후 Sonnet | → verify: 각 단계 사용자 Mac, CI는 빌드만 |
 
 게이트: M1 판정 전에는 M2 이후, M2 판정 전에는 M3 이후를 착수하지 않는다.
@@ -316,6 +317,46 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 회신: 드래그 후 1초 안 반영(예). 선호 강도: 밝기 중간 40~60%, 최대 40~50%. 하이라이트가 뭉개지기 시작: 중간 70~80%, 최대 약 70%. 진단 JSON 1개(`strength` 0.68, 밝기 미기재, 3840×1920 SDR bt709, path vf, errors 없음, frames 1220, JS p95 1 ms).
 - 해석: 균형 P=3에서 t=0.7의 피크는 2.4다. 밝기 최대(헤드룸 약 2)에서는 헤드룸 초과 클리핑으로 설명되지만, 중간(헤드룸 약 3)에서도 비슷한 지점(70~80%)에서 뭉개짐이 보였다. 따라서 뭉개짐의 주원인은 헤드룸 클리핑만이 아니라 **곡선 상단의 압축(n=2.5, k=0.65 위 구간이 빠르게 피크로 감)과 하이라이트 채도 감소(hs 0.95)**일 가능성이 크다 [추정]. M4에서 S2·S10b와 함께 확인한다.
 - M4 결정 입력: (1) 기본 강도 후보 **0.45**(두 밝기 선호 구간의 공통부, 균형 P=3에서 피크 1.9 ≤ 헤드룸 2). (2) 강도 상한 표시 또는 경고 기준 후보 0.7. (3) 곡선 상단 형태(n, k)와 소프트 롤오프 검토 근거.
+
+### D-M9. 내 프리셋: 현재 설정 저장·불러오기·삭제 (2026-10-03, Opus)
+
+목적: 사용자가 맞춘 설정을 이름 붙여 여러 개 저장하고, 골라 불러오고, 지울 수 있게 한다. 사용자 요청(2026-10-03). 이전 계획 M5-7에서 범위 밖이던 "프리셋 추가 저장"을 이번에 넣는다.
+
+**M9-0. 결정 (Opus)**
+- (a) **저장 내용**: 화질 값만 — 곡선 6개(현재 `curveOf(settings)`로 확정된 P·k·n·g·s·hs), 강도, 선명도, 채도. 켜기·진단 모드·HUD·상태 알림은 저장하지 않는다(화면 표시 설정이지 화질이 아님).
+- (b) **불러오기 동작**: 내 프리셋을 불러오면 `preset='custom'`, `custom`=저장한 곡선, 강도·선명도·채도를 **한 번의 `storage.local.set`**으로 쓴다(렌더러가 반쯤 바뀐 값을 읽지 않게, M5-1 원칙). content script·renderer·수명주기는 바뀌지 않는다(기존 custom 경로 그대로).
+- (c) **덮어쓰기 보호**: 불러오기는 현재 custom 곡선을 덮으므로, M7 UX-04와 같은 방식으로 현재 custom이 불러올 값과 다르면 `customPrev`에 백업하고 기존 [되돌리기] 안내를 재사용한다(문구: "이전 사용자 지정 곡선을 「이름」으로 바꿨습니다").
+- (d) **저장소**: 새 키 `sdrhdr.userPresets` = 배열 `[{id, name, createdAt, values:{P,k,n,g,s,hs,strength,sharpness,saturation}}]`. 최대 **20개**, 이름은 앞뒤 공백 제거 후 1~20자(그 외 문자 제한 없음, 표시할 때 textContent만 사용). 같은 이름으로 저장하면 **덮어쓰기**(두 번 눌러 확인). id는 `'u' + createdAt.toString(36) + 순번`.
+- (e) **기본값으로 되돌리기**는 내 프리셋을 지우지 않는다(`RESETTABLE_KEYS`에 넣지 않음). **네이티브 백업(U1)에는 포함**한다(`BACKUP_KEYS`에 추가, background.js 목록도 같이). 20개 × 약 250바이트 ≈ 5 KB로 Swift 상한 16 KB 안. 복원 조건(백업 대상 키가 모두 비었을 때)은 그대로.
+- (f) 내보내기·가져오기(JSON 파일), 프리셋 순서 변경, 이름 변경은 범위 밖. 이름을 바꾸려면 같은 값으로 새 이름 저장 후 이전 것 삭제.
+- (g) 버전 1.3.0(기능 추가, GUIDELINES 7-7). 진단 스키마 불변(진단에 내 프리셋 목록·이름을 넣지 않는다).
+
+**M9-1. params.js (본 세션, 순수 함수 + 키)**
+- `KEYS.userPresets`, `USER_PRESET_MAX = 20`, `USER_PRESET_NAME_MAX = 20`. `BACKUP_KEYS`에 추가.
+- `normalizeUserPresets(raw)`: 배열이 아니면 `[]`. 항목마다 id·name(정규화 후 1~20자)·createdAt(숫자) 검사, values는 곡선 키를 `normalizeCustom` 규칙, 강도·선명도·채도는 `normalizeRange`로 정규화. 잘못된 항목은 버리고, id 중복은 첫 것만, 최대 20개(앞에서부터).
+- `snapshotValues(settings)` → `{...curveOf(settings), strength, sharpness, saturation}`(정규화된 값).
+- `upsertUserPreset(list, name, values, now)` → `{list, replaced: boolean, error: null | 'name' | 'full'}`: 이름 정규화 실패 → error 'name'. 같은 이름이 있으면 그 항목의 values·createdAt을 바꾸고(id 유지) replaced true. 없고 이미 20개면 error 'full'. 새 항목은 목록 끝.
+- `removeUserPreset(list, id)` → 새 목록.
+- `applyUserPresetEntries(entry)` → storage에 쓸 객체 `{[KEYS.preset]:'custom', [KEYS.custom]:{곡선}, [KEYS.strength], [KEYS.sharpness], [KEYS.saturation]}`.
+- 단위 테스트: 정규화(비배열·잘못된 항목·id 중복·21개 초과·이름 공백/길이), upsert(신규·같은 이름 덮어쓰기 id 유지·가득 참·잘못된 이름), remove, apply 객체 키 집합, BACKUP_KEYS 포함·RESETTABLE_KEYS 미포함.
+
+**M9-2. background.js (본 세션)**: 백업 목록에 `sdrhdr.userPresets` 추가(params.BACKUP_KEYS와 일치 테스트 갱신).
+
+**M9-3. popup (impl-worker, `extension/popup/*`·popup 테스트)**
+- 위치: 프리셋 select 바로 아래 `<details id="my-presets">`, summary "내 프리셋 (N)"(N = 저장 개수), 기본 접힘(펼침 상태 기억 안 함).
+- 안: (1) 목록 select(`#up-list`, 저장 순서, 비면 "저장된 프리셋 없음" 비활성 옵션) + [불러오기] [삭제] 버튼. (2) 이름 입력(`#up-name`, maxlength 20, placeholder "이름") + [현재 설정 저장].
+- 저장: `snapshotValues(cur)` → `upsertUserPreset`. error 'name' → 입력 아래 "이름을 1~20자로 입력하세요", 'full' → "최대 20개입니다. 하나를 삭제한 뒤 저장하세요". 같은 이름이면 첫 클릭에 버튼이 "덮어쓰기 확인"(3초 후 원상), 두 번째 클릭에 저장. 저장 후 목록 갱신·새 항목 선택·"저장됨" 2초 표시·입력 비움.
+- 불러오기: 선택 항목으로 M9-0 (b)(c). UI(프리셋 select=사용자 지정, 슬라이더·상세·유효 피크)를 즉시 다시 그린다. 진단 모드(itm 아님)일 때는 기존 잠금 규칙대로 불러오기 버튼도 비활성.
+- 삭제: 첫 클릭 "삭제 확인"(3초 후 원상), 두 번째 클릭에 `removeUserPreset` 저장, 목록 갱신.
+- 목록 select에서 항목을 고르면 이름 입력에 그 이름을 채운다(덮어쓰기 저장을 쉽게).
+- 다른 곳(다른 popup 창·복원)에서 `sdrhdr.userPresets`가 바뀌면 `storage.onChanged`로 목록 갱신.
+- 저장 실패는 기존 `save()`의 '저장 실패' 표시 경로를 쓴다.
+- 접근성: 버튼·입력에 라벨, 상태 문구는 `role="status"`. 이름은 textContent로만 넣는다(innerHTML 금지).
+- 테스트: 저장(신규·이름 오류·가득 참·같은 이름 2단계 덮어쓰기), 불러오기(한 번의 set에 5키, customPrev 백업과 안내, UI 재표시), 삭제 2단계, 목록 갱신(onChanged), 진단 모드 잠금, summary 개수, 이름 textContent.
+
+**M9-4. 문서·버전 (본 세션)**: manifest·popup 헤더 1.3.0, install.md 6장 "내 프리셋" 절, 체크리스트 M9 절: (1) 현재 설정을 이름 붙여 저장 → 목록에 보임 (2) 값을 바꾼 뒤 불러오기 → 1초 안에 화면 반영, 슬라이더 값 복원 (3) 같은 이름 저장 시 덮어쓰기 확인 (4) 삭제 2단계 (5) 기본값으로 되돌리기 후에도 내 프리셋이 남음 (6) Xcode Run·재부팅 후 내 프리셋이 남는지(U 회차 절과 함께 확인). 판정: (1)(2)(4)(5) 예이면 M9 완료.
+
+**M9-5. 순서·검증**: 본 세션 M9-1·M9-2 커밋 → impl-worker M9-3 → 본 세션 M9-4·STATUS → lint·test·test:dom·pytest → PR(base: PR #15가 머지된 브랜치, #15 미머지면 #15 위에 쌓은 브랜치로 두고 PR 설명에 명시).
 
 ### D-M8. UX 2단계: 현재 탭 상태·배지·단축키·아이콘 (2026-10-02, Opus)
 
