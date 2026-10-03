@@ -12,6 +12,7 @@ fi
 
 if [ -e xcode ]; then
   echo "오류: xcode/ 가 이미 있습니다. 덮어쓰지 않습니다. 재생성하려면 직접 삭제한 뒤 다시 실행하세요." >&2
+  echo "코드 업데이트에는 재생성이 필요 없습니다(docs/install.md 4장)." >&2
   exit 1
 fi
 

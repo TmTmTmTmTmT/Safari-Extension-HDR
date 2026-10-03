@@ -88,6 +88,7 @@ test('normalizeSettings: 잘못된 값은 기본값', () => {
     saturation: 1.05,
     custom: { P: 2, k: 0.4, n: 2, g: 1.22, s: 1.03, hs: 1.03 },
     hud: false,
+    notify: true,
   };
   assert.deepStrictEqual(plain(normalizeSettings(undefined)), def);
   assert.deepStrictEqual(plain(normalizeSettings(null)), def);
@@ -230,7 +231,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 11);
+  assert.strictEqual(d.schemaVersion, 12);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -622,7 +623,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 11);
+  assert.strictEqual(d.schemaVersion, 12);
   assert.strictEqual(d.render.sameFrameSkipped, 12);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
@@ -953,13 +954,65 @@ test('커스텀 프리셋: normalizeSettings·toUniformArray·curveOf·effective
   assert.ok(Math.abs(P.effectivePeak({ preset: 'accurate', strength: 0.53 }) - 1.53) < 1e-12);
   assert.ok(Math.abs(P.effectivePeak({ preset: 'balanced', strength: 0.5 }) - 2) < 1e-12);
   assert.ok(Math.abs(P.effectivePeak({ preset: 'balanced', strength: 0 }) - 1) < 1e-12);
+  // g>1: 셰이더가 g를 곡선 앞에서 곱하므로 f(g) (PLAN M7-1). P2 k0.4 n2 g1.5 t1 -> f(1.5) = 4.8611
   assert.ok(
-    Math.abs(P.effectivePeak({ preset: 'custom', custom: { P: 2, g: 1.5 }, strength: 1 }) - 3) <
-      1e-12,
+    Math.abs(
+      P.effectivePeak({ preset: 'custom', custom: { P: 2, g: 1.5 }, strength: 1 }) - 4.8611,
+    ) < 1e-3,
   );
-  // 기본 설정
-  // 1 + 0.43 x (2.0 x 1.22 - 1) = 1.6192
-  assert.ok(Math.abs(P.effectivePeak(P.normalizeSettings({})) - 1.6192) < 1e-12);
+  // 기본 설정: 1 + 0.43 x (f(1.22) - 1) ~= 1.8977 (이전 공식 1.6192)
+  assert.ok(Math.abs(P.effectivePeak(P.normalizeSettings({})) - 1.8977) < 1e-3);
+  // M5 회신 설정 {P2.6 k0.4 n2 g1.11}, t0.53 -> 약 2.2457
+  assert.ok(
+    Math.abs(
+      P.effectivePeak({
+        preset: 'custom',
+        custom: { P: 2.6, k: 0.4, n: 2, g: 1.11, s: 1, hs: 1.03 },
+        strength: 0.53,
+      }) - 2.2457,
+    ) < 1e-3,
+  );
+});
+
+test('curveY: g=1이면 f(1)=P, y<=k 항등, 미러(tonecurve.curveF)와 일치 (M7-1)', () => {
+  const P = ns.params;
+  for (const id of Object.keys(P.PRESETS)) {
+    const c = P.PRESETS[id];
+    assert.ok(Math.abs(P.curveY(1, c) - c.P) < 1e-12, id);
+  }
+  const c = { P: 2.6, k: 0.4, n: 2.5, g: 1, s: 1, hs: 1 };
+  assert.strictEqual(P.curveY(0.3, c), 0.3);
+  // tonecurve.js는 테스트 전용 미러라 manifest에 없다(FIX_GUIDE T). 따로 로드한다.
+  const tc = vm.createContext({});
+  for (const f of ['ns.js', 'tonecurve.js'])
+    vm.runInContext(fs.readFileSync(path.join(root, 'content', f), 'utf8'), tc, { filename: f });
+  for (let y = 0; y <= 1.5; y += 0.05) {
+    assert.ok(
+      Math.abs(P.curveY(y, c) - tc.__sdrhdr.tonecurve.curveF(y, c.P, c.k, c.n)) < 1e-6,
+      String(y),
+    );
+  }
+});
+
+test('peakAdvice·HEADROOM_STEPS·RESETTABLE_KEYS (M7-1)', () => {
+  const P = ns.params;
+  assert.deepStrictEqual(plain(P.peakAdvice(1.5)), { clipAt: [], ok: true });
+  assert.deepStrictEqual(plain(P.peakAdvice(2)), { clipAt: [], ok: true });
+  assert.deepStrictEqual(plain(P.peakAdvice(2.25)), { clipAt: ['최대'], ok: false });
+  assert.deepStrictEqual(plain(P.peakAdvice(3.5)), { clipAt: ['최대', '중간'], ok: false });
+  assert.deepStrictEqual(plain(P.peakAdvice(5)).clipAt, ['최대', '중간', '낮음']);
+  const keys = plain(P.RESETTABLE_KEYS);
+  for (const k of [
+    P.KEYS.preset,
+    P.KEYS.custom,
+    P.KEYS.strength,
+    P.KEYS.sharpness,
+    P.KEYS.saturation,
+    P.KEYS.hud,
+  ])
+    assert.ok(keys.includes(k), k);
+  for (const k of [P.KEYS.enabled, P.KEYS.mode, P.KEYS.diag, P.KEYS.customPrev])
+    assert.ok(!keys.includes(k), k);
 });
 
 test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
@@ -973,7 +1026,7 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
       flags: { hud: true },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 11);
+  assert.strictEqual(d.schemaVersion, 12);
   assert.strictEqual(d.render.preset, 'custom');
   assert.deepStrictEqual(d.render.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
   assert.strictEqual(d.render.effectivePeak, 1.8);
@@ -982,6 +1035,70 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
   assert.strictEqual(e.render.custom, null);
   assert.strictEqual(e.render.effectivePeak, null);
   assert.strictEqual(e.flags.hud, false);
+});
+
+test('statusOf: 상태별 level·문구·배지 (M8-1)', () => {
+  const st = (o) => plain(ns.params.statusOf({ enabled: true, mode: 'itm', ...o }));
+  assert.deepStrictEqual(Object.keys(st({})), ['level', 'text', 'hint', 'badge']);
+  assert.strictEqual(st({ enabled: false }).level, 'off');
+  assert.strictEqual(st({ enabled: false }).text, '꺼짐');
+  assert.strictEqual(st({ state: 'skipped', skip: 'disabled' }).level, 'off');
+  // 꺼짐이 진단 모드보다 먼저다.
+  assert.strictEqual(st({ enabled: false, mode: 'baseline' }).level, 'off');
+  const d = st({ mode: 'baseline', state: 'active' });
+  assert.strictEqual(d.level, 'diag');
+  assert.strictEqual(d.badge.text, 'D');
+  assert.ok(!d.text.includes('baseline'), '모드 이름은 일반 문구에 쓰지 않는다 (GUIDELINES 2.6-3)');
+  assert.strictEqual(st({ state: 'active', bypass: true }).text, '원본 보기 중');
+  assert.deepStrictEqual(st({ state: 'active' }), {
+    level: 'ok',
+    text: 'HDR 변환 중',
+    hint: '',
+    badge: { text: '' },
+  });
+  assert.strictEqual(st({ state: 'probing' }).text, '판정 중(원본 표시)');
+  assert.strictEqual(st({ state: 'probing' }).level, 'wait');
+  const u = st({ state: 'probing', undecided: true });
+  assert.strictEqual(u.level, 'error');
+  assert.strictEqual(u.badge.text, '!');
+  assert.strictEqual(
+    st({ state: 'skipped', skip: 'drm', drmNow: true }).text,
+    'DRM 영상: 변환하지 않음',
+  );
+  const old = st({ state: 'skipped', skip: 'drm', drmNow: false });
+  assert.ok(old.text.includes('이전 DRM 영상'));
+  assert.ok(old.hint.includes('새로고침'));
+  assert.strictEqual(st({ state: 'skipped', skip: 'hdrSource' }).badge.text, 'HDR');
+  assert.strictEqual(st({ state: 'skipped', skip: 'pip' }).text, 'PiP 중: 원본 표시');
+  assert.strictEqual(st({ state: 'skipped', skip: 'blackFrame' }).level, 'error');
+  const g = st({ state: 'skipped', skip: 'noGpu', errorName: 'OperationError' });
+  assert.strictEqual(g.text, '렌더 오류(OperationError)');
+  assert.strictEqual(g.badge.color, '#ff3b30');
+  assert.strictEqual(st({ state: 'skipped', skip: 'noGpu' }).text, '렌더 오류(?)');
+  assert.strictEqual(st({ state: 'idle' }).text, '대상 영상을 찾는 중');
+  assert.strictEqual(st({ state: 'skipped', skip: 'nope' }).level, 'wait');
+  // 잘못된 입력에도 죽지 않는다. URL·제목 같은 필드는 결과에 나오지 않는다.
+  assert.strictEqual(plain(ns.params.statusOf(null)).level, 'wait');
+  assert.ok(
+    !JSON.stringify(st({ state: 'active', url: '/watch?v=x', title: 'T' })).includes('watch'),
+  );
+});
+
+test('MSG·notify·setEnabled (M8-1)', () => {
+  const P = ns.params;
+  assert.deepStrictEqual(plain(P.MSG), { getState: 'sdrhdr:getState', state: 'sdrhdr:state' });
+  assert.strictEqual(P.normalizeSettings({}).notify, true);
+  assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: false }).notify, false);
+  assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: 'x' }).notify, true);
+  assert.ok(P.RESETTABLE_KEYS.includes(P.KEYS.notify));
+  // setEnabled는 storage에 enabled만 쓴다.
+  const sets = [];
+  const c2 = vm.createContext({ browser: { storage: { local: { set: (o) => sets.push(o) } } } });
+  for (const f of ['ns.js', 'params.js'])
+    vm.runInContext(fs.readFileSync(path.join(root, 'content', f), 'utf8'), c2, { filename: f });
+  c2.__sdrhdr.params.setEnabled(0);
+  c2.__sdrhdr.params.setEnabled(true);
+  assert.deepStrictEqual(plain(sets), [{ 'sdrhdr.enabled': false }, { 'sdrhdr.enabled': true }]);
 });
 
 test('진단 요청 키 (FIX_GUIDE T2): requestDiag는 시각을 쓰고, subscribeDiagRequest는 그 키 변경에만 반응한다', async () => {

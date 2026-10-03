@@ -11,7 +11,7 @@
 
 1. **[필수]** DRM(EME/FairPlay) 신호가 하나라도 있으면 즉시 no-op한다. DRM 회피, 화면 캡처 우회, CORS 우회 코드는 작성하지 않는다.
 2. **[필수]** 요청 없는 기능, 옵션, 설정 항목, 추상화 계층을 추가하지 않는다. PLAN.md C절 파일 구조 밖에 새 최상위 디렉터리를 만들지 않는다.
-3. **[필수]** background 스크립트, 번들러, 런타임 의존성, 원격 코드 로드를 도입하지 않는다(필요하면 Opus 승인).
+3. **[필수]** 번들러, 런타임 의존성, 원격 코드 로드를 도입하지 않는다(필요하면 Opus 승인). background는 `extension/content/background.js` 하나만 두며(PLAN D-M8), 상태를 저장하지 않고 배지·아이콘 갱신과 설정 백업·복원(FIX_GUIDE U1)만 한다. 네트워크 요청 금지.
 4. **[필수]** 네이티브 헬퍼(F-A) 코드는 PLAN.md "게이트 판정 기록"에 Opus의 착수 지시가 있기 전까지 작성하지 않는다.
 5. **[필수]** 클라우드 VM에서 WebGPU, EDR 출력, Safari 확장 동작, 성능을 "검증했다"고 기록하지 않는다. 해당 항목은 "미검증(사용자 Mac 필요)"으로 쓴다.
 
@@ -22,7 +22,7 @@
 2. **[필수]** 전역 이름은 `globalThis.__sdrhdr` 하나만 쓴다. `ns.js`가 첫 번째로 로드되어 객체를 만들고, 이후 파일은 자기 하위 키(`__sdrhdr.detect`, `__sdrhdr.params` 등)에만 할당한다.
 3. **[필수]** 각 파일은 IIFE로 감싸 지역 스코프를 유지한다. 파일 최상위에서 DOM 조회, `navigator.gpu` 접근, 이벤트 등록 같은 부작용을 실행하지 않는다. 부작용 시작점은 `main.js` 하나다.
 4. **[필수]** 파일 간 의존은 manifest 순서로만 해결한다. 뒤에 로드되는 파일의 심볼을 앞 파일이 로드 시점에 참조하지 않는다(호출 시점 참조는 허용).
-5. **[필수]** `browser.*` API 접근은 `params.js`(storage)와 `main.js`(수명주기)에만 둔다. popup은 `storage.local`에 설정을 쓰고, 읽기는 진단 키(`sdrhdr.diag`)와 현재 설정 표시에만 한다. content script와 popup 간 메시징(`runtime`/`tabs` 메시지)은 쓰지 않는다.
+5. **[필수]** `browser.*` API 접근은 `params.js`(storage), `main.js`(수명주기·메시지), `popup.js`, `background.js`에만 둔다. 메시지는 두 종류만 쓴다(PLAN D-M8 M8-1 `MSG`): popup → 현재 탭 content `sdrhdr:getState`(응답: 상태 객체), content → background `sdrhdr:state`(배지 정보). 네이티브 메시지(`runtime.sendNativeMessage`)는 background만 쓰며 `backup:set`·`backup:get` 두 종류, 데이터는 설정 키(`params.BACKUP_KEYS`)뿐이다(FIX_GUIDE U1). 메시지·응답에 URL·제목을 넣지 않는다(2.6-1). 새 권한은 Opus 승인 없이 추가하지 않는다(D-M8 M8-0 (a)의 `activeTab` 예외와 FIX_GUIDE U1의 `nativeMessaging`만 허용).
 
 ### 2.2 순수 함수 / 부작용 분리
 1. **[필수]** 다음은 순수 함수로 작성한다. 입력은 인자로만 받고, DOM·GPU·`browser.*`·시간에 의존하지 않는다.
@@ -44,6 +44,7 @@
 2. **[필수]** 한 번 DRM으로 판정된 video 요소는 영구 no-op이다(같은 요소에 재attach 금지). 판정 해제 로직을 만들지 않는다.
 3. **[필수]** 검은 프레임 연속 감지는 보조 신호로만 쓰며, detach 방향으로만 작동한다.
 4. **[필수]** DRM 영구 no-op은 **요소 단위**다(같은 요소의 이후 소스에도 적용). 검은 프레임·HDR 원본·PiP 스킵은 **소스 또는 상태 단위**이며 소스가 바뀌거나 조건이 사라지면 재판정한다(PLAN D-M3 M3-1).
+5. **[필수]** DRM 판정 후에도 HUD·상태 칩의 **텍스트 표시**는 허용한다(PLAN D-M8 M8-0 (c)). 영상 프레임·캔버스·GPU 접근, DRM 판정 해제, 재attach는 하지 않는다. 현재 소스의 DRM 신호는 표시 문구 구분을 위해 읽기만 한다.
 
 ### 2.5 렌더러
 1. **[필수]** 프레임 구동은 PLAN.md C절 "렌더 루프"를 따른다(2026-09-30 확정: `requestAnimationFrame` 구동, rVFC는 Safari에서 표시 프레임보다 적게 호출되어 구동에 쓰지 않음). `importExternalTexture`는 렌더할 때마다 다시 호출한다(외부 텍스처 재사용 금지).
@@ -58,6 +59,7 @@
 1. **[필수]** 진단 JSON(`sdrhdr.diag`, 결과 파일)에는 영상 제목, 채널, 쿠키, 계정 정보, 전체 URL을 넣지 않는다. 페이지는 경로와 `v` 쿼리만 기록한다.
 2. **[필수]** 진단 기록은 `storage.local`에 최신 1개만 유지하고 외부로 전송하지 않는다. content script는 주기적으로 진단을 쓰지 않고, popup의 요청 키(`sdrhdr.diagRequest`)가 바뀔 때 **보이는 탭만** 1회 쓴다(FIX_GUIDE T2).
 3. **[필수]** `stripes`·`identity`·`baseline` 모드는 진단용이며 popup의 "진단" 영역(`<details>`, 기본 접힘) 밖으로 노출하지 않는다(PLAN D-M5 M5-2). 페이지 HUD는 사용자 확인용이라 이 규칙 대상이 아니지만 개인정보 규칙(2.6-1)은 따른다.
+   - 해석(PLAN D-M7 M7-0 (a)): 모드가 `itm`이 아닐 때 진단 영역을 자동으로 펼치는 것, 일반 영역에 모드 이름 없이 "진단 모드라 조정이 잠김" 안내를 두는 것은 허용한다. 모드 select와 모드 이름은 진단 영역 안에만 둔다.
 
 ### 2.7 수명주기 (M3 추가)
 1. **[필수]** YouTube 이벤트 이름(`yt-navigate-finish` 등)과 클래스명(`ad-showing` 등)은 detect.js 상수로만 둔다(셀렉터와 같은 취급).
@@ -119,6 +121,7 @@
 4. **[필수]** PR 본문에 verify 결과를 (1)/(2)/(3)으로 구분하고, 수동 미완 항목은 "미검증"으로 명시한다.
 5. **[필수]** Xcode 프로젝트(`xcode/`, `*.pbxproj`)는 클라우드에서 수기 편집하지 않는다. 사용자 Mac에서 push한 커밋만 인정한다.
 6. **[필수]** 게이트 마일스톤(M1, M2)은 사용자 회신 JSON(`results/`)과 Opus 판정(PLAN.md 게이트 판정 기록)이 있어야 머지 대상이 된다.
+7. **[필수]** 사용자에게 보이는 변경을 담은 PR은 `manifest.json` version을 올린다(기능 minor, 수정 patch). popup 헤더의 정적 버전 문자열은 manifest와 같아야 하며 단위 테스트로 검사한다(PLAN D-M7).
 
 ## 8. 역할·문서 규칙 (요약)
 

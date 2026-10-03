@@ -297,6 +297,9 @@ def summarize_m2(name, data):
     """milestone 'M2' 진단 JSON의 값만 표로 출력한다. 판정하지 않는다."""
     print("\n## %s" % name)
     print("schemaVersion=%s extVersion=%s createdAt=%s" % (fmt(data.get("schemaVersion")), fmt(data.get("extVersion")), fmt(data.get("createdAt"))))
+    sv = data.get("schemaVersion")
+    if isinstance(sv, int) and sv < 12:
+        print("주의: schemaVersion 11 이하의 render.effectivePeak는 extVersion 1.1.0 미만이면 1 + t (P g - 1), 1.1.0 이상이면 셰이더와 같은 새 공식이다. g≠1에서 서로 직접 비교하지 않는다.")
     print("page: %s" % fmt(g(data, "page", "url")))
     env = data.get("env") or {}
     print("\nenv")

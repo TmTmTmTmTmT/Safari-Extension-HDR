@@ -1214,6 +1214,22 @@ test('M6: 단일 측정 중 선택 경로 예외도 전체 측정으로 폴백, 
   s.renderer.destroy();
 });
 
+test('원본 보기(setBypass): 캔버스만 숨기고 렌더는 유지, 해제하면 복원 (M8-2)', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  assert.strictEqual(s.canvas.style.visibility, '');
+  s.renderer.setBypass(true);
+  assert.strictEqual(s.canvas.style.visibility, 'hidden');
+  assert.strictEqual(s.renderer.getStats().bypass, true);
+  const before = s.renders;
+  s.flush();
+  assert.strictEqual(s.renders, before + 1, '숨겨도 렌더 루프는 계속');
+  s.renderer.setBypass(false);
+  assert.strictEqual(s.canvas.style.visibility, '');
+  assert.strictEqual(s.renderer.getStats().undecided, false);
+});
+
 // ---- FIX_GUIDE T1: 소스 세대 번호 ----
 test('T1: 측정 중간(ext await)에 restartSource하면 이전 회차 결과를 폐기한다', async () => {
   const s = setup({ readyState: 4, paused: false });

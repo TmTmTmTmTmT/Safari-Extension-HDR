@@ -137,6 +137,37 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - → verify: lint 통과, npm test 228/228, test:dom 15/15, pytest sim 157/157, results parse-result 통과 / (1) 로컬 Mac. **TA의 "그리지 않아도 캔버스가 마지막 화면을 유지"(깜박임 없음), popup 진단 영역 동작, 두 탭 응답은 미검증(사용자 Mac 필요)**
 - 해석: ① 경로 변경 dirty는 단위 테스트가 약함(vf→copy 폴백만 렌더 확인). ② T2로 popup을 처음 열 때 저장된 진단이 없으면(요청 전) 진단 상자가 비어 있다 — 진단 영역을 펼치면 채워진다
 
+## M7 구현 (브랜치 claude/m7-ux, 2026-10-02, Sonnet)
+
+- 계획: PLAN D-M7(UX 1단계), 근거 `docs/ux-review.md`. 사용자 결정: 프리셋 `vivid` 표시명 **'강조'**(저장 id 불변)
+- 본 세션: `params.js`(`curveY`·새 `effectivePeak` = 1 + t(f(g) − 1), `HEADROOM_STEPS`·`peakAdvice`·`RESETTABLE_KEYS`·`KEYS.customPrev`), `main.js`(꺼진 채 시작 → skipped(disabled), 보이지 않는 탭은 진단 미기록 + visibilitychange 즉시 1회, HUD 누락률 null 보존), `hud.js`(라벨 '렌더 fps'·'선명도'·'강조', 2줄 구분자, 진단 schemaVersion 11), 스키마 설명·parse-result 주의 문구, manifest 1.1.0, 체크리스트 M7 절. 테스트 추가(curveY 미러 일치, 기본값 ×1.90, M5 회신 설정 ×2.25, main 2건)
+- W-A(impl-worker): popup 전면 개편(M7-3 전체) + 테스트 24건. W-B(impl-worker): install.md(설치 순서·끄기·제거·회복 방법), 체크리스트 구조 개편(완료 절은 `docs/archive/manual-checklist-m1-m6.md`로 이동), make-xcode.sh 안내 1줄
+- → verify: lint 통과, npm test 226/226, test:dom 15/15, pytest sim 157/157, 과거 results parse-result 통과 / (1) 로컬 Mac. **popup 화면·다크 모드·스위치·되돌리기·기본값 복원·복사·HUD 표시는 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 같은 편집 세션에서 프리셋을 바꿔 다시 편집하면 되돌리기 안내의 프리셋 이름이 처음 것으로 남음. ② W-B가 보관 파일에서 M3·M4a·M4 전제의 make-xcode 문구와 M4 '(당시 기본값)'을 한 줄씩 고침(줄 수 불변). ③ 상세 슬라이더 저장 throttler를 6개에서 1개로 합침. ④ PLAN M7-3 '진단 영역 고정 토글' 없이 포커스·선택 중 갱신 보류로 대체(계획대로)
+- 이월: [확인 필요] install.md 항목(메뉴 이름·두 타깃 서명 필요 여부·확장 데이터 삭제 등), 2·3단계 UX 항목(ux-review 참조)
+
+## M8 구현 (브랜치 claude/m8-plan, 2026-10-02, Sonnet)
+
+- 계획: PLAN D-M8(UX 2단계). 사용자 결정: 권한·background·단축키·아이콘 추가, 컨테이너 앱 한국어화 제외. install.md [확인 필요] 5건 해소(두 타깃 서명 필요, 서명되지 않은 확장 허용은 재시작마다, 사이트 접근 선택지, 메뉴 이름, 빌드 폴더)
+- 본 세션: `params.js`(`statusOf`·`MSG`·`setEnabled`·`notify` 키), `renderer.js`(`setBypass`·`getStats().undecided/bypass`), popup 버전 v1.2.0, install.md·체크리스트 M8 절
+- W-A: `main.js`(현재 탭 상태 입력, getState 응답, background 알림, HUD 수명 분리, 상태 칩, 단축키)·`hud.js`(한국어 상태 문구·`createChip`) + 테스트·DOM 테스트. W-B: popup 상태 줄·상태 알림 체크박스·단축키 안내. W-C: `background.js`, manifest 1.2.0(background·icons·default_icon), `scripts/make-icons.py`와 PNG(확장 14개·앱 10개·Icon.png), 테스트
+- → verify: lint 통과, npm test 282/282, test:dom 18/18, pytest sim 157/157 / (1) 로컬 Mac. **Safari의 tabs.sendMessage·background service_worker 로드·배지·아이콘·단축키·칩·화면은 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 상태 칩이 영상 전환마다 '판정 중(원본 표시)'을 잠깐 띄움 → wait 레벨을 칩에서 제외할지. ② Option+Shift+H 직후 'HDR 변환 켜짐' 칩 뒤에 storage 반영으로 상태 칩이 이어서 뜰 수 있음. ③ `drmNow`는 mediaKeys/webkitKeys만 읽음(encrypted 이벤트만 있으면 '이전 DRM 영상' 문구로 표시될 수 있음). ④ 앱 아이콘 슬롯만 여백 약 9.8%(macOS 규격), 확장·Icon.png는 꽉 채움. ⑤ popup 켜기 스위치가 `cur.enabled`를 갱신하지 않아 기본값 복원 때 옛 enabled가 되살아나던 M7 결함을 W-B가 한 줄 수정
+- 이월: manifest background 형식이 Safari에서 로드되지 않으면 `{"scripts":[…],"persistent":false}`로 교체(사용자 Mac 확인 후), `tabs.sendMessage`가 거부되면 `activeTab` 권한 추가
+
+## 병합 (claude/amazing-hypatia-3rbspr → claude/m8-plan, 2026-10-03, Sonnet, 사용자 지시: 버그 수정 우선)
+
+- 두 줄기(T 회차 1.0.1 ↔ M7·M8 1.2.0)를 통합. 충돌은 T 회차 방식을 우선: 2초 주기 진단 저장 제거·popup 진단 요청(`sdrhdr.diagRequest`)·숨긴 탭 HUD 중단·`tonecurve.js` manifest 제외·`sameFrameSkipped`. M7·M8 쪽은 그 위에 얹음(popup 진단 영역은 열렸을 때만 textarea 갱신, Blob은 저장 클릭 시)
+- 버전: manifest 1.2.0 유지(T 회차 수정 포함). 진단 schemaVersion은 두 줄기가 각각 11을 써서 **12로 올림**(12 = 새 effectivePeak 공식 + sameFrameSkipped). 스키마·parse-result 안내 갱신
+- 테스트: `tonecurve.js`가 manifest에 없으므로 curveY 미러 테스트는 따로 로드. popup 테스트에 진단 요청 3건 포함
+- → verify: lint 통과, npm test 301/301, test:dom 18/18, pytest sim 157/157 / (1) 로컬 Mac
+
+## 조사: 메모리 증가·재부팅 후 설정 초기화 (2026-10-03, Sonnet, 코드 읽기만, 변경 없음)
+
+- **메모리**: 코드상 누수 경로는 찾지 못함. 확인한 것: VideoFrame은 모든 경로에서 `finally`로 close, probe 텍스처·버퍼는 destroy, `destroy()`는 `device.destroy`·`ctx.unconfigure`, 오버레이·main의 ResizeObserver·MutationObserver·리스너·타이머는 detach 때 해제, 통계 링 버퍼와 `errors`·`events`는 상한 있음, setInterval은 start() 1회만 등록, HUD·칩 DOM은 container 변경·끄기 때 제거. 프레임마다 bindGroup·encoder·외부 텍스처를 새로 만드는 것은 설계(GUIDELINES 2.5-1)라 GC 대기 중 WebContent 메모리가 오르내리는 것은 정상 범위일 수 있으나 Safari에서 실제 회수 속도는 **미검증**. M6 soak는 메모리 수치 없이 사용자 판단으로 통과했으므로 증가 여부 자체가 수치로 확인된 적 없음
+- **설정 초기화**: 코드에서 설정을 지우는 경로는 popup '기본값으로 되돌리기'의 `storage.local.remove` 하나뿐이고, 저장소는 `storage.local`(session·sync 미사용)이라 재부팅만으로 코드가 지우지는 않음. 가능한 원인은 Safari 쪽: ① 서명되지 않은 확장은 Safari 재시작마다 꺼져 다시 켜야 함(사용자 확인) → 이때 확장 저장소가 지워지는지 **미확인**, ② Xcode Run으로 다시 설치하면 저장소가 새로 시작되는지 **미확인**, ③ 사용자가 '초기화'라 느끼는 것이 실제로는 '켜기 꺼짐/사이트 접근 허용 초기화'일 가능성
+- Opus 확인 필요: 두 건 모두 원인 특정에 측정이 필요함. 제안(계획 문서 필요): (a) background.js `onStartup`/`onInstalled`에서 저장소 기존 키 유무만 `sdrhdr.boot`에 기록해 재부팅 후 저장소가 비었는지 코드 버그인지 가름, (b) 체크리스트에 메모리 측정 절차 재수행(5·30분 Activity Monitor 수치 기록)과 설정 초기화 재현 절차 추가
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

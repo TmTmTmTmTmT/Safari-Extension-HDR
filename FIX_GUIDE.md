@@ -1,105 +1,88 @@
-# FIX_GUIDE.md — 1.0.0 코드 리뷰 지적 사항 (T 회차)
+# FIX_GUIDE.md — 설정 초기화·메모리 증가 (U 회차)
 
-> 작성: Opus (2026-10-01). 근거: 1.0.0(main `ac304f9`) 정적 코드 리뷰(Sonnet, 대화 기록), `extension/content/{renderer,main,overlay,hud,params}.js`, `extension/popup/popup.js`.
+> 작성: Opus (2026-10-03). 근거: 사용자 보고(2026-10-03), STATUS.md "조사: 메모리 증가·재부팅 후 설정 초기화"(Sonnet 코드 읽기), `extension/content/{renderer,main,params,background}.js`, `extension/popup/popup.js`, `xcode/SDRHDR/SDRHDR Extension/SafariWebExtensionHandler.swift`.
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
-> 이전 회차(L·N·P·Q·R·S·K1)는 git 이력에 있다. K1은 PLAN D-M6 M6-5에서 종료되었다.
-> 브랜치: `claude/review-fixes`. 버전 1.0.0 → 1.0.1.
+> 이전 회차(T 포함)는 git 이력에 있다. T 회차 판정 보류 항목(TA 깜박임, T2 popup)은 체크리스트 "T 회차 확인" 절로 계속 받는다.
+> 브랜치: `claude/m8-plan`의 PR #14가 머지된 뒤 새 브랜치 `claude/u-fixes`(base는 PR #14가 머지된 브랜치). 버전 1.2.0 → 1.2.1.
+
+## 사용자 보고 (2026-10-03)
+
+- 설정: **Xcode에서 다시 Run** 하거나 **Mac을 재부팅**하면 슬라이더 값(프리셋·강도·상세 곡선 등)이 기본값으로 돌아간다.
+- 메모리: 4K 재생, HUD 끔. 시점은 무작위. 활동 상태 보기에서 `kernel_task`와 Safari의 해당 페이지 프로세스 합계 약 13 GB.
 
 ## 판정 요약
 
-| ID  | 분류                                                                       | 심각도         | 결정                                     |
-| --- | -------------------------------------------------------------------------- | -------------- | ---------------------------------------- |
-| T1  | 버그: 소스 변경 중 진행 중이던 frameProbe 결과가 새 소스에 적용            | 중(확률 낮음)  | 수정                                     |
-| T2  | 자원·버그: 진단 JSON 2초 주기 저장, 여러 탭이 같은 키를 덮어씀             | 중             | 수정(요청 시에만 저장)                   |
-| T3  | 자원: 숨긴 탭에서도 frameProbe·HUD 갱신                                    | 낮음           | 수정                                     |
-| T4  | UX·자원: popup 진단 상자가 2초마다 다시 그려져 스크롤 초기화, Blob 재생성  | 낮음           | 수정(T2와 함께)                          |
-| TA  | 자원: 120Hz에서 같은 소스 프레임을 2~4회 렌더                              | 중(배터리·GPU) | 수정(vf·copy 경로), 사용자 Mac 확인 필수 |
-| T5  | 정리: popup 상세 슬라이더 기본값 불일치, 런타임 미사용 `tonecurve.js` 로드 | 낮음           | 수정                                     |
-| T6  | 단일 측정 모드에서 영상 중간 HDR 전환 미검사                               | 매우 낮음      | 수정 안 함(아래 사유)                    |
-| TB  | 창 크기 드래그 중 캔버스 백킹 재할당                                       | 일시적         | 수정 안 함(수용)                         |
+| ID  | 분류                                       | 심각도 | 결정                                                 |
+| --- | ------------------------------------------ | ------ | ---------------------------------------------------- |
+| U1  | 설정 유실: 재설치·재부팅 뒤 storage 초기화 | 높음   | 수정(네이티브 백업·복원)                             |
+| U2  | 메모리: GPU 측 자원 적체 가능성            | 높음   | 방어 수정 1건(U2-A) + 진단 카운터(U2-B) + 측정(U2-C) |
 
-## T1. 소스 변경 중 frameProbe 결과 폐기
+## U1. 재설치·재부팅 뒤 설정 초기화
 
-- **원인**: `renderer.runProbe`는 경로별 측정 사이에 여러 번 await한다. 그 사이 `restartSource()`가 `path=null`·`colorSpace=null`로 초기화해도, 재개된 이전 회차가 이전 소스의 측정값으로 `path`를 결정하고 `onProbe`를 부른다. 이전 값이 밝으면 새 소스는 경로가 이미 결정된 상태가 되고, 이후 30초 회차는 단일 측정(`mode:'single'`)이라 결정 전 회차의 HDR 조기 판정(M6-1 (a))을 건너뛴다. 새 소스가 HDR이고 경로가 ext면 다음 소스 변경까지 HDR 영상에 ITM이 적용된다.
-- **수정 방향**:
-  1. renderer에 소스 세대 번호(정수)를 둔다. `restartSource()`와 `enterBaseline()`에서 1 증가시킨다.
-  2. `runProbe` 시작 시 세대 번호를 기억하고, **각 await 직후**와 frameProbe를 만들기 직전에 현재 번호와 비교한다. 다르면 `frameProbe`·`path`·`noneStreak`·`pendingCount`·`colorSpace`를 건드리지 않고 `onProbe`도 부르지 않고 반환한다(`probeBusy`는 finally에서 해제).
-  3. `probeVf`가 `colorSpace`를 쓰는 시점도 세대 번호를 확인한다(이전 세대의 프레임이 새 세대의 colorSpace를 덮지 않게).
-  4. 폐기한 회차는 `probeDue`를 바꾸지 않는다. `restartSource`가 `probeDue = 0`으로 둔 값이 유지되어 다음 poll(≤ 500 ms)에서 새 회차가 즉시 돈다.
-- **영향 범위**: `renderer.js`만. main·detect 변경 없음.
-- **검증**: 단위 테스트(renderer stub): (a) 측정 중간(예: ext await 중) `restartSource()` 호출 → 이전 회차 완료 후에도 `path === null`, `onProbe` 호출 없음, `frameProbe === null`. (b) 다음 poll에서 새 회차가 vf부터 다시 측정하고 HDR colorSpace면 `hdrEarly` true. (c) 세대가 같으면 기존 동작 그대로(기존 테스트 전부 통과).
+**원인 분석**
 
-## T2. 진단 JSON을 popup 요청 시에만 저장
+- 코드가 설정을 지우는 경로는 popup "기본값으로 되돌리기"(사용자 조작) 하나뿐이다. 설정 쓰기는 모두 popup 조작 시점이며 로드 시 기본값을 쓰는 코드는 없다(Sonnet 확인). 저장소는 `storage.local`만 쓴다.
+- 재현 조건 두 가지(Xcode Run, Mac 재부팅)는 모두 Safari가 **서명되지 않은 확장을 다시 등록·재허용하는 시점**이다(재부팅 → Safari 재시작 → "서명되지 않은 확장 허용" 재설정 → 확장 다시 켬, 사용자 확인 2026-10-02). 이때 Safari가 확장의 `storage.local`을 새로 시작하는 것으로 **추정**한다 [미확인: Safari 내부 동작, 문서 근거 없음]. 코드로 막을 수 없는 외부 원인이므로 저장소를 하나 더 둔다.
 
-- **원인**: `main.js`가 2초마다 `buildDiag`를 만들고, 내용이 바뀌면(재생 중에는 frames가 늘어 항상 바뀜) `storage.local.set({sdrhdr.diag})`를 한다. 탭당 시간당 약 1,800회·회당 수 KB이고 숨긴 탭도 쓴다. 키가 하나라 여러 YouTube 탭이 서로 덮어써 popup이 다른 탭의 진단을 보여 줄 수 있다.
-- **수정 방향** (GUIDELINES 2.1-5 유지: 메시징 없이 storage만):
-  1. 새 키 `sdrhdr.diagRequest`(숫자, 요청 시각 ms). `params.js`에 키와 구독 함수(요청 키 변경 시 콜백)를 추가한다. `browser.*` 접근은 params.js에만 둔다.
-  2. popup은 **진단 영역(`#diag-section`)이 열려 있는 동안만** 요청을 쓴다: 열릴 때 1회, 열려 있는 동안 2초마다. 닫히거나 popup이 닫히면 요청이 멈춘다.
-  3. content(main)는 2초 주기 `setInterval(writeDiagIfChanged)`를 **제거**한다. 요청 키가 바뀌면 `document.visibilityState === 'visible'`인 탭만 즉시 진단을 1회 만들어 쓴다(변경 비교 `lastDiagKey`는 유지해 같은 내용이면 생략). 숨긴 탭은 무시한다.
-  4. `pollMode()`(플레이어 모드 이벤트 기록)는 진단 작성 시와 fullscreenchange 때만 호출된다(현행 이벤트 리스너 유지). 2초 주기 호출이 사라져 `mode:` 이벤트가 덜 세밀해지는 것은 수용한다.
-  5. popup이 처음 열릴 때는 저장된 마지막 진단을 먼저 보여 주고(현행), 요청 응답이 오면 갱신한다. 보이는 YouTube 탭이 없으면 응답이 없으므로 진단 상자 위에 "보이는 YouTube 탭에서만 갱신됩니다" 한 줄을 고정 표시한다.
-- **영향 범위**: `params.js`(키·구독), `main.js`(주기 제거, 요청 구독), `popup.html/js`(요청 쓰기·안내 문구). 스키마 변경 없음. `docs/install.md`·체크리스트의 "진단 JSON 복사" 안내에 "진단 영역을 펼치면 보이는 탭에서 갱신" 한 줄 추가.
-- **검증**: 단위 테스트: (a) main은 시작 후 요청 없이 시간이 지나도 `writeDiag` 0회 (b) 요청 키 변경 시 보이는 탭은 1회 쓰고, `document.visibilityState === 'hidden'`이면 0회 (c) popup은 진단 영역이 닫혀 있으면 요청 0회, 열면 즉시 1회 + 타이머로 2초마다, 닫으면 중단. 사용자 Mac: 진단 영역을 펼쳐 JSON이 갱신되는지, 두 탭(하나는 백그라운드 재생)에서 보이는 탭의 URL이 표시되는지.
+**수정 방향**
 
-## T3. 숨긴 탭의 주기 작업 중단
+- (a) **네이티브 백업**: 컨테이너 앱의 확장 타깃(`SafariWebExtensionHandler.swift`, 이미 프로젝트에 있음 → pbxproj 변경 불필요)이 `UserDefaults`에 설정 JSON 1개를 보관한다. 확장 컨테이너의 UserDefaults는 Xcode 재빌드·재부팅 뒤에도 유지된다 [추정, U1 검증 (3)으로 확인].
+  - 메시지 2종(`browser.runtime.sendNativeMessage`, Safari는 앱 id 인자를 무시하므로 번들 id 문자열을 그대로 넘김): `{type: 'backup:set', data}` → 저장 후 `{ok: true}`, `{type: 'backup:get'}` → `{ok: true, data}`(없으면 `data: null`). 그 외 type은 `{ok: false}`.
+  - Swift 쪽 검증: `data`는 JSON 직렬화 가능한 사전이고 직렬화 크기 ≤ 16 KB일 때만 저장. 키는 `sdrhdr.settingsBackup` 하나. 기존 템플릿의 echo·os_log 출력은 메시지 내용을 로그에 남기지 않게 바꾼다(타입만 로그).
+- (b) **백업 대상**: `params`에 `BACKUP_KEYS` = enabled, preset, custom, strength, sharpness, saturation, hud, notify. **mode(진단 모드)·diag·diagRequest·customPrev는 제외**(진단 모드가 재시작 후 살아나면 UX-01 문제 재발).
+- (c) **백업 시점**(background.js): `storage.onChanged`에서 `BACKUP_KEYS` 중 하나라도 바뀌면 1초 디바운스 후 `storage.local.get(BACKUP_KEYS)` → `normalizeSettings` 하지 않은 **원본 값 그대로**(없는 키는 생략) `backup:set`. 기본값 복원(키 삭제)도 같은 경로로 반영된다(빈 객체 저장 허용).
+- (d) **복원 시점**(background.js 시작 시 1회, `runtime.onStartup`·`onInstalled`와 최상위 실행 중 먼저 오는 것 1회만): `storage.local.get(BACKUP_KEYS)`가 **모두 비어 있고** 백업이 비어 있지 않을 때만 `storage.local.set(백업)` + `sdrhdr.restoredAt`(ms) 기록. 하나라도 있으면 아무것도 하지 않는다(사용자 최신 값 우선). 복원으로 생긴 onChanged는 백업을 다시 쓰지만 같은 값이므로 무해.
+  - content는 background보다 먼저 기본값으로 시작할 수 있다. 복원 set이 onChanged로 전달되어 1초 안에 사용자 값으로 바뀌므로 수용한다.
+- (e) **표시**: popup 진단 영역 출처 줄 아래에 `sdrhdr.restoredAt`이 있으면 "M월 D일 HH:MM 재시작 후 설정을 백업에서 복원함" 한 줄(진단 영역 안). 진단 JSON 스키마는 바꾸지 않는다.
+- (f) **실패 시**: `sendNativeMessage`가 없거나 거부·예외면 조용히 무시(현재 동작과 같음). background가 로드되지 않는 경우(M8 미확인 사항)에는 U1도 동작하지 않는다 → 체크리스트에서 함께 확인.
+- (g) **규칙·권한**: manifest `permissions`에 `"nativeMessaging"` 추가(이 문서로 Opus 승인). GUIDELINES 1-3(background 역할에 "설정 백업·복원" 추가), 2.1-5(네이티브 메시지 2종 추가)는 Opus가 이 커밋에서 개정한다. 백업 데이터에 URL·제목·진단은 없다(2.6-1).
 
-- **원인**: 렌더 루프는 `document.hidden`이면 멈추지만 `probePoll`(0.5초)은 계속 돌아 30초마다 GPU 되읽기 측정을 하고, main의 HUD 1초 타이머도 계속 돈다.
-- **수정 방향**: `probePoll`은 `document.hidden`이면 즉시 반환한다(가시 복귀 시 다음 poll에서 재개, `probeDue`는 그대로). `tickHud`도 `document.hidden`이면 반환한다. 타이머 자체는 유지한다(해제·재등록 로직을 늘리지 않는다).
-- **영향 범위**: `renderer.js`, `main.js`.
-- **검증**: 단위 테스트: `document.hidden = true`인 동안 poll이 측정을 시작하지 않고, false로 바뀐 뒤 다음 poll에서 측정한다. HUD stub `update` 호출 0회(hidden).
+**영향 범위**: `background.js`, `params.js`(`BACKUP_KEYS`, `KEYS.restoredAt`), `manifest.json`, `SafariWebExtensionHandler.swift`, `popup.js`(복원 안내 한 줄), 관련 테스트. content·renderer·수명주기 불변.
 
-## T4. popup 진단 상자 갱신
+**검증**
 
-- **원인**: `storage.onChanged`로 진단이 올 때마다 textarea 값을 통째로 바꾸고 Blob·object URL을 새로 만든다. 스크롤 위치가 맨 위로 돌아간다.
-- **수정 방향**: (1) 진단 영역이 닫혀 있으면 textarea를 갱신하지 않고 최신 진단만 변수에 보관한다(열릴 때 반영). (2) 갱신 시 textarea의 `scrollTop`을 보존한다. (3) Blob·object URL은 "JSON 저장" 링크를 누를 때 만든다(이전 URL은 그때 해제).
-- **영향 범위**: `popup.js`(+ 필요 시 popup.html 안내 문구 1줄).
-- **검증**: popup 단위 테스트(가짜 DOM): 닫힌 상태에서 진단 변경 시 textarea 불변, 열면 반영, scrollTop 보존, Blob 생성은 저장 클릭 시 1회.
+- (1) 단위: 디바운스(연속 변경 → 1회 백업, 마지막 값), mode·diag 변경은 백업 안 함, 시작 시 저장소가 비고 백업이 있으면 복원 + restoredAt, 저장소에 키가 하나라도 있으면 복원 안 함, 백업이 비면 복원 안 함, 복원 1회만, 네이티브 미지원·거부 무시, popup 복원 안내 표시.
+- (2) `xcodebuild`(무서명) 빌드 통과로 Swift 컴파일 확인. Swift 동작 자체는 사용자 Mac.
+- (3) 사용자 Mac: 슬라이더 값 바꿈 → 1초 이상 대기 → Xcode Run → Safari 재시작·확장 켬 → popup 값 유지 + 진단 영역 "복원함" 표시 여부. 이어서 Mac 재부팅 후 같은 확인. "복원함"이 뜨면 원인 추정(storage 초기화)이 맞는 것이다. 값이 유지되는데 "복원함"이 없으면 storage가 지워지지 않은 것(원인이 다른 곳) → Opus에 회신.
 
-## TA. 같은 소스 프레임 재렌더 생략 (vf·copy 경로)
+## U2. 메모리 증가 (4K, kernel_task + Safari 페이지 약 13 GB)
 
-- **원인**: 렌더 루프는 rAF마다 그린다. ProMotion(120Hz)에서 60fps 영상은 같은 소스 프레임을 2회, 30fps는 4회, 24fps는 5회 그린다. 2160p ITM 1회 GPU 약 2.4 ms(G3)라 절반 이상이 같은 그림을 다시 그리는 데 쓰인다. PLAN D-M6 M6-5는 "프레임 변화 신호가 없다"는 이유로 보류했지만, vf 경로는 매 rAF에 만드는 `VideoFrame.timestamp`가 그 신호다(S2 cadence가 이미 이 값을 쓴다). copy 경로는 `updateCopyTexture`가 이미 `currentTime`이 같으면 복사를 생략한다.
-- **수정 방향**:
-  1. renderer에 "다시 그려야 함" 플래그(dirty)를 둔다. 켜는 조건: `setParams`, `setMode`, `restartSource`, 경로 변경(결정·한 단계 전환·vf→copy 폴백), `onWake`(play·seeked), 가시 복귀, 캔버스 백킹 크기(`canvas.width/height`)가 직전 렌더와 다름, GPU 초기화 직후 첫 렌더.
-  2. **vf 경로**: `VideoFrame`을 만든 뒤 `frame.timestamp`가 숫자이고 직전에 실제로 그린 timestamp와 같으며 dirty가 아니면, 프레임을 즉시 닫고 import·렌더·submit을 하지 않는다. timestamp가 없으면(undefined) 항상 그린다.
-  3. **copy 경로**: `updateCopyTexture`가 같은 프레임이라 복사를 생략했고 dirty가 아니면 렌더·submit도 생략한다.
-  4. **ext 경로**: 신호가 없으므로 현행대로 매번 그린다.
-  5. 생략한 tick도 **루프 통계는 기록**한다: `loopTs`·`srcTs`·`frameTimes`(JS 시간)를 현행처럼 push하고 `frames`는 실제 렌더만 센다. 이렇게 해야 `loopFps`·`displayMissRate`·cadence(S2)의 의미가 바뀌지 않는다. 생략 횟수 `sameFrameSkipped`를 getStats·진단에 추가한다(schemaVersion 11, `render.sameFrameSkipped`, 스키마·parse-result 갱신).
-  6. 되돌리기 쉬운 형태: renderer 상단 이름 있는 상수 `SKIP_SAME_FRAME = true` 하나로 끄고 켤 수 있게 한다(사용자 노출 설정 아님, GUIDELINES 1-2 위반 아님).
-- **전제 [미확인]**: WebGPU 캔버스는 해당 프레임에 `getCurrentTexture`를 부르지 않으면 직전에 표시한 내용을 유지한다(스펙상 새 텍스처를 present하지 않으면 표시가 바뀌지 않음). Safari 27.2에서 실제로 유지되는지(깜박임·검은 프레임 없음)는 사용자 Mac에서만 확인 가능하다. 깜박이면 `SKIP_SAME_FRAME = false`로 되돌리고 FIX_GUIDE에 기록한다.
-- **영향 범위**: `renderer.js`, `hud.js`(진단 필드), 스키마, parse-result.
-- **검증**: 단위 테스트(renderer stub): (a) vf 경로에서 같은 timestamp 두 tick → 두 번째는 import·submit 없음, frame.close 호출됨, loopTs는 2개, frames 1, sameFrameSkipped 1 (b) timestamp가 바뀌면 렌더 (c) dirty 조건 각각(setParams, 캔버스 크기 변경, onWake, 경로 전환) 후에는 같은 timestamp여도 렌더 (d) timestamp undefined면 항상 렌더 (e) copy 경로 같은 currentTime → 렌더 생략 (f) ext 경로는 항상 렌더 (g) `SKIP_SAME_FRAME=false` 동작은 소스 상수라 테스트하지 않는다. 사용자 Mac(ProMotion, 60fps·30fps SDR 영상, HUD 켬): 깜박임·검은 프레임 없음, HUD fps가 이전과 같은 수준(약 120), 진단 `sameFrameSkipped`가 60fps에서 약 절반·30fps에서 약 3/4, 끊김 육안 변화 없음. 가능하면 활성 상태 보기(Activity Monitor) GPU 탭의 Safari GPU 시간 전후 비교.
+**원인 분석 (가설, 측정 전)**
 
-## T5. 정리
+- `kernel_task` 메모리에는 GPU가 쓰는 wired 메모리(IOSurface 등)가 잡힌다. 확장은 렌더할 때마다 `VideoFrame`(즉시 close), `GPUExternalTexture`, `GPUBindGroup`, command encoder를 새로 만든다(GUIDELINES 2.5-1, 외부 텍스처 재사용 금지). JS 래퍼는 GC 전까지 남고, 그동안 GPU 측 자원(4K 프레임 IOSurface 참조)이 함께 유지될 수 있다. 120Hz·4K에서 GC가 늦거나 GPU 큐가 밀리면 적체된다 → **H1 (유력)**.
+- **H2**: 설정 토글·SPA 이동·모드 전환마다 `requestDevice`로 새 GPU device를 만든다. 이전 device는 `destroy()`하지만 Safari가 즉시 반환하는지 미확인.
+- **H3**: 확장과 무관(YouTube 4K 재생·Safari 자체). 확장 끔 상태 측정 없이 배제할 수 없다.
+- 코드 읽기로 확인된 누수(해제 누락)는 없다(STATUS 조사). 따라서 원인은 "해제 누락"이 아니라 "해제 지연·적체"로 본다.
 
-- (a) popup `bindDetail`의 범위 밖 입력 기본값이 `PRESETS.accurate`다 → `params.DEFAULT_CUSTOM`으로 바꾼다.
-- (b) `content/tonecurve.js`는 테스트 전용 JS 미러인데 manifest `content_scripts`에 들어 있어 모든 YouTube 페이지에서 로드된다 → manifest 목록에서 뺀다(파일은 유지). 이 파일을 manifest로 로드하던 테스트(`extension-load`의 네임스페이스 키 목록, `extension-manifest`의 파일 순서, `extension-wgsl`의 계수 비교)는 `tonecurve.js`를 명시적으로 로드하도록 고친다. GUIDELINES 3-1의 "JS 미러는 `content/tonecurve.js`"는 유지하고 "런타임 미로드(테스트 전용)"를 덧붙인다(아래 GUIDELINES 개정).
-- 검증: 기존 테스트 통과, manifest 테스트가 새 목록을 검사.
+**수정 방향**
 
-## T6. 수정하지 않는 항목 (사유)
+- **U2-A (방어, 지금 적용)**: GPU 큐 적체 상한. renderer에 제출 후 완료되지 않은 프레임 수(in-flight)를 센다(`device.queue.onSubmittedWorkDone()`의 resolve로 감소). **in-flight ≥ 2이면 그 tick은 렌더하지 않고 건너뛴다**(VideoFrame도 만들지 않음, `sameFrameSkipped`와 별도 카운터 `gpuBusySkipped`). device 교체·destroy 시 카운터 초기화(이전 device의 promise가 늦게 와도 새 카운터를 건드리지 않게 세대 확인). 이 상한은 정상 상태(GPU 2.4~5.3 ms/프레임, G3)에서는 거의 걸리지 않고 적체 때만 동작한다.
+- **U2-B (진단 카운터)**: 진단 `render`에 `devicesCreated`(이 페이지에서 requestDevice 성공 누적, renderer 바깥 main이 세는 누적값), `gpuBusySkipped`, `uptimeS`(start 후 경과 초)를 추가 → **schemaVersion 13**. 스키마·parse-result 갱신. HUD 4줄에 `GPU 대기 생략 n` 추가하지 않는다(진단만).
+- **U2-C (측정, 사용자)**: 아래 체크리스트로 H1~H3를 가른다. 결과를 받은 뒤 Opus가 추가 조치(예: H1이면 렌더 상한 60Hz 옵션, H2면 device 재사용)를 결정한다. 이 문서는 U2-A·B만 구현을 지시한다.
 
-- **T6 단일 측정 모드의 영상 중간 HDR 전환**: vf 경로는 단일 측정 회차에서도 `probeVf`가 `colorSpace`를 갱신하고, main `onProbe`가 매 회차 `probe.colorSpace`로 HDR을 검사하므로 이미 30초 안에 잡는다. ext 경로(H.264)만 못 잡지만, YouTube HDR은 VP9·AV1이고 소스 변경 시 전체 측정을 하므로 실사용 영향이 없다고 본다.
-- **TB 창 크기 드래그 중 캔버스 재할당**: 드래그 동안에만 일시적이고 끝나면 안정된다. 디바운스는 위치 지연(오버레이 어긋남)을 만들어 수용한다.
+**영향 범위**: `renderer.js`(in-flight 카운트·tick 생략·`getStats` 필드), `main.js`(devicesCreated 누적, uptime), `hud.js`(buildDiag 필드, schemaVersion 13), `docs/result-schema-m2.json`, `scripts/parse-result.py`, 테스트. 경로 선택·곡선·수명주기 불변.
+
+**검증**
+
+- (1) 단위: in-flight 2에서 tick 생략·VideoFrame 미생성·카운터 증가, onSubmittedWorkDone resolve 후 재개, device 교체 후 늦은 resolve가 새 카운터를 바꾸지 않음, `onSubmittedWorkDone` 미지원이면 상한 없이 현행 동작, buildDiag v13 필드.
+- (2) 사용자 Mac 측정(체크리스트 "U 회차 확인"):
+  - 같은 4K SDR 영상(재생목록 반복 가능), 창 모드, HUD 끔. 각 조건 **15분**, 0·5·15분에 활동 상태 보기 → 메모리 탭에서 `kernel_task`와 "Safari 웹 콘텐츠(youtube.com)" 값을 적는다. 조건 사이에 Safari를 완전 종료 후 재시작.
+  - (a) 확장 끔 (b) popup 진단 모드 `baseline` (c) 정상(itm). (c) 끝에 진단 JSON 1개.
+  - 판정 자료: (a)에서도 오르면 H3(확장 무관). (b)는 평탄하고 (c)만 오르면 H1(렌더 경로). (c)에서 `devicesCreated`가 1보다 크고 그때마다 오르면 H2.
 
 ## 버전·문서
 
-- manifest `version` 1.0.0 → 1.0.1. 진단 schemaVersion 11(`render.sameFrameSkipped`).
-- 체크리스트에 "T 회차 확인" 절(사용자 Mac): TA 깜박임·HUD fps·`sameFrameSkipped`, T2 진단 영역 갱신·두 탭, T1·T3은 단위 테스트로 갈음.
-- STATUS.md에 회차 결과 기록.
+- manifest 1.2.1, popup 헤더 버전 문자열 동기화(GUIDELINES 7-7), 진단 schemaVersion 13.
+- install.md: 7장 문제 해결에 "설정이 기본값으로 돌아갔을 때"(U1 동작과 복원 안내), 8장에 메모리 측정 중임을 한 줄. 6장 HUD 절 첫 줄에 "popup의 '페이지 HUD 표시'를 켜면 보이는 상태 표시"라고 위치를 명시(사용자가 HUD를 모른다고 회신).
+- 체크리스트: "U 회차 확인" 절 = U1 검증 (3) + U2 측정 (2). 판정: U1 값 유지, U2 측정 표 회신.
 
 ## 이번 수정 범위 밖 (변경 금지)
 
-- 곡선·프리셋·기본값·WGSL 수식, 경로 선택 규칙(choosePath·stepDownPath), 수명주기 상태 전이, DRM 가드, 오버레이 배치, HUD 표시 내용.
+- 곡선·프리셋·기본값·WGSL, 경로 선택 규칙, 수명주기 상태 전이, DRM 가드, 오버레이 배치, popup 레이아웃(복원 안내 한 줄 제외), M8 상태 칩·배지 동작.
 
 ## 병렬 분할
 
-- W-A(impl-worker): `renderer.js` T1·T3(probePoll 부분)·TA + `tests/unit/extension-renderer.test.js`.
-- W-B(impl-worker): `popup/*` T2(popup 쪽)·T4·T5(a) + `tests/unit/extension-popup.test.js`.
-- 본 세션(Sonnet): `params.js`(T2 키·구독, W-B 시작 전에 먼저 커밋해 W-B가 사용), `main.js` T2·T3(HUD), `hud.js`·스키마·parse-result(TA 진단), manifest(T5(b)·버전), 관련 테스트(load·manifest·wgsl·main), 체크리스트·install.md 문구, STATUS.
-- 순서: 본 세션 params 먼저 → W-A·W-B 병렬 → 본 세션 나머지 통합 → lint·test·test:dom·pytest → PR.
-
-## 구현 검토 (Opus, 2026-10-01, PR #12 `claude/review-fixes`)
-
-- T1·T2·T3·T4·T5·TA 모두 이 문서의 수정 방향과 일치한다. 범위 밖 변경 없음. 추가 수정 지시 없음.
-- 기존 테스트 P2의 렌더 횟수 3→2 변경은 TA(e)의 의도된 결과라 성질 약화가 아니다.
-- 해석 확인: (1) 생략 tick도 `frameTimes`에 JS 시간을 넣으므로 `jsP95`는 생략 tick(수 μs)이 섞여 1.0.0보다 낮게 나올 수 있다. 이 문서 TA-5의 결정대로 두며, M6 기준(`jsP95` ≤ 4 ms) 비교 시 1.0.0 값과 직접 비교하지 않는다. (2) 경로 변경 dirty는 단위 테스트가 약하지만 경로 변경 시 `lastVfTs`·복사 텍스처가 어차피 달라져 실해가 없다. (3) popup을 처음 열 때 진단 상자가 비어 있거나 다른 탭의 이전 값일 수 있음은 수용한다(영역을 펼치면 보이는 탭 값으로 바뀜).
-- 판정 보류: TA 캔버스 내용 유지(깜박임 없음)와 T2 popup 동작은 사용자 Mac 체크리스트 "T 회차 확인" 결과로 판정한다. 1(a)가 "가끔" 이상이면 `SKIP_SAME_FRAME = false`로 되돌리는 것을 Sonnet이 바로 해도 된다(이 문서로 사전 승인).
+- 본 세션(Sonnet) 먼저: `params.js`(`BACKUP_KEYS`, `KEYS.restoredAt`) 커밋.
+- W-A(impl-worker): U1 — `background.js`, `manifest.json`(nativeMessaging·1.2.1), `SafariWebExtensionHandler.swift`, `tests/unit/extension-background.test.js`·manifest 테스트, `xcodebuild` 무서명 빌드 확인.
+- W-B(impl-worker): U2-A·B — `renderer.js`, `tests/unit/extension-renderer.test.js`.
+- 본 세션 나머지: `main.js`(devicesCreated·uptime), `hud.js` v13·스키마·parse-result, `popup.js`·`popup.html`(복원 안내 한 줄·버전 문자열), 문서·체크리스트·STATUS, 전체 검증 → PR.

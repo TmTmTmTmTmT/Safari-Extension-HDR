@@ -7,6 +7,10 @@
   const MUTATION_DEBOUNCE_MS = 250;
   const MAX_ERRORS = 20;
   const MAX_EVENTS = 30;
+  // 단축키 (PLAN D-M8 M8-0 (e)). 문자열은 이 상수 한 곳에서만 쓴다.
+  const KEY_CODE = 'KeyH'; // Option+H: 누르는 동안 원본 보기, Option+Shift+H: 켜기/끄기
+  const BYPASS_STATES = ['active', 'probing']; // 원본 보기를 허용하는 수명주기 상태
+  const TYPING_TAGS = ['INPUT', 'TEXTAREA', 'SELECT'];
   const NO_PROBE_MODES = ['stripes', 'baseline']; // frameProbe 경로 결정 없이 바로 그리는(또는 그리지 않는) 모드
 
   const drmVideos = new WeakSet(); // DRM 판정된 video는 요소 단위 영구 no-op (GUIDELINES 2.4-2, 2.4-4)
@@ -33,6 +37,12 @@
   let observedPlayer = null;
   let lastDiagKey = null;
   let started = false;
+  let hudState = null; // { container, hud }: attach와 독립 수명 (PLAN M8-3, UX-13)
+  let chipState = null; // { container, chip }
+  let lastVideo = null; // 마지막으로 본 메인 video. cur가 없을 때 DRM 신호를 읽기만 하려는 용도
+  let bypass = false; // 원본 보기 (Option+H 누르는 동안)
+  let lastSentKey = null; // background에 마지막으로 보낸 상태 (같은 상태 연속 미전송)
+  let lastChipText = null; // 칩이 마지막으로 다룬 상태 문구
 
   function addError(at, e) {
     if (errors.length >= MAX_ERRORS) return;
@@ -54,10 +64,12 @@
   function dispatch(ev, quiet) {
     const prev = lc;
     lc = ns.detect.nextLifecycle(lc, ev);
-    if (quiet) return;
-    logEvent(ev);
-    if (lc.state === 'skipped' && (prev.state !== 'skipped' || prev.skip !== lc.skip))
-      logEvent('skip:' + lc.skip);
+    if (!quiet) {
+      logEvent(ev);
+      if (lc.state === 'skipped' && (prev.state !== 'skipped' || prev.skip !== lc.skip))
+        logEvent('skip:' + lc.skip);
+    }
+    refreshUi();
   }
 
   function snapshot() {
@@ -88,6 +100,7 @@
     snapshot();
     const a = cur;
     cur = null;
+    bypass = false; // renderer가 사라지므로 원본 보기도 끝난다
     a.cleanup.forEach((fn) => fn());
     a.renderer.destroy();
     a.overlay.destroy();
@@ -108,35 +121,88 @@
     if (NO_PROBE_MODES.includes(settings.mode)) dispatch('decided', true);
   }
 
-  // 페이지 HUD (PLAN M5-3). 켜져 있고 attach 중일 때만 만든다. detach 때 함께 제거된다.
-  function showHud(a) {
-    if (a.hud) return;
-    a.hud = ns.hud.createHud(a.container);
-    a.cleanup.push(() => {
-      if (a.hud) a.hud.destroy();
-      a.hud = null;
-    });
-    tickHud();
+  // 현재 상태 입력 (PLAN M8-3). URL·제목은 넣지 않는다 (GUIDELINES 2.6-1).
+  // drmNow는 현재 video의 DRM 신호를 읽기만 한다. sawEncrypted는 보지 않고 markDrm도 부르지 않는다 (GUIDELINES 2.4-5).
+  function currentStatusInput() {
+    const v = cur ? cur.video : lastVideo;
+    const drmNow = v
+      ? ns.detect.isDrm({
+          mediaKeys: v.mediaKeys,
+          webkitKeys: v.webkitKeys,
+          sawEncryptedEvent: false,
+        })
+      : false;
+    return {
+      enabled: settings ? settings.enabled : undefined,
+      mode: settings ? settings.mode : undefined,
+      state: lc.state,
+      skip: lc.skip,
+      undecided: cur ? !!cur.renderer.getStats().undecided : false,
+      errorName: errors.length > 0 ? errors[errors.length - 1].name : null,
+      drmNow,
+      bypass,
+    };
   }
 
-  function hideHud(a) {
-    if (!a.hud) return;
-    a.hud.destroy();
-    a.hud = null;
+  function destroyHud() {
+    if (!hudState) return;
+    hudState.hud.destroy();
+    hudState = null;
   }
 
-  function hudInfo(a) {
-    const st = a.renderer.getStats();
+  function destroyChip() {
+    if (!chipState) return;
+    chipState.chip.destroy();
+    chipState = null;
+  }
+
+  // HUD·칩은 attach가 아니라 container에 묶는다. cur가 없어도(DRM·오류·꺼짐) 유지하고, container가 바뀔 때만 다시 만든다.
+  // 요소 조회는 detect 함수로만 한다 (GUIDELINES 2.3-1).
+  function syncUi() {
+    if (!settings) return null;
+    const found = ns.detect.findMainVideo(document);
+    if (found) lastVideo = found.video;
+    const container = found ? found.container : null;
+    if (settings.hud && container) {
+      if (!hudState || hudState.container !== container) {
+        destroyHud();
+        hudState = { container, hud: ns.hud.createHud(container) };
+      }
+    } else {
+      destroyHud();
+    }
+    if (chipState && chipState.container !== container) destroyChip();
+    return container;
+  }
+
+  function showChip(container, label) {
+    if (!container) return;
+    if (!chipState) chipState = { container, chip: ns.hud.createChip(container) };
+    chipState.chip.show(label);
+  }
+
+  function hudInfo() {
+    const a = cur;
+    const st = a ? a.renderer.getStats() : last.render || {};
     const sum = ns.hud.summarize(st.frameTimesMs, st.loopTimestamps);
     const loopTs = Array.isArray(st.loopTimestamps) ? st.loopTimestamps : [];
     const hz = ns.hud.estimateDisplayHz(loopTs);
-    const miss =
-      hz === null
-        ? null
-        : ns.hud.displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], hz) * 100;
+    // 측정 불가(null)를 0%로 바꾸지 않는다 (PLAN M7-2).
+    const missRate =
+      hz === null ? null : ns.hud.displayMissRate(loopTs, loopTs[0], loopTs[loopTs.length - 1], hz);
+    const miss = missRate === null ? null : missRate * 100;
+    const input = currentStatusInput();
+    const lv = last.video;
     return {
       state: lc.state,
       skipReason: lc.skip,
+      mode: input.mode,
+      enabled: input.enabled,
+      paused: a ? a.video.paused : false,
+      undecided: input.undecided,
+      drmNow: input.drmNow,
+      bypass: input.bypass,
+      errorName: input.errorName,
       path: st.path,
       preset: st.preset,
       strength: st.strength,
@@ -146,14 +212,108 @@
       loopFps: sum.loopFps,
       jsP95: sum.jsP95,
       missPct: miss,
-      videoW: a.video.videoWidth,
-      videoH: a.video.videoHeight,
+      videoW: a ? a.video.videoWidth : lv ? lv.videoWidth : null,
+      videoH: a ? a.video.videoHeight : lv ? lv.videoHeight : null,
     };
   }
 
   function tickHud() {
-    if (document.hidden || !cur || !cur.hud) return;
-    cur.hud.update(ns.hud.hudLines(hudInfo(cur)));
+    if (document.hidden || !hudState) return; // 숨긴 탭은 HUD를 갱신하지 않는다 (FIX_GUIDE T)
+    hudState.hud.update(ns.hud.hudLines(hudInfo()));
+  }
+
+  // browser.runtime이 없는 환경(테스트)에서도 죽지 않는다. 실패·거부는 무시한다 (GUIDELINES 2.1-5).
+  function notifyBackground(status) {
+    const key = status.text + '|' + JSON.stringify(status.badge);
+    if (key === lastSentKey) return;
+    lastSentKey = key;
+    try {
+      const p = browser.runtime.sendMessage({
+        type: ns.params.MSG.state,
+        badge: status.badge,
+        level: status.level,
+      });
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) {
+      // 배지 알림 실패는 무시한다.
+    }
+  }
+
+  // 상태 문구가 바뀌면 칩을 보이고(notify), background에 알린다. force는 단축키 피드백용(notify 무관).
+  function refreshUi(opts) {
+    try {
+      refreshUiNow(opts);
+    } catch (e) {
+      // HUD·칩·배지 실패가 수명주기나 재생을 방해하지 않는다.
+    }
+  }
+
+  function refreshUiNow(opts) {
+    if (!settings) return;
+    const o = opts || {};
+    if (bypass && !BYPASS_STATES.includes(lc.state)) setBypass(false); // 렌더가 멈추면 원본 보기도 끝
+    const container = syncUi();
+    tickHud();
+    const status = ns.params.statusOf(currentStatusInput());
+    if (status.text !== lastChipText) {
+      if (!settings.notify) lastChipText = status.text;
+      else if (container) {
+        lastChipText = status.text;
+        if (!o.silentChip) showChip(container, status.text);
+      }
+    }
+    notifyBackground(status);
+  }
+
+  function setBypass(on) {
+    if (bypass === on) return;
+    bypass = on;
+    if (cur) cur.renderer.setBypass(on);
+  }
+
+  // 단축키 피드백: notify와 무관하게 칩을 보이고 같은 문구의 일반 알림은 중복시키지 않는다.
+  function feedback(label) {
+    refreshUi({ silentChip: true });
+    showChip(syncUi(), label);
+  }
+
+  function isTyping(e) {
+    const els = [e && e.target, document.activeElement];
+    return els.some(
+      (el) =>
+        el && (TYPING_TAGS.includes(String(el.tagName).toUpperCase()) || el.isContentEditable),
+    );
+  }
+
+  function onKeyDown(e) {
+    if (!settings || e.code !== KEY_CODE || !e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.repeat || isTyping(e)) return;
+    if (e.shiftKey) {
+      e.preventDefault();
+      const next = !settings.enabled;
+      try {
+        const p = ns.params.setEnabled(next);
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (err) {
+        // 저장 실패는 무시한다.
+      }
+      feedback(next ? 'HDR 변환 켜짐' : 'HDR 변환 꺼짐');
+      return;
+    }
+    if (!cur || !BYPASS_STATES.includes(lc.state)) return;
+    e.preventDefault();
+    setBypass(true);
+    feedback(ns.params.statusOf(currentStatusInput()).text);
+  }
+
+  function releaseBypass() {
+    if (!bypass) return;
+    setBypass(false);
+    feedback(ns.params.statusOf(currentStatusInput()).text);
+  }
+
+  function onKeyUp(e) {
+    if (e.code === KEY_CODE || e.key === 'Alt' || String(e.code).startsWith('Alt')) releaseBypass();
   }
 
   function markDrm(video) {
@@ -298,11 +458,13 @@
               name: 'PathUndecided',
               message: 'frameProbe 60회 이상 경로 판단 불가 (캔버스 숨김 유지)',
             });
+          refreshUi();
         },
       },
     );
     cur = a;
-    if (settings.hud) showHud(a);
+    bypass = false; // 새 attach는 항상 변환 표시로 시작
+    refreshUi();
     a.renderer.setMode(settings.mode);
     if (NO_PROBE_MODES.includes(settings.mode)) dispatch('decided', true);
     if (a.pip) {
@@ -442,8 +604,6 @@
       return;
     }
     if (cur) {
-      if (next.hud && !cur.hud) showHud(cur);
-      else if (!next.hud && cur.hud) hideHud(cur);
       // 셰이더 값(프리셋·강도·선명도·채도)은 바뀐 것만 유니폼으로 보낸다. 재attach 금지.
       const changed = {};
       for (const key of ['preset', 'strength', 'sharpness', 'saturation']) {
@@ -462,6 +622,7 @@
       else if (lc.state === 'active' && NO_PROBE_MODES.includes(prev.mode))
         dispatch('srcChange', true);
     }
+    refreshUi(); // hud·notify·mode 변경 반영
   }
 
   function collectState() {
@@ -544,6 +705,8 @@
   }
 
   function writeDiagIfChanged() {
+    // 보이지 않는 탭은 다른 탭의 진단을 덮어쓰지 않는다 (PLAN M7-2, GUIDELINES 2.6-2).
+    if (document.visibilityState !== 'visible') return;
     pollMode();
     const diag = ns.hud.buildDiag(collectState());
     const key = JSON.stringify(Object.assign({}, diag, { createdAt: null }));
@@ -575,13 +738,53 @@
       document.addEventListener('fullscreenchange', pollMode);
       document.addEventListener('webkitfullscreenchange', pollMode);
       if (settings.enabled) scheduleAttach();
+      else {
+        // 꺼진 채 시작할 때는 '꺼짐' 칩을 띄우지 않는다. 이후 상태 변화부터 알린다.
+        lastChipText = ns.params.statusOf({ enabled: false }).text;
+        dispatch('disable', true); // 꺼진 채 시작하면 idle이 아니라 skipped(disabled)로 기록 (PLAN M7-2)
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') {
+          releaseBypass(); // 탭을 떠나면 원본 보기 해제
+          return;
+        }
+        // 탭이 다시 보이면 비교 키를 비우고 즉시 1회 기록하고, 배지 상태도 다시 보낸다.
+        lastDiagKey = null;
+        lastSentKey = null;
+        try {
+          writeDiagIfChanged();
+        } catch (e) {
+          // 진단 실패는 무시한다.
+        }
+        try {
+          refreshUi();
+        } catch (e) {
+          // 상태 알림 실패는 무시한다.
+        }
+      });
+      // 단축키는 capture 단계에서 받는다 (PLAN M8-0 (e)). 원본 보기는 keyup·blur·hidden에서 해제한다.
+      document.addEventListener('keydown', onKeyDown, true);
+      document.addEventListener('keyup', onKeyUp, true);
+      if (typeof globalThis.addEventListener === 'function')
+        globalThis.addEventListener('blur', releaseBypass);
+      try {
+        browser.runtime.onMessage.addListener((msg) => {
+          if (!msg || msg.type !== ns.params.MSG.getState) return undefined;
+          const input = currentStatusInput();
+          return Promise.resolve({ status: ns.params.statusOf(input), input });
+        });
+      } catch (e) {
+        // runtime 메시지가 없는 환경에서는 popup 상태 줄만 쓰지 못한다.
+      }
       setInterval(() => {
         try {
-          tickHud();
+          refreshUi(); // HUD 갱신·container 변경 추적·undecided 전환 알림
         } catch (e) {
           // HUD 갱신 실패는 무시한다.
         }
       }, HUD_INTERVAL_MS);
+      lastSentKey = null;
+      refreshUi(); // start 직후 1회 재전송
     } catch (e) {
       // 페이지 재생은 방해하지 않되 원인은 diag errors에 남긴다.
       addError('main.start', e);
