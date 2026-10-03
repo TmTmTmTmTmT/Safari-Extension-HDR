@@ -24,6 +24,7 @@ function setup({
   videoSize,
   mode,
   hooksSettings,
+  workDone = false,
 }) {
   const vals = { ext, vf, copy, c2d };
   const state = {
@@ -45,6 +46,8 @@ function setup({
     // 각 mapAsync가 차례로 기다릴 promise (없거나 undefined면 즉시). T1 테스트에서 측정 중간 상태를 만든다.
     mapGates: [],
     docListeners: {},
+    // U2-A: workDone=true이면 onSubmittedWorkDone이 수동 게이트를 돌려준다. gate.resolve()/reject()로 완료시킨다.
+    workGates: [],
   };
   let lastFill = 0;
   const device = {
@@ -118,6 +121,17 @@ function setup({
       submit() {
         state.submits += 1;
       },
+      ...(workDone && {
+        onSubmittedWorkDone: () => {
+          const gate = {};
+          const p = new Promise((res, rej) => {
+            gate.resolve = res;
+            gate.reject = rej;
+          });
+          state.workGates.push(gate);
+          return p;
+        },
+      }),
       writeBuffer: (buf, offset, data) => {
         buf.writes.push(Array.from(data));
       },
@@ -1473,5 +1487,158 @@ test('TA(f): ext 경로는 항상 렌더한다', async () => {
   const st = s.renderer.getStats();
   assert.strictEqual(st.frames, 3);
   assert.strictEqual(st.sameFrameSkipped, 0);
+  s.renderer.destroy();
+});
+
+// ---- U2-A: GPU 큐 적체 상한. stub 검사이며 실제 GPU 적체·Safari 동작 검증이 아니다. ----
+
+async function startExt(extra) {
+  const s = setup({ readyState: 4, paused: false, workDone: true, ...extra });
+  await s.renderer.start();
+  await s.settle();
+  return s;
+}
+
+test('U2-A(a): in-flight < 2이면 현행대로 렌더한다', async () => {
+  const s = await startExt();
+  s.flush();
+  let st = s.renderer.getStats();
+  assert.deepStrictEqual([st.frames, st.inflight, st.gpuBusySkipped], [1, 1, 0]);
+  s.renderer.destroy();
+});
+
+test('U2-A(b): 미완료 2개면 다음 tick은 렌더·VideoFrame 없이 busy로 건너뛰고 loopTs·srcTs(직전 소스 유지)만 기록한다', async () => {
+  const s = await startExt({ ext: 0, vf: 60, copy: 0, c2d: 60 });
+  s.flush();
+  s.flush();
+  let st = s.renderer.getStats();
+  assert.strictEqual(st.path, 'vf');
+  assert.deepStrictEqual([st.frames, st.inflight], [2, 2]);
+  const before = {
+    renders: s.renders,
+    submits: s.submits,
+    vfs: s.frames.length,
+    loop: st.loopTimestamps.length,
+    ft: st.frameTimesMs.length,
+    src: st.srcTimes.length,
+  };
+  s.flush();
+  st = s.renderer.getStats();
+  assert.strictEqual(st.gpuBusySkipped, 1);
+  assert.strictEqual(st.frames, 2);
+  assert.strictEqual(s.renders, before.renders);
+  assert.strictEqual(s.submits, before.submits);
+  assert.strictEqual(s.frames.length, before.vfs, 'VideoFrame을 만들지 않는다');
+  assert.strictEqual(st.loopTimestamps.length, before.loop + 1);
+  assert.strictEqual(st.frameTimesMs.length, before.ft);
+  // 화면은 직전 소스를 유지하므로 srcTs에도 같은 값을 넣어 loopTs와 인덱스를 맞춘다 (FIX_GUIDE S2).
+  assert.strictEqual(st.srcTimes.length, before.src + 1);
+  assert.strictEqual(st.srcTimes[st.srcTimes.length - 1], st.srcTimes[st.srcTimes.length - 2]);
+  assert.strictEqual(st.srcTimes.length, st.loopTimestamps.length);
+  assert.strictEqual(st.sameFrameSkipped, 0);
+  assert.strictEqual(s.raf.length, 1, '루프는 이어진다');
+  s.renderer.destroy();
+});
+
+test('U2-A(c): 게이트가 resolve되면 렌더를 재개한다 (reject도 감소)', async () => {
+  const s = await startExt();
+  s.flush();
+  s.flush();
+  s.flush();
+  assert.strictEqual(s.renderer.getStats().gpuBusySkipped, 1);
+  s.workGates[0].resolve();
+  s.workGates[1].reject(new Error('x'));
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().inflight, 0);
+  s.flush();
+  const st = s.renderer.getStats();
+  assert.deepStrictEqual([st.frames, st.inflight, st.gpuBusySkipped], [3, 1, 1]);
+  s.renderer.destroy();
+});
+
+test('U2-A(d): device 교체 뒤 이전 device의 늦은 resolve가 새 inflight를 바꾸지 않는다', async () => {
+  const s = await startExt();
+  s.flush();
+  s.flush();
+  assert.strictEqual(s.renderer.getStats().inflight, 2);
+  s.renderer.setMode('baseline');
+  assert.strictEqual(s.renderer.getStats().inflight, 0);
+  s.renderer.setMode('itm');
+  await s.settle();
+  s.intervals[s.intervals.length - 1]();
+  await s.settle();
+  s.flush();
+  assert.strictEqual(s.renderer.getStats().devicesCreated, 2);
+  const live = s.workGates.length - 2; // 새 device에서 제출된 수
+  assert.ok(live >= 1);
+  assert.strictEqual(s.renderer.getStats().inflight, live);
+  s.workGates.slice(0, 2).forEach((g) => g.resolve());
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().inflight, live, '이전 세대 settle은 무시');
+  s.workGates.slice(2).forEach((g) => g.resolve());
+  await s.settle();
+  assert.strictEqual(s.renderer.getStats().inflight, 0);
+  s.renderer.destroy();
+});
+
+test('U2-A(e): onSubmittedWorkDone이 없으면 상한 없이 현행 동작', async () => {
+  const s = setup({ readyState: 4, paused: false });
+  await s.renderer.start();
+  await s.settle();
+  for (let i = 0; i < 5; i++) s.flush();
+  const st = s.renderer.getStats();
+  assert.deepStrictEqual([st.frames, st.inflight, st.gpuBusySkipped], [5, 0, 0]);
+  s.renderer.destroy();
+});
+
+test('U2-A(f): getStats의 gpuBusySkipped·inflight·uptimeS·devicesCreated', async () => {
+  const s = await startExt();
+  let st = s.renderer.getStats();
+  assert.deepStrictEqual(
+    [st.gpuBusySkipped, st.inflight, st.uptimeS, st.devicesCreated],
+    [0, 0, 0, 1],
+  );
+  s.now = 12600;
+  s.flush();
+  s.flush();
+  s.flush();
+  st = s.renderer.getStats();
+  assert.deepStrictEqual(
+    [st.gpuBusySkipped, st.inflight, st.uptimeS, st.devicesCreated],
+    [1, 2, 13, 1],
+  );
+  assert.ok(Number.isInteger(st.uptimeS));
+  s.renderer.destroy();
+});
+
+test('U2-A(g): busy 생략 중에도 dirty가 유지되어 복귀 첫 렌더가 같은 프레임 생략에 걸리지 않는다', async () => {
+  const s = setup({
+    readyState: 4,
+    paused: false,
+    workDone: true,
+    ext: 0,
+    vf: 60,
+    copy: 0,
+    c2d: 60,
+  });
+  s.vfTs = 1000;
+  await s.renderer.start();
+  await s.settle();
+  s.flush(); // 렌더 1 (ts=1000)
+  s.vfTs = 2000;
+  s.flush(); // 렌더 2
+  assert.deepStrictEqual([s.renderer.getStats().frames, s.renderer.getStats().inflight], [2, 2]);
+  s.renderer.setParams({ strength: 0.5 }); // dirty = true
+  s.flush(); // busy
+  let st = s.renderer.getStats();
+  assert.deepStrictEqual([st.gpuBusySkipped, st.frames], [1, 2]);
+  s.workGates.forEach((g) => g.resolve());
+  await s.settle();
+  s.flush(); // 같은 ts(2000)지만 dirty이므로 그려야 한다
+  st = s.renderer.getStats();
+  assert.deepStrictEqual([st.frames, st.sameFrameSkipped], [3, 0]);
+  s.flush(); // 이제 dirty=false, 같은 ts이므로 생략
+  st = s.renderer.getStats();
+  assert.deepStrictEqual([st.frames, st.sameFrameSkipped], [3, 1]);
   s.renderer.destroy();
 });

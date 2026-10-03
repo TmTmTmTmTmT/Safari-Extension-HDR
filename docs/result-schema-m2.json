@@ -199,7 +199,19 @@
         },
         "sameFrameSkipped": {
           "type": ["number", "null"],
-          "description": "schemaVersion 11 이상(1.0.1 T 회차 빌드부터, 1.1.0 빌드의 v11에는 없음). 같은 소스 프레임이라 렌더·제출을 생략한 횟수(vf·copy 경로, FIX_GUIDE TA)."
+          "description": "schemaVersion 11 이상(진단에 실제로 실리는 것은 v13부터, 이전 빌드는 항상 null). 같은 소스 프레임이라 렌더·제출을 생략한 횟수(vf·copy 경로, FIX_GUIDE TA)."
+        },
+        "gpuBusySkipped": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 13 이상. GPU가 처리 못한 제출이 2개 이상 밀려 렌더를 건너뛴 횟수(FIX_GUIDE U2-A)."
+        },
+        "devicesCreated": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 13 이상. 이 페이지에서 GPU device를 만든 누적 횟수(detach된 renderer 포함, FIX_GUIDE U2-B)."
+        },
+        "uptimeS": {
+          "type": ["number", "null"],
+          "description": "schemaVersion 13 이상. 이 페이지에서 확장이 시작된 뒤 경과 초(메모리 증가 측정용)."
         },
         "videoDropped": {
           "type": ["number", "null"],

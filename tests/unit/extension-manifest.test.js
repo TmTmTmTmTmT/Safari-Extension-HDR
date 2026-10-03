@@ -10,7 +10,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'u
 test('manifest: 필수 키', () => {
   assert.strictEqual(manifest.manifest_version, 3);
   assert.strictEqual(manifest.name, 'SDR HDR');
-  assert.strictEqual(manifest.version, '1.2.0');
+  assert.strictEqual(manifest.version, '1.2.1');
   assert.strictEqual(typeof manifest.description, 'string');
   assert.ok(manifest.description.trim().length > 0);
   assert.strictEqual(manifest.action.default_popup, 'popup/popup.html');
@@ -39,8 +39,8 @@ test('manifest: content_scripts 순서·옵션·파일 존재', () => {
   assert.ok(fs.existsSync(path.join(root, manifest.action.default_popup)));
 });
 
-test('manifest: permissions는 storage만, 금지 키 없음', () => {
-  assert.deepStrictEqual(manifest.permissions, ['storage']);
+test('manifest: permissions는 storage·nativeMessaging만, 금지 키 없음', () => {
+  assert.deepStrictEqual(manifest.permissions, ['storage', 'nativeMessaging']);
   for (const k of ['host_permissions', 'web_accessible_resources']) {
     assert.ok(!(k in manifest), k + ' 없어야 함');
   }

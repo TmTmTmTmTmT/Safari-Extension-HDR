@@ -177,6 +177,9 @@ async function setup(mode = 'itm', enabled = true) {
         sharpness: 0,
         saturation: 1,
         effectivePeak: 2,
+        devicesCreated: 1,
+        gpuBusySkipped: 4,
+        sameFrameSkipped: 7,
         undecided: r.undecided,
         frameTimesMs: [],
         loopTimestamps: [],
@@ -879,4 +882,26 @@ test('HUD 갱신은 숨긴 탭에서 건너뛴다 (FIX_GUIDE T3)', async () => {
   t.doc.hidden = false;
   t.intervals.forEach((fn) => fn());
   assert.strictEqual(t.huds[0].lines.length, 5);
+});
+
+test('진단: devicesCreated는 detach된 renderer까지 누적, gpuBusySkipped·sameFrameSkipped·uptimeS 전달 (U2-B)', async () => {
+  const t = await setup();
+  let d = await diagOf(t);
+  assert.strictEqual(d.render.devicesCreated, 1);
+  assert.strictEqual(d.render.gpuBusySkipped, 4);
+  assert.strictEqual(d.render.sameFrameSkipped, 7);
+  assert.strictEqual(typeof d.render.uptimeS, 'number');
+  const on = {
+    enabled: true,
+    mode: 'itm',
+    preset: 'balanced',
+    strength: 0.5,
+    sharpness: 0,
+    saturation: 1,
+  };
+  t.settings({ ...on, enabled: false });
+  t.settings(on);
+  assert.strictEqual(t.renderers.length, 2);
+  d = await diagOf(t);
+  assert.strictEqual(d.render.devicesCreated, 2, '이전 renderer의 1 + 현재 1');
 });

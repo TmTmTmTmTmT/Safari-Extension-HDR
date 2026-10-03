@@ -290,7 +290,7 @@
     const copyTimes = Array.isArray(render.copyTimesMs) ? render.copyTimesMs : [];
     const vfTimes = Array.isArray(render.vfTimesMs) ? render.vfTimesMs : [];
     return {
-      schemaVersion: 12,
+      schemaVersion: 13,
       milestone: 'M2',
       extVersion: orNull(s.extVersion),
       createdAt: orNull(s.createdAt),
@@ -358,6 +358,9 @@
         copyMsP95: round2(percentile(copyTimes, 95)),
         copySkipped: numOrNull(render.copySkipped),
         sameFrameSkipped: numOrNull(render.sameFrameSkipped),
+        gpuBusySkipped: numOrNull(render.gpuBusySkipped),
+        devicesCreated: numOrNull(render.devicesCreated),
+        uptimeS: numOrNull(render.uptimeS),
         vfMsP50: round2(percentile(vfTimes, 50)),
         vfMsP95: round2(percentile(vfTimes, 95)),
         videoDropped: numOrNull(render.videoDropped),

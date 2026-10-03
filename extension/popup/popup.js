@@ -141,6 +141,28 @@
     el.classList.toggle('stale', ago > STALE_S);
   }
 
+  // 재시작 뒤 설정을 백업에서 복원했으면 진단 영역에 한 줄 알린다 (FIX_GUIDE U1). 진단 영역 밖에는 쓰지 않는다.
+  function showRestored(ms) {
+    const el = $('restored-note');
+    if (typeof ms !== 'number' || !Number.isFinite(ms)) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    const d = new Date(ms);
+    el.textContent =
+      d.getMonth() +
+      1 +
+      '월 ' +
+      d.getDate() +
+      '일 ' +
+      pad(d.getHours()) +
+      ':' +
+      pad(d.getMinutes()) +
+      ' 재시작 후 설정을 백업에서 복원함';
+    el.hidden = false;
+  }
+
   // 표시 문자열 (UX-30): P·g ×, s·hs %, k·n 소수. step이 0.1이면 1자리, 0.01이면 2자리.
   const decimals = (step) => Math.round(-Math.log10(step));
   const pct = (v) => Math.round(v * 100) + '%';
@@ -445,6 +467,7 @@
     bindDetails();
     render(true);
     showDiag(raw[K.diag]);
+    showRestored(raw[K.restoredAt]);
 
     $('enabled').addEventListener('change', () => {
       cur.enabled = $('enabled').checked;
@@ -492,7 +515,9 @@
     globalThis.addEventListener?.('pagehide', stopDiagRequests);
     if ($('diag-section').open) startDiagRequests();
     browser.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && K.diag in changes) onDiag(changes[K.diag].newValue);
+      if (area !== 'local') return;
+      if (K.diag in changes) onDiag(changes[K.diag].newValue);
+      if (K.restoredAt in changes) showRestored(changes[K.restoredAt].newValue);
     });
     // 경과 시간 갱신(타이머가 없는 환경에서는 건너뜀)
     if (typeof setInterval === 'function') {

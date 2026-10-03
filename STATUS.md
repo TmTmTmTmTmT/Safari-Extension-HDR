@@ -168,6 +168,15 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - **설정 초기화**: 코드에서 설정을 지우는 경로는 popup '기본값으로 되돌리기'의 `storage.local.remove` 하나뿐이고, 저장소는 `storage.local`(session·sync 미사용)이라 재부팅만으로 코드가 지우지는 않음. 가능한 원인은 Safari 쪽: ① 서명되지 않은 확장은 Safari 재시작마다 꺼져 다시 켜야 함(사용자 확인) → 이때 확장 저장소가 지워지는지 **미확인**, ② Xcode Run으로 다시 설치하면 저장소가 새로 시작되는지 **미확인**, ③ 사용자가 '초기화'라 느끼는 것이 실제로는 '켜기 꺼짐/사이트 접근 허용 초기화'일 가능성
 - Opus 확인 필요: 두 건 모두 원인 특정에 측정이 필요함. 제안(계획 문서 필요): (a) background.js `onStartup`/`onInstalled`에서 저장소 기존 키 유무만 `sdrhdr.boot`에 기록해 재부팅 후 저장소가 비었는지 코드 버그인지 가름, (b) 체크리스트에 메모리 측정 절차 재수행(5·30분 Activity Monitor 수치 기록)과 설정 초기화 재현 절차 추가
 
+## U 회차 구현 (브랜치 claude/u-fixes, 2026-10-03, Sonnet)
+
+- 사용자 보고: Xcode 다시 Run·Mac 재부팅 시 슬라이더 값 초기화, 4K 재생 중 kernel_task+Safari 페이지 약 13 GB(HUD 끔). Opus FIX_GUIDE U 회차
+- 본 세션: `params.BACKUP_KEYS`·`KEYS.restoredAt`, `main.js` 진단 `devicesCreated`(detach된 renderer 누적)·`uptimeS`·`gpuBusySkipped`·`sameFrameSkipped` 전달, `hud.js` buildDiag 필드·schemaVersion 13, 스키마·parse-result, popup 복원 안내 한 줄·버전 v1.2.1, install.md·체크리스트 U 절
+- W-A: `background.js` 백업(1초 디바운스, 원본 값)·복원(저장소가 모두 비고 백업이 있을 때 1회, restoredAt), manifest 1.2.1·`nativeMessaging`, `SafariWebExtensionHandler.swift` backup:set/get(UserDefaults, ≤16 KB, 로그는 type만), 테스트. xcodebuild 무서명 빌드 성공
+- W-B: `renderer.js` GPU in-flight 상한 2(`onSubmittedWorkDone`, 세대 번호로 늦은 settle 무시), busy tick 생략(`gpuBusySkipped`), `getStats` inflight·uptimeS·devicesCreated, 테스트 7건. 본 세션이 busy tick에서 `srcTs`도 직전 소스로 기록하게 보정(loopTs와 인덱스 정렬, FIX_GUIDE S2 가정 유지)
+- → verify: lint 통과, npm test 323/323, test:dom 18/18, pytest sim 157/157, xcodebuild 무서명 빌드 성공, 과거 results parse-result 통과 / (1) 로컬 Mac. **Safari의 nativeMessaging·UserDefaults 유지·복원, onSubmittedWorkDone 동작, 메모리 영향은 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 복원은 저장소가 비었을 때만 네이티브 조회. 백업에 BACKUP_KEYS 키가 하나도 없으면 복원 안 함. ② busy 검사는 경로 확정 뒤·VideoFrame 생성 전. probe submit은 in-flight에 세지 않음. ③ busy tick의 srcTs 보정(위)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
