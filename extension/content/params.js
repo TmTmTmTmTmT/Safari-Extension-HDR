@@ -32,6 +32,7 @@
     custom: 'sdrhdr.custom',
     customPrev: 'sdrhdr.customPrev', // 프리셋에서 상세 편집을 시작할 때 덮어쓴 사용자 지정 곡선 백업 (PLAN M7-3)
     hud: 'sdrhdr.hud',
+    userPresets: 'sdrhdr.userPresets', // 내 프리셋 목록 (PLAN D-M9)
     restoredAt: 'sdrhdr.restoredAt', // 재시작 뒤 백업에서 복원한 시각(ms), popup 안내용 (FIX_GUIDE U1)
     notify: 'sdrhdr.notify', // 상태 알림 칩 (PLAN D-M8 M8-0 (f))
     strength: 'sdrhdr.strength',
@@ -183,6 +184,7 @@
     KEYS.saturation,
     KEYS.hud,
     KEYS.notify,
+    KEYS.userPresets,
   ];
 
   // 기본값 복원 대상 (PLAN M7-0 (d)). enabled·mode·diag·customPrev는 건드리지 않는다. 값은 DEFAULTS에서 읽는다.
@@ -211,6 +213,98 @@
     };
     browser.storage.onChanged.addListener(listener);
     return () => browser.storage.onChanged.removeListener(listener);
+  }
+
+  // ---- 내 프리셋 (PLAN D-M9). 화질 값(곡선 6 + 강도·선명도·채도)만 저장한다. ----
+  const USER_PRESET_MAX = 20;
+  const USER_PRESET_NAME_MAX = 20;
+  const USER_VALUE_KEYS = Object.keys(DETAIL_STEPS).concat('strength', 'sharpness', 'saturation');
+
+  // 순수: 이름 정규화(앞뒤 공백 제거, 1~20자). 실패하면 null.
+  function normalizeUserPresetName(name) {
+    if (typeof name !== 'string') return null;
+    const t = name.trim();
+    return t.length >= 1 && t.length <= USER_PRESET_NAME_MAX ? t : null;
+  }
+
+  // 순수: 값 {P,k,n,g,s,hs,strength,sharpness,saturation} 정규화.
+  function normalizeUserValues(raw) {
+    const r = raw && typeof raw === 'object' ? raw : {};
+    return Object.assign({}, normalizeCustom(r), {
+      strength: normalizeRange(STRENGTH, r.strength),
+      sharpness: normalizeRange(SHARPNESS, r.sharpness),
+      saturation: normalizeRange(SATURATION, r.saturation),
+    });
+  }
+
+  // 순수: 저장소 원본 -> 유효한 목록. 잘못된 항목·중복 id는 버리고 최대 20개.
+  function normalizeUserPresets(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const ids = new Set();
+    for (const e of raw) {
+      if (out.length >= USER_PRESET_MAX) break;
+      if (!e || typeof e !== 'object') continue;
+      const name = normalizeUserPresetName(e.name);
+      if (name === null || typeof e.id !== 'string' || e.id === '' || ids.has(e.id)) continue;
+      if (typeof e.createdAt !== 'number' || !Number.isFinite(e.createdAt)) continue;
+      ids.add(e.id);
+      out.push({ id: e.id, name, createdAt: e.createdAt, values: normalizeUserValues(e.values) });
+    }
+    return out;
+  }
+
+  // 순수: 현재 설정 -> 저장할 값(곡선은 프리셋이어도 확정된 값).
+  function snapshotValues(settings) {
+    const s = settings || {};
+    return normalizeUserValues(
+      Object.assign({}, curveOf(s), {
+        strength: s.strength,
+        sharpness: s.sharpness,
+        saturation: s.saturation,
+      }),
+    );
+  }
+
+  // 순수: 저장. 같은 이름이면 덮어쓰기(id 유지, replaced true), 가득 차면 error 'full', 이름이 잘못이면 'name'.
+  function upsertUserPreset(list, name, values, now) {
+    const cur = normalizeUserPresets(list);
+    const n = normalizeUserPresetName(name);
+    if (n === null) return { list: cur, replaced: false, error: 'name' };
+    const v = normalizeUserValues(values);
+    const i = cur.findIndex((e) => e.name === n);
+    if (i >= 0) {
+      const next = cur.slice();
+      next[i] = { id: cur[i].id, name: n, createdAt: now, values: v };
+      return { list: next, replaced: true, error: null };
+    }
+    if (cur.length >= USER_PRESET_MAX) return { list: cur, replaced: false, error: 'full' };
+    let id = 'u' + Math.floor(now).toString(36) + cur.length;
+    while (cur.some((e) => e.id === id)) id += 'x';
+    return {
+      list: cur.concat({ id, name: n, createdAt: now, values: v }),
+      replaced: false,
+      error: null,
+    };
+  }
+
+  // 순수: 삭제.
+  function removeUserPreset(list, id) {
+    return normalizeUserPresets(list).filter((e) => e.id !== id);
+  }
+
+  // 순수: 항목 -> storage에 한 번에 쓸 객체. preset은 custom으로 간다 (PLAN D-M9 M9-0 (b)).
+  function applyUserPresetEntries(entry) {
+    const v = normalizeUserValues(entry && entry.values);
+    const custom = {};
+    for (const k of Object.keys(DETAIL_STEPS)) custom[k] = v[k];
+    return {
+      [KEYS.preset]: 'custom',
+      [KEYS.custom]: custom,
+      [KEYS.strength]: v.strength,
+      [KEYS.sharpness]: v.sharpness,
+      [KEYS.saturation]: v.saturation,
+    };
   }
 
   // 메시지 타입 (PLAN D-M8 M8-1, GUIDELINES 2.1-5). popup -> content 요청, content -> background 배지 알림.
@@ -327,6 +421,16 @@
     HEADROOM_STEPS,
     RESETTABLE_KEYS,
     BACKUP_KEYS,
+    USER_PRESET_MAX,
+    USER_PRESET_NAME_MAX,
+    USER_VALUE_KEYS,
+    normalizeUserPresetName,
+    normalizeUserValues,
+    normalizeUserPresets,
+    snapshotValues,
+    upsertUserPreset,
+    removeUserPreset,
+    applyUserPresetEntries,
     UNIFORM_ORDER,
     UNIFORM_FLOATS,
     normalizeRange,

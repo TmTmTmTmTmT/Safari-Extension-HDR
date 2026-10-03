@@ -14,6 +14,7 @@
     'sdrhdr.saturation',
     'sdrhdr.hud',
     'sdrhdr.notify',
+    'sdrhdr.userPresets',
   ];
   const KEY_RESTORED_AT = 'sdrhdr.restoredAt'; // params.KEYS.restoredAt와 같은 값
   const NATIVE_APP_ID = 'io.github.tmtmtmtmtmt.SDRHDR'; // Safari는 무시하지만 인자는 필요
