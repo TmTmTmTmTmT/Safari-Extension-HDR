@@ -1134,3 +1134,28 @@ test('진단 요청 키 (FIX_GUIDE T2): requestDiag는 시각을 쓰고, subscri
   off();
   assert.strictEqual(listener, null);
 });
+
+test('BACKUP_KEYS: 설정 키만, 진단 모드·진단·곡선 백업·복원 시각 제외 (U1)', () => {
+  const P = ns.params;
+  const keys = plain(P.BACKUP_KEYS);
+  for (const k of [
+    P.KEYS.enabled,
+    P.KEYS.preset,
+    P.KEYS.custom,
+    P.KEYS.strength,
+    P.KEYS.sharpness,
+    P.KEYS.saturation,
+    P.KEYS.hud,
+    P.KEYS.notify,
+  ])
+    assert.ok(keys.includes(k), k);
+  for (const k of [
+    P.KEYS.mode,
+    P.KEYS.diag,
+    P.KEYS.diagRequest,
+    P.KEYS.customPrev,
+    P.KEYS.restoredAt,
+  ])
+    assert.ok(!keys.includes(k), k);
+  assert.strictEqual(P.KEYS.restoredAt, 'sdrhdr.restoredAt');
+});

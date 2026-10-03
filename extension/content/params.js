@@ -32,6 +32,7 @@
     custom: 'sdrhdr.custom',
     customPrev: 'sdrhdr.customPrev', // 프리셋에서 상세 편집을 시작할 때 덮어쓴 사용자 지정 곡선 백업 (PLAN M7-3)
     hud: 'sdrhdr.hud',
+    restoredAt: 'sdrhdr.restoredAt', // 재시작 뒤 백업에서 복원한 시각(ms), popup 안내용 (FIX_GUIDE U1)
     notify: 'sdrhdr.notify', // 상태 알림 칩 (PLAN D-M8 M8-0 (f))
     strength: 'sdrhdr.strength',
     sharpness: 'sdrhdr.sharpness',
@@ -167,6 +168,19 @@
     KEYS.sharpness,
     KEYS.saturation,
     KEYS.custom,
+    KEYS.hud,
+    KEYS.notify,
+  ];
+
+  // 네이티브 백업 대상 (FIX_GUIDE U1). 진단 모드·진단·진단 요청·곡선 백업은 제외한다.
+  // background.js는 params.js를 로드하지 않아 같은 목록을 따로 갖고, 테스트가 둘의 일치를 검사한다.
+  const BACKUP_KEYS = [
+    KEYS.enabled,
+    KEYS.preset,
+    KEYS.custom,
+    KEYS.strength,
+    KEYS.sharpness,
+    KEYS.saturation,
     KEYS.hud,
     KEYS.notify,
   ];
@@ -312,6 +326,7 @@
     DETAIL_STEPS,
     HEADROOM_STEPS,
     RESETTABLE_KEYS,
+    BACKUP_KEYS,
     UNIFORM_ORDER,
     UNIFORM_FLOATS,
     normalizeRange,
