@@ -47,6 +47,10 @@ function makeEl() {
     select() {
       this.selected = true;
     },
+    children: [],
+    replaceChildren(...c) {
+      this.children = c;
+    },
   };
 }
 
@@ -73,6 +77,7 @@ async function setup(stored = {}, opts = {}) {
   const body = makeEl();
   const document = {
     getElementById: (id) => els[id],
+    createElement: () => makeEl(),
     body,
     activeElement: null,
   };
@@ -133,6 +138,8 @@ async function setup(stored = {}, opts = {}) {
     t.forEach((fn) => fn && fn());
   };
   const tick = () => intervals.forEach((fn) => fn());
+  const emitStore = (key, newValue) =>
+    changed.forEach((fn) => fn({ [key]: { newValue } }, 'local'));
   const emitDiag = (diag) =>
     changed.forEach((fn) => fn({ 'sdrhdr.diag': { newValue: diag } }, 'local'));
   const flush = () => new Promise((r) => setImmediate(r));
@@ -149,6 +156,7 @@ async function setup(stored = {}, opts = {}) {
     document,
     body,
     emitDiag,
+    emitStore,
     changed,
     flush,
     params: ctx.__sdrhdr.params,
@@ -820,4 +828,289 @@ test('복원 안내: 저장소 변경 이벤트로 나중에 생겨도 표시', 
   );
   assert.strictEqual(els['restored-note'].hidden, false);
   assert.ok(els['restored-note'].textContent.startsWith('10월 3일 23:59'));
+});
+
+// ---- 내 프리셋 (PLAN D-M9 M9-3) ----
+const UP_KEY = 'sdrhdr.userPresets';
+const vals = (o = {}) => ({
+  P: 3,
+  k: 0.45,
+  n: 2,
+  g: 1.1,
+  s: 1,
+  hs: 1,
+  strength: 0.6,
+  sharpness: 0.2,
+  saturation: 1.1,
+  ...o,
+});
+const entry = (id, name, o) => ({ id, name, createdAt: 1000, values: vals(o) });
+const upSets = (sets) => sets.filter((o) => UP_KEY in o);
+
+test('내 프리셋: init 목록·summary 개수, 비면 단일 비활성 옵션과 버튼 비활성', async () => {
+  const a = await setup({ [UP_KEY]: [entry('u1', 'A'), entry('u2', 'B')] });
+  assert.strictEqual(a.els['up-summary'].textContent, '내 프리셋 (2)');
+  assert.deepStrictEqual(
+    a.els['up-list'].children.map((o) => [o.value, o.textContent]),
+    [
+      ['u1', 'A'],
+      ['u2', 'B'],
+    ],
+  );
+  assert.strictEqual(a.els['up-load'].disabled, false);
+  assert.strictEqual(a.els['up-delete'].disabled, false);
+  assert.strictEqual(read('popup/popup.html').includes('<details id="my-presets">'), true);
+  assert.strictEqual(a.els['my-presets'].open, false);
+
+  const b = await setup();
+  assert.strictEqual(b.els['up-summary'].textContent, '내 프리셋 (0)');
+  const ch = b.els['up-list'].children;
+  assert.strictEqual(ch.length, 1);
+  assert.strictEqual(ch[0].disabled, true);
+  assert.strictEqual(ch[0].textContent, '저장된 프리셋 없음');
+  assert.strictEqual(b.els['up-load'].disabled, true);
+  assert.strictEqual(b.els['up-delete'].disabled, true);
+  assert.strictEqual(b.els['up-save'].disabled, false);
+  // 빈 목록에서 눌러도 저장 호출 없음
+  b.els['up-load'].fire('click');
+  b.els['up-delete'].fire('click');
+  assert.strictEqual(b.sets.length, 0);
+});
+
+test('내 프리셋 저장: snapshotValues 값으로 신규 저장, 선택·저장됨 2초·입력 비움', async () => {
+  const { els, sets, runTimers, params, clock } = await setup({
+    'sdrhdr.preset': 'balanced',
+    'sdrhdr.strength': 0.7,
+    'sdrhdr.saturation': 1.2,
+  });
+  els['up-name'].value = '  내 설정  ';
+  els['up-save'].fire('click');
+  const w = upSets(sets);
+  assert.strictEqual(w.length, 1);
+  const list = w[0][UP_KEY];
+  assert.strictEqual(list.length, 1);
+  assert.strictEqual(list[0].name, '내 설정');
+  assert.strictEqual(list[0].createdAt, clock.now);
+  assert.deepStrictEqual(
+    list[0].values,
+    plain(
+      params.snapshotValues({
+        preset: 'balanced',
+        custom: params.DEFAULT_CUSTOM,
+        strength: 0.7,
+        sharpness: 0,
+        saturation: 1.2,
+      }),
+    ),
+  );
+  assert.strictEqual(els['up-list'].value, list[0].id);
+  assert.strictEqual(els['up-summary'].textContent, '내 프리셋 (1)');
+  assert.strictEqual(els['up-status'].textContent, '저장됨');
+  assert.strictEqual(els['up-name'].value, '');
+  runTimers();
+  assert.strictEqual(els['up-status'].textContent, '');
+});
+
+test('내 프리셋 저장: 이름 공백·가득 참 오류 문구, 저장 없음', async () => {
+  const { els, sets } = await setup();
+  els['up-name'].value = '   ';
+  els['up-save'].fire('click');
+  assert.strictEqual(els['up-status'].textContent, '이름을 1~20자로 입력하세요');
+  assert.strictEqual(upSets(sets).length, 0);
+  const full = Array.from({ length: 20 }, (_, i) => entry('u' + i, 'N' + i));
+  const b = await setup({ [UP_KEY]: full });
+  b.els['up-name'].value = '새것';
+  b.els['up-save'].fire('click');
+  assert.strictEqual(
+    b.els['up-status'].textContent,
+    '최대 20개입니다. 하나를 삭제한 뒤 저장하세요',
+  );
+  assert.strictEqual(upSets(b.sets).length, 0);
+  assert.strictEqual(b.els['up-summary'].textContent, '내 프리셋 (20)');
+});
+
+test('내 프리셋 저장: 같은 이름은 2단계 덮어쓰기, 3초 후·입력 변경 시 확인 해제, id 유지', async () => {
+  const { els, sets, runTimers } = await setup({
+    [UP_KEY]: [entry('u1', 'A', { strength: 0.1 })],
+    'sdrhdr.strength': 0.9,
+  });
+  els['up-name'].value = 'A';
+  els['up-save'].fire('click');
+  assert.strictEqual(els['up-save'].textContent, '덮어쓰기 확인');
+  assert.strictEqual(upSets(sets).length, 0);
+  runTimers();
+  assert.strictEqual(els['up-save'].textContent, '현재 설정 저장');
+  els['up-save'].fire('click');
+  assert.strictEqual(els['up-save'].textContent, '덮어쓰기 확인');
+  els['up-name'].value = 'AB';
+  els['up-name'].fire('input');
+  assert.strictEqual(els['up-save'].textContent, '현재 설정 저장');
+  els['up-name'].value = 'A';
+  els['up-save'].fire('click');
+  els['up-save'].fire('click');
+  const w = upSets(sets);
+  assert.strictEqual(w.length, 1);
+  assert.strictEqual(w[0][UP_KEY].length, 1);
+  assert.strictEqual(w[0][UP_KEY][0].id, 'u1');
+  assert.strictEqual(w[0][UP_KEY][0].values.strength, 0.9);
+  assert.strictEqual(els['up-save'].textContent, '현재 설정 저장');
+});
+
+test('내 프리셋 불러오기: 한 번의 set에 5키+customPrev, 안내·UI 재표시, 되돌리기', async () => {
+  const prev = { P: 5, k: 0.7, n: 3, g: 1.1, s: 0.9, hs: 0.8 };
+  const { els, sets, params } = await setup({
+    [UP_KEY]: [entry('u1', '밝게')],
+    'sdrhdr.preset': 'custom',
+    'sdrhdr.custom': prev,
+  });
+  els['up-list'].value = 'u1';
+  els['up-load'].fire('click');
+  assert.strictEqual(sets.length, 1);
+  assert.deepStrictEqual(sets[0], {
+    'sdrhdr.preset': 'custom',
+    'sdrhdr.custom': { P: 3, k: 0.45, n: 2, g: 1.1, s: 1, hs: 1 },
+    'sdrhdr.strength': 0.6,
+    'sdrhdr.sharpness': 0.2,
+    'sdrhdr.saturation': 1.1,
+    'sdrhdr.customPrev': prev,
+  });
+  assert.strictEqual(els.preset.value, 'custom');
+  assert.strictEqual(els.strength.value, '60');
+  assert.strictEqual(els.sharpness.value, '20');
+  assert.strictEqual(els.saturation.value, '110');
+  assert.strictEqual(Number(els['d-P'].value), 3);
+  assert.strictEqual(els['d-g-value'].textContent, '×1.10');
+  const peak = params.effectivePeak({
+    preset: 'custom',
+    custom: { P: 3, k: 0.45, n: 2, g: 1.1, s: 1, hs: 1 },
+    strength: 0.6,
+  });
+  assert.strictEqual(
+    els['peak-value'].textContent,
+    `유효 피크 ×${peak.toFixed(2)} (SDR 흰색 대비)`,
+  );
+  assert.strictEqual(els['backup-note'].hidden, false);
+  assert.strictEqual(
+    els['backup-text'].textContent,
+    '이전 사용자 지정 곡선을 「밝게」 기준으로 바꿨습니다',
+  );
+  sets.length = 0;
+  els['backup-undo'].fire('click');
+  assert.deepStrictEqual(sets, [{ 'sdrhdr.preset': 'custom', 'sdrhdr.custom': prev }]);
+  assert.strictEqual(Number(els['d-P'].value), 5);
+  assert.strictEqual(els['backup-note'].hidden, true);
+});
+
+test('내 프리셋 불러오기: 이름 있는 프리셋 상태에서도 저장된 custom이 다르면 백업', async () => {
+  const prev = { P: 5, k: 0.7, n: 3, g: 1.1, s: 0.9, hs: 0.8 };
+  const { els, sets } = await setup({
+    [UP_KEY]: [entry('u1', 'X')],
+    'sdrhdr.preset': 'vivid',
+    'sdrhdr.custom': prev,
+  });
+  els['up-load'].fire('click');
+  assert.strictEqual(sets.length, 1);
+  assert.deepStrictEqual(sets[0]['sdrhdr.customPrev'], prev);
+  assert.strictEqual(sets[0]['sdrhdr.preset'], 'custom');
+  assert.strictEqual(els['backup-note'].hidden, false);
+});
+
+test('내 프리셋 불러오기: 현재 custom과 같은 곡선이면 백업·안내 없음(5키만)', async () => {
+  const c = { P: 3, k: 0.45, n: 2, g: 1.1, s: 1, hs: 1 };
+  const { els, sets } = await setup({
+    [UP_KEY]: [entry('u1', 'X')],
+    'sdrhdr.preset': 'custom',
+    'sdrhdr.custom': c,
+  });
+  els['up-load'].fire('click');
+  assert.strictEqual(sets.length, 1);
+  assert.deepStrictEqual(Object.keys(sets[0]).sort(), [
+    'sdrhdr.custom',
+    'sdrhdr.preset',
+    'sdrhdr.saturation',
+    'sdrhdr.sharpness',
+    'sdrhdr.strength',
+  ]);
+  assert.strictEqual(els['backup-note'].hidden, true);
+});
+
+test('내 프리셋 삭제: 2단계 확인, 3초 후 원상, 선택 변경 시 해제', async () => {
+  const { els, sets, runTimers } = await setup({
+    [UP_KEY]: [entry('u1', 'A'), entry('u2', 'B')],
+  });
+  els['up-list'].value = 'u2';
+  els['up-delete'].fire('click');
+  assert.strictEqual(els['up-delete'].textContent, '삭제 확인');
+  assert.strictEqual(sets.length, 0);
+  runTimers();
+  assert.strictEqual(els['up-delete'].textContent, '삭제');
+  els['up-delete'].fire('click');
+  els['up-list'].value = 'u1';
+  els['up-list'].fire('change');
+  assert.strictEqual(els['up-delete'].textContent, '삭제');
+  els['up-delete'].fire('click');
+  els['up-delete'].fire('click');
+  const w = upSets(sets);
+  assert.strictEqual(w.length, 1);
+  assert.deepStrictEqual(
+    w[0][UP_KEY].map((e) => e.id),
+    ['u2'],
+  );
+  assert.strictEqual(els['up-summary'].textContent, '내 프리셋 (1)');
+  assert.strictEqual(els['up-status'].textContent, '삭제됨');
+  assert.strictEqual(els['up-list'].value, 'u2');
+});
+
+test('내 프리셋: 항목을 고르면 이름 입력에 이름을 채움', async () => {
+  const { els } = await setup({ [UP_KEY]: [entry('u1', 'A'), entry('u2', 'B')] });
+  els['up-list'].value = 'u2';
+  els['up-list'].fire('change');
+  assert.strictEqual(els['up-name'].value, 'B');
+});
+
+test('내 프리셋: onChanged로 목록·summary 갱신, 잘못된 값은 빈 목록', async () => {
+  const { els, emitStore } = await setup({ [UP_KEY]: [entry('u1', 'A')] });
+  emitStore(UP_KEY, [entry('u1', 'A'), entry('u3', 'C')]);
+  assert.strictEqual(els['up-summary'].textContent, '내 프리셋 (2)');
+  assert.strictEqual(els['up-list'].children.length, 2);
+  emitStore(UP_KEY, undefined);
+  assert.strictEqual(els['up-summary'].textContent, '내 프리셋 (0)');
+  assert.strictEqual(els['up-load'].disabled, true);
+});
+
+test('내 프리셋: 진단 모드면 불러오기·저장·삭제 잠금, 정상 모드로 돌리면 해제', async () => {
+  const { els } = await setup({
+    [UP_KEY]: [entry('u1', 'A')],
+    'sdrhdr.mode': 'stripes',
+  });
+  for (const id of ['up-load', 'up-save', 'up-delete']) {
+    assert.strictEqual(els[id].disabled, true, id);
+    assert.strictEqual(els[id].attrs['aria-describedby'], 'locked-note', id);
+  }
+  els.mode.value = 'itm';
+  els.mode.fire('change');
+  for (const id of ['up-load', 'up-save', 'up-delete'])
+    assert.strictEqual(els[id].disabled, false, id);
+});
+
+test('내 프리셋: 기본값 복원은 목록을 지우지 않는다', async () => {
+  const { els, removes, flush } = await setup({ [UP_KEY]: [entry('u1', 'A')] });
+  els.reset.fire('click');
+  els.reset.fire('click');
+  await flush();
+  assert.strictEqual(removes.length, 1);
+  assert.ok(!removes[0].includes(UP_KEY));
+  assert.strictEqual(els['up-summary'].textContent, '내 프리셋 (1)');
+  assert.strictEqual(els['up-list'].children.length, 1);
+});
+
+test('내 프리셋: 이름은 textContent로만 들어가고 HTML로 해석되지 않는다', async () => {
+  const { els } = await setup({ [UP_KEY]: [entry('u1', '<b>x</b>')] });
+  const o = els['up-list'].children[0];
+  assert.strictEqual(o.textContent, '<b>x</b>');
+  assert.strictEqual('innerHTML' in o, false);
+  assert.ok(!/innerHTML|insertAdjacentHTML/.test(read('popup/popup.js')));
+  els['up-list'].value = 'u1';
+  els['up-load'].fire('click');
+  assert.ok(els['backup-text'].textContent.includes('「<b>x</b>」'));
 });

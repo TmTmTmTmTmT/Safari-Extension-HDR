@@ -177,6 +177,14 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - → verify: lint 통과, npm test 323/323, test:dom 18/18, pytest sim 157/157, xcodebuild 무서명 빌드 성공, 과거 results parse-result 통과 / (1) 로컬 Mac. **Safari의 nativeMessaging·UserDefaults 유지·복원, onSubmittedWorkDone 동작, 메모리 영향은 미검증(사용자 Mac 필요)**
 - 해석(Opus 확인 요청): ① 복원은 저장소가 비었을 때만 네이티브 조회. 백업에 BACKUP_KEYS 키가 하나도 없으면 복원 안 함. ② busy 검사는 경로 확정 뒤·VideoFrame 생성 전. probe submit은 in-flight에 세지 않음. ③ busy tick의 srcTs 보정(위)
 
+## M9 구현 (브랜치 claude/m9-presets, 2026-10-03, Sonnet)
+
+- 계획: PLAN D-M9(내 프리셋: 현재 설정 저장·불러오기·삭제, 최대 20개). 저장 값은 곡선 6 + 강도·선명도·채도, 켜기·진단 모드·HUD·알림은 제외. 네이티브 백업(U1)에는 포함, 기본값 복원 대상에서는 제외
+- 본 세션: `params.js`(`KEYS.userPresets`, `normalizeUserPresets`·`snapshotValues`·`upsertUserPreset`·`removeUserPreset`·`applyUserPresetEntries` 순수 함수, `BACKUP_KEYS`에 추가), `background.js` 백업 목록, manifest·popup 헤더 1.3.0, install.md "내 프리셋"·체크리스트 M9 절
+- W(impl-worker): popup `내 프리셋` 영역(저장·같은 이름 2단계 덮어쓰기·불러오기 한 번의 set·곡선 백업/되돌리기 재사용·삭제 2단계·진단 모드 잠금·onChanged 갱신·textContent) + 테스트 12건
+- → verify: lint 통과, npm test 339/339, test:dom 18/18, pytest sim 157/157 / (1) 로컬 Mac. **popup 화면·불러오기 반영·재시작 뒤 유지는 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 불러오기는 현재 preset 종류와 무관하게 `custom`이 불러올 곡선과 다르면 백업(같으면 이전 안내를 숨김). ② 저장 직후 이름 입력을 비움. ③ `up-list`·`up-name`은 진단 모드에서 잠그지 않고 저장·불러오기·삭제 버튼만 잠금
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비

@@ -1175,3 +1175,107 @@ test('buildDiag v13: gpuBusySkipped·devicesCreated·uptimeS·sameFrameSkipped (
   for (const k of ['gpuBusySkipped', 'devicesCreated', 'uptimeS'])
     assert.strictEqual(e.render[k], null);
 });
+
+test('내 프리셋: 이름·값 정규화, 목록 정규화 (M9-1)', () => {
+  const P = ns.params;
+  assert.strictEqual(P.normalizeUserPresetName('  밤 영상  '), '밤 영상');
+  assert.strictEqual(P.normalizeUserPresetName('   '), null);
+  assert.strictEqual(P.normalizeUserPresetName('가'.repeat(21)), null);
+  assert.strictEqual(P.normalizeUserPresetName('가'.repeat(20)), '가'.repeat(20));
+  assert.strictEqual(P.normalizeUserPresetName(5), null);
+  const v = plain(P.normalizeUserValues({ P: 99, strength: 5, sharpness: -1, saturation: 'x' }));
+  assert.strictEqual(v.P, 8);
+  assert.strictEqual(v.strength, 1);
+  assert.strictEqual(v.sharpness, 0);
+  assert.strictEqual(v.saturation, P.SATURATION.default);
+  assert.deepStrictEqual(Object.keys(v).sort(), [...P.USER_VALUE_KEYS].sort());
+  assert.deepStrictEqual(plain(P.normalizeUserPresets('x')), []);
+  assert.deepStrictEqual(plain(P.normalizeUserPresets(null)), []);
+  const ok = { id: 'a', name: 'A', createdAt: 1, values: {} };
+  const list = plain(
+    P.normalizeUserPresets([
+      ok,
+      { ...ok }, // id 중복
+      { id: 'b', name: '', createdAt: 1, values: {} }, // 이름 잘못
+      { id: '', name: 'C', createdAt: 1 }, // id 없음
+      { id: 'd', name: 'D', createdAt: 'x' }, // createdAt 잘못
+      null,
+      5,
+      { id: 'e', name: ' E ', createdAt: 2, values: { P: 2.04 } },
+    ]),
+  );
+  assert.deepStrictEqual(
+    list.map((e) => [e.id, e.name]),
+    [
+      ['a', 'A'],
+      ['e', 'E'],
+    ],
+  );
+  assert.strictEqual(list[1].values.P, 2);
+  const many = Array.from({ length: 25 }, (_, i) => ({
+    id: 'i' + i,
+    name: 'n' + i,
+    createdAt: i,
+    values: {},
+  }));
+  assert.strictEqual(P.normalizeUserPresets(many).length, 20);
+});
+
+test('내 프리셋: snapshotValues·upsert·remove·apply (M9-1)', () => {
+  const P = ns.params;
+  const st = P.normalizeSettings({});
+  const snap = plain(P.snapshotValues(st));
+  assert.deepStrictEqual(Object.keys(snap).sort(), [...P.USER_VALUE_KEYS].sort());
+  assert.strictEqual(snap.P, 2);
+  assert.strictEqual(snap.g, 1.22);
+  assert.strictEqual(snap.strength, 0.43);
+  // 이름 있는 프리셋이면 그 프리셋의 확정 곡선을 저장한다.
+  assert.strictEqual(plain(P.snapshotValues({ ...st, preset: 'vivid' })).P, 4);
+  assert.strictEqual(plain(P.snapshotValues({ ...st, preset: 'vivid' })).s, 1.2);
+  let r = P.upsertUserPreset([], ' 내 설정 ', snap, 1000);
+  assert.strictEqual(r.error, null);
+  assert.strictEqual(r.replaced, false);
+  assert.strictEqual(r.list.length, 1);
+  assert.strictEqual(r.list[0].name, '내 설정');
+  const id = r.list[0].id;
+  // 같은 이름: 덮어쓰기, id 유지, 값·시각 갱신
+  r = P.upsertUserPreset(r.list, '내 설정', { ...snap, strength: 0.9 }, 2000);
+  assert.strictEqual(r.replaced, true);
+  assert.strictEqual(r.list.length, 1);
+  assert.strictEqual(r.list[0].id, id);
+  assert.strictEqual(r.list[0].values.strength, 0.9);
+  assert.strictEqual(r.list[0].createdAt, 2000);
+  assert.strictEqual(P.upsertUserPreset(r.list, '   ', snap, 3).error, 'name');
+  // 가득 참
+  let full = [];
+  for (let i = 0; i < 20; i++) full = P.upsertUserPreset(full, 'p' + i, snap, 10 + i).list;
+  assert.strictEqual(full.length, 20);
+  assert.strictEqual(new Set(full.map((e) => e.id)).size, 20);
+  const over = P.upsertUserPreset(full, 'new', snap, 99);
+  assert.strictEqual(over.error, 'full');
+  assert.strictEqual(over.list.length, 20);
+  // 가득 차도 같은 이름 덮어쓰기는 허용
+  assert.strictEqual(P.upsertUserPreset(full, 'p3', snap, 99).error, null);
+  // 삭제
+  const after = P.removeUserPreset(full, full[0].id);
+  assert.strictEqual(after.length, 19);
+  assert.ok(!after.some((e) => e.id === full[0].id));
+  assert.strictEqual(P.removeUserPreset(full, 'nope').length, 20);
+  // 적용: 한 번에 쓸 5키, preset은 custom
+  const a = plain(P.applyUserPresetEntries(r.list[0]));
+  assert.deepStrictEqual(
+    Object.keys(a).sort(),
+    [P.KEYS.preset, P.KEYS.custom, P.KEYS.strength, P.KEYS.sharpness, P.KEYS.saturation].sort(),
+  );
+  assert.strictEqual(a[P.KEYS.preset], 'custom');
+  assert.strictEqual(a[P.KEYS.strength], 0.9);
+  assert.deepStrictEqual(Object.keys(a[P.KEYS.custom]).sort(), ['P', 'g', 'hs', 'k', 'n', 's']);
+});
+
+test('내 프리셋: 백업 대상이지만 기본값 복원 대상은 아니다 (M9-0 (e))', () => {
+  const P = ns.params;
+  assert.ok(P.BACKUP_KEYS.includes(P.KEYS.userPresets));
+  assert.ok(!P.RESETTABLE_KEYS.includes(P.KEYS.userPresets));
+  assert.strictEqual(P.USER_PRESET_MAX, 20);
+  assert.strictEqual(P.KEYS.userPresets, 'sdrhdr.userPresets');
+});

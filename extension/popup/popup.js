@@ -21,6 +21,8 @@
   let shownDiag = null; // textarea에 표시 중인 진단
   let pendingDiag = null; // 포커스·선택 때문에 보류한 새 진단 {diag}
   const throttlers = [];
+  let userPresets = []; // 내 프리셋 목록(저장 순서)
+  const UP_STATUS_MS = 2000; // '저장됨'·'삭제됨' 표시 시간
   let statusSeq = 0; // 늦게 도착한 이전 응답이 새 결과를 덮지 않게 하는 요청 번호
   const STATUS_LEVELS = ['ok', 'wait', 'skip', 'error', 'off', 'diag', 'none'];
   // 대상 페이지가 아니거나 content script가 없을 때(응답 없음)의 표시. 이 문구만 popup이 가진다.
@@ -38,10 +40,19 @@
   ];
   const DETAIL_KEYS = Object.keys(params.DETAIL_STEPS);
   // 진단 모드일 때 잠그는 컨트롤
-  const LOCKABLE = ['preset', ...SLIDERS.map((s) => s.id), ...DETAIL_KEYS.map((k) => 'd-' + k)];
+  const LOCKABLE = [
+    'preset',
+    ...SLIDERS.map((s) => s.id),
+    ...DETAIL_KEYS.map((k) => 'd-' + k),
+    'up-load',
+    'up-delete',
+    'up-save',
+  ];
   // init 실패 시 전부 잠그는 컨트롤
   const ALL_CONTROLS = [
     ...LOCKABLE,
+    'up-list',
+    'up-name',
     'enabled',
     'hud',
     'notify',
@@ -262,10 +273,10 @@
 
   const sameCurve = (a, b) => DETAIL_KEYS.every((k) => a[k] === b[k]);
 
-  function showBackupNotice(presetId) {
+  // label: 프리셋 한글명 또는 내 프리셋 이름(textContent로만 넣는다)
+  function showBackupNotice(label) {
     backupShown = true;
-    $('backup-text').textContent =
-      '이전 사용자 지정 곡선을 「' + PRESET_LABEL[presetId] + '」 기준으로 바꿨습니다';
+    $('backup-text').textContent = '이전 사용자 지정 곡선을 「' + label + '」 기준으로 바꿨습니다';
     $('backup-note').hidden = false;
   }
   function hideBackupNotice() {
@@ -298,7 +309,7 @@
           if (!sameCurve(old, base)) {
             prevCustom = old;
             save({ [K.customPrev]: old });
-            showBackupNotice(cur.preset);
+            showBackupNotice(PRESET_LABEL[cur.preset]);
           }
         }
         const v = params.normalizeRange(spec, Number(el.value));
@@ -326,6 +337,154 @@
     hideBackupNotice();
   }
 
+  // ---- 내 프리셋 (PLAN D-M9) ----
+  // 진단 모드면 잠그고, 목록이 비면 불러오기·삭제를 끈다.
+  function updateUpButtons() {
+    if (!cur) return;
+    const locked = cur.mode !== 'itm';
+    $('up-load').disabled = locked || userPresets.length === 0;
+    $('up-delete').disabled = locked || userPresets.length === 0;
+    $('up-save').disabled = locked;
+  }
+
+  let upStatusTimer = null;
+  function showUpStatus(text, autoClearMs) {
+    if (upStatusTimer !== null) clearTimeout(upStatusTimer);
+    upStatusTimer = null;
+    $('up-status').textContent = text;
+    if (autoClearMs)
+      upStatusTimer = setTimeout(() => {
+        upStatusTimer = null;
+        $('up-status').textContent = '';
+      }, autoClearMs);
+  }
+
+  const selectedPreset = () => userPresets.find((e) => e.id === $('up-list').value) || null;
+
+  // 목록 select와 summary 개수를 다시 그린다. 이름은 option.textContent로만 넣는다.
+  function renderUserPresets(selectId) {
+    const list = $('up-list');
+    const want = selectId !== undefined ? selectId : list.value;
+    const opts = userPresets.map((e) => {
+      const o = document.createElement('option');
+      o.value = e.id;
+      o.textContent = e.name;
+      return o;
+    });
+    if (opts.length === 0) {
+      const o = document.createElement('option');
+      o.value = '';
+      o.disabled = true;
+      o.textContent = '저장된 프리셋 없음';
+      opts.push(o);
+    }
+    list.replaceChildren(...opts);
+    list.value = userPresets.some((e) => e.id === want)
+      ? want
+      : userPresets.length
+        ? userPresets[0].id
+        : '';
+    $('up-summary').textContent = '내 프리셋 (' + userPresets.length + ')';
+    disarmDelete();
+    updateUpButtons();
+  }
+
+  let delTimer = null;
+  function disarmDelete() {
+    if (delTimer !== null) clearTimeout(delTimer);
+    delTimer = null;
+    $('up-delete').textContent = '삭제';
+  }
+  let saveTimer = null;
+  function disarmSave() {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = null;
+    $('up-save').textContent = '현재 설정 저장';
+  }
+
+  function onUpSave() {
+    const r = params.upsertUserPreset(
+      userPresets,
+      $('up-name').value,
+      params.snapshotValues(cur),
+      Date.now(),
+    );
+    if (r.error === 'name') {
+      disarmSave();
+      showUpStatus('이름을 1~20자로 입력하세요');
+      return;
+    }
+    if (r.error === 'full') {
+      disarmSave();
+      showUpStatus('최대 20개입니다. 하나를 삭제한 뒤 저장하세요');
+      return;
+    }
+    // 같은 이름이면 첫 클릭은 확인 대기, 3초 안에 다시 누르면 덮어쓴다.
+    if (r.replaced && saveTimer === null) {
+      $('up-save').textContent = '덮어쓰기 확인';
+      saveTimer = setTimeout(disarmSave, CONFIRM_MS);
+      return;
+    }
+    disarmSave();
+    const name = params.normalizeUserPresetName($('up-name').value);
+    userPresets = r.list;
+    save({ [K.userPresets]: userPresets });
+    const saved = userPresets.find((e) => e.name === name);
+    renderUserPresets(saved ? saved.id : undefined);
+    $('up-name').value = '';
+    showUpStatus('저장됨', UP_STATUS_MS);
+  }
+
+  function onUpLoad() {
+    const entry = selectedPreset();
+    if (!entry) return;
+    for (const t of throttlers) t.cancel();
+    const obj = params.applyUserPresetEntries(entry);
+    const target = obj[K.custom];
+    // 덮을 사용자 지정 곡선이 불러올 곡선과 다르면 백업한다(UX-04와 같은 규칙).
+    const old = params.normalizeCustom(cur.custom);
+    const needBackup = !sameCurve(old, target);
+    if (needBackup) obj[K.customPrev] = old;
+    save(obj); // 한 번의 set (렌더러가 반쯤 바뀐 값을 읽지 않게)
+    cur.preset = 'custom';
+    cur.custom = Object.assign({}, target);
+    for (const sl of SLIDERS) cur[sl.id] = obj[sl.key];
+    $('preset').value = 'custom';
+    for (const sl of SLIDERS) showSlider(sl, cur[sl.id]);
+    showDetail();
+    showPeak();
+    if (needBackup) {
+      prevCustom = old;
+      showBackupNotice(entry.name);
+    } else {
+      hideBackupNotice();
+    }
+  }
+
+  function onUpDelete() {
+    const entry = selectedPreset();
+    if (!entry) return;
+    if (delTimer === null) {
+      $('up-delete').textContent = '삭제 확인';
+      delTimer = setTimeout(disarmDelete, CONFIRM_MS);
+      return;
+    }
+    disarmDelete();
+    userPresets = params.removeUserPreset(userPresets, entry.id);
+    save({ [K.userPresets]: userPresets });
+    renderUserPresets();
+    showUpStatus('삭제됨', UP_STATUS_MS);
+  }
+
+  function onUpSelect() {
+    disarmDelete();
+    const entry = selectedPreset();
+    if (entry) {
+      $('up-name').value = entry.name;
+      disarmSave();
+    }
+  }
+
   // 진단 모드면 일반 컨트롤을 잠그고 안내를 보인다. 모드 이름은 진단 영역 안에만 쓴다(GUIDELINES 2.6-3).
   function applyMode(mode, openDiag) {
     const locked = mode !== 'itm';
@@ -338,6 +497,7 @@
     $('locked-note').hidden = !locked;
     $('diag-banner').hidden = !locked;
     if (locked && openDiag) $('diag-section').open = true;
+    updateUpButtons();
   }
 
   function showEnabled() {
@@ -464,8 +624,10 @@
   async function init() {
     const raw = await browser.storage.local.get([...Object.values(K)]);
     cur = params.normalizeSettings(raw);
+    userPresets = params.normalizeUserPresets(raw[K.userPresets]);
     bindDetails();
     render(true);
+    renderUserPresets('');
     showDiag(raw[K.diag]);
     showRestored(raw[K.restoredAt]);
 
@@ -500,6 +662,11 @@
     });
     for (const sl of SLIDERS) bindSlider(sl);
     $('backup-undo').addEventListener('click', undoBackup);
+    $('up-save').addEventListener('click', onUpSave);
+    $('up-load').addEventListener('click', onUpLoad);
+    $('up-delete').addEventListener('click', onUpDelete);
+    $('up-list').addEventListener('change', onUpSelect);
+    $('up-name').addEventListener('input', disarmSave);
     $('reset').addEventListener('click', onResetClick);
     $('copy').addEventListener('click', onCopy);
     $('diag-refresh').addEventListener('click', () => {
@@ -517,6 +684,10 @@
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
       if (K.diag in changes) onDiag(changes[K.diag].newValue);
+      if (K.userPresets in changes) {
+        userPresets = params.normalizeUserPresets(changes[K.userPresets].newValue);
+        renderUserPresets();
+      }
       if (K.restoredAt in changes) showRestored(changes[K.restoredAt].newValue);
     });
     // 경과 시간 갱신(타이머가 없는 환경에서는 건너뜀)
