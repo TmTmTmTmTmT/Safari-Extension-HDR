@@ -22,6 +22,7 @@
   let cur = null; // 현재 attach: { video, container, overlay, renderer, src, pip, sawEncrypted, blackStreak, cleanup }
   let lc = { state: 'idle', skip: null }; // 수명주기 상태 (detect.nextLifecycle)
   let last = { render: null, canvas: null, video: null }; // detach 직전 스냅샷
+  let devicesBase = 0; // 이미 detach된 renderer들의 GPU device 생성 누적 (FIX_GUIDE U2-B)
   let drmFlag = false;
   let blackFlag = false;
   let navCount = 0;
@@ -72,6 +73,11 @@
     refreshUi();
   }
 
+  // 페이지 확장 가동 시간(초, 정수). 메모리 증가 측정에서 경과 시간을 JSON만으로 알기 위한 값 (FIX_GUIDE U2-B).
+  function pageUptimeS() {
+    return started ? Math.round((performance.now() - startedAt) / 1000) : null;
+  }
+
   function snapshot() {
     if (!cur) return;
     const v = cur.video;
@@ -98,6 +104,7 @@
   function detach() {
     if (!cur) return;
     snapshot();
+    devicesBase += (last.render && last.render.devicesCreated) || 0;
     const a = cur;
     cur = null;
     bypass = false; // renderer가 사라지므로 원본 보기도 끝난다
@@ -668,8 +675,14 @@
             saturation: last.render.saturation,
             custom: last.render.custom,
             effectivePeak: last.render.effectivePeak,
+            gpuBusySkipped: last.render.gpuBusySkipped,
+            sameFrameSkipped: last.render.sameFrameSkipped,
+            devicesCreated: devicesBase + (cur ? last.render.devicesCreated || 0 : 0),
+            uptimeS: pageUptimeS(),
           }
         : {
+            devicesCreated: devicesBase,
+            uptimeS: pageUptimeS(),
             mode: settings ? settings.mode : null,
             preset: settings ? settings.preset : null,
             strength: settings ? settings.strength : null,

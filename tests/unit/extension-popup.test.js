@@ -149,6 +149,7 @@ async function setup(stored = {}, opts = {}) {
     document,
     body,
     emitDiag,
+    changed,
     flush,
     params: ctx.__sdrhdr.params,
   };
@@ -797,4 +798,26 @@ test('Blob은 JSON 저장 클릭 시에만 만들고 최신 진단을 담는다 
   els.save.fire('click');
   assert.strictEqual(blobs.length, 1);
   assert.ok(blobs[0].includes('probing'));
+});
+
+test('복원 안내: restoredAt이 있으면 진단 영역에 한 줄, 없으면 숨김, 변경 시 갱신 (U1)', async () => {
+  const none = await setup({});
+  assert.strictEqual(none.els['restored-note'].hidden, true);
+  const ms = new Date(2026, 9, 3, 9, 5).getTime();
+  const { els } = await setup({ 'sdrhdr.restoredAt': ms });
+  assert.strictEqual(els['restored-note'].hidden, false);
+  assert.strictEqual(
+    els['restored-note'].textContent,
+    '10월 3일 09:05 재시작 후 설정을 백업에서 복원함',
+  );
+  assert.ok(!els['restored-note'].textContent.includes('watch'));
+});
+
+test('복원 안내: 저장소 변경 이벤트로 나중에 생겨도 표시', async () => {
+  const { els, changed } = await setup({});
+  changed.forEach((fn) =>
+    fn({ 'sdrhdr.restoredAt': { newValue: new Date(2026, 9, 3, 23, 59).getTime() } }, 'local'),
+  );
+  assert.strictEqual(els['restored-note'].hidden, false);
+  assert.ok(els['restored-note'].textContent.startsWith('10월 3일 23:59'));
 });

@@ -111,3 +111,230 @@ test('background: reject되는 호출은 unhandledRejection 없이 무시', asyn
   process.off('unhandledRejection', on);
   assert.strictEqual(seen.length, 0);
 });
+
+// ---- U1: 설정 백업·복원 ----
+const paramsKeys = (() => {
+  const ctx = { globalThis: {} };
+  ctx.globalThis = ctx;
+  vm.createContext(ctx);
+  for (const f of ['ns.js', 'params.js']) {
+    vm.runInContext(
+      fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'content', f), 'utf8'),
+      ctx,
+    );
+  }
+  return JSON.parse(JSON.stringify(ctx.__sdrhdr.params.BACKUP_KEYS));
+})();
+const RESTORED = 'sdrhdr.restoredAt';
+
+// store: storage.local 내용, backup: backup:get 응답(생략 시 native 미지원), 타이머 주입
+function setupU1({ store = {}, getReply, sendMode = 'ok', noRuntimeEvents = false } = {}) {
+  const sent = [];
+  const sets = [];
+  const timers = [];
+  const cleared = [];
+  const h = {};
+  const runtime = { onMessage: { addListener: () => {} } };
+  if (!noRuntimeEvents) {
+    runtime.onStartup = { addListener: (f) => (h.startup = f) };
+    runtime.onInstalled = { addListener: (f) => (h.installed = f) };
+  }
+  if (sendMode !== 'absent') {
+    runtime.sendNativeMessage = (id, msg) => {
+      sent.push({ id, msg });
+      if (sendMode === 'throw') throw new Error('x');
+      if (sendMode === 'reject') return Promise.reject(new Error('x'));
+      return Promise.resolve(msg.type === 'backup:get' ? getReply : { ok: true });
+    };
+  }
+  const browser = {
+    runtime,
+    storage: {
+      local: {
+        get: async (keys) => {
+          const o = {};
+          for (const k of [].concat(keys)) if (k in store) o[k] = store[k];
+          return o;
+        },
+        set: async (o) => {
+          sets.push(o);
+          Object.assign(store, o);
+        },
+      },
+      onChanged: { addListener: (f) => (h.changed = f) },
+    },
+  };
+  const sandbox = {
+    browser,
+    Date,
+    setTimeout: (fn, ms) => (timers.push({ fn, ms }), timers.length),
+    clearTimeout: (id) => cleared.push(id),
+  };
+  vm.runInNewContext(src, sandbox);
+  return { h, sent, sets, timers, cleared, store };
+}
+const plain = (x) => JSON.parse(JSON.stringify(x));
+
+test('background U1: 연속 변경 -> 1초 디바운스, 마지막 값 1회 전송', async () => {
+  const r = setupU1({ store: { 'sdrhdr.strength': 0.1 } });
+  await tick();
+  r.h.changed({ 'sdrhdr.strength': { newValue: 0.1 } }, 'local');
+  r.store['sdrhdr.strength'] = 0.9;
+  r.h.changed({ 'sdrhdr.strength': { newValue: 0.9 } }, 'local');
+  assert.strictEqual(r.timers.length, 2);
+  assert.strictEqual(r.timers[1].ms, 1000);
+  assert.deepStrictEqual(r.cleared, [1]); // 앞 타이머 취소 -> 실제 활성 타이머 1개
+  r.timers[1].fn();
+  await tick();
+  const sets = r.sent.filter((s) => s.msg.type === 'backup:set');
+  assert.strictEqual(sets.length, 1);
+  assert.strictEqual(sets[0].id, 'io.github.tmtmtmtmtmt.SDRHDR');
+  assert.deepStrictEqual(plain(sets[0].msg.data), { 'sdrhdr.strength': 0.9 });
+});
+
+test('background U1: 백업 대상 키만 반응', () => {
+  const r = setupU1();
+  for (const k of ['mode', 'diag', 'diagRequest', 'customPrev', 'restoredAt']) {
+    r.h.changed({ ['sdrhdr.' + k]: { newValue: 1 } }, 'local');
+  }
+  r.h.changed({ 'sdrhdr.hud': { newValue: 1 } }, 'sync');
+  assert.strictEqual(r.timers.length, 0);
+  r.h.changed({ 'sdrhdr.hud': { newValue: false } }, 'local');
+  assert.strictEqual(r.timers.length, 1);
+});
+
+test('background U1: 전송 data는 BACKUP_KEYS 안의 키만, 없는 키 생략, 빈 객체 허용', async () => {
+  const store = { 'sdrhdr.mode': 'diag', 'sdrhdr.diag': { a: 1 }, 'sdrhdr.hud': true };
+  const r = setupU1({ store });
+  await tick();
+  r.h.changed({ 'sdrhdr.hud': { newValue: true } }, 'local');
+  r.timers[0].fn();
+  await tick();
+  assert.deepStrictEqual(plain(r.sent.at(-1).msg), {
+    type: 'backup:set',
+    data: { 'sdrhdr.hud': true },
+  });
+  delete store['sdrhdr.hud'];
+  r.h.changed({ 'sdrhdr.hud': {} }, 'local');
+  r.timers.at(-1).fn();
+  await tick();
+  assert.deepStrictEqual(plain(r.sent.at(-1).msg), { type: 'backup:set', data: {} });
+});
+
+test('background U1: 저장소 비고 백업 있음 -> 허용 키 + restoredAt set', async () => {
+  const backup = { 'sdrhdr.preset': 'vivid', 'sdrhdr.strength': 0.7 };
+  const r = setupU1({ getReply: { ok: true, data: backup } });
+  await tick();
+  await tick();
+  assert.deepStrictEqual(plain(r.sent), [
+    { id: 'io.github.tmtmtmtmtmt.SDRHDR', msg: { type: 'backup:get' } },
+  ]);
+  assert.strictEqual(r.sets.length, 1);
+  const o = plain(r.sets[0]);
+  assert.strictEqual(typeof o[RESTORED], 'number');
+  delete o[RESTORED];
+  assert.deepStrictEqual(o, backup);
+});
+
+test('background U1: 저장소에 키가 하나라도 있으면 복원 안 함(백업 조회도 안 함)', async () => {
+  const r = setupU1({
+    store: { 'sdrhdr.notify': false },
+    getReply: { ok: true, data: { 'sdrhdr.preset': 'x' } },
+  });
+  await tick();
+  await tick();
+  assert.strictEqual(r.sets.length, 0);
+});
+
+test('background U1: 백업 null·빈 객체·비객체·ok 아님이면 복원 안 함', async () => {
+  for (const reply of [
+    { ok: true, data: null },
+    { ok: true, data: {} },
+    { ok: true, data: 'str' },
+    { ok: true, data: [1] },
+    { ok: false },
+    { ok: true },
+    null,
+    undefined,
+    'x',
+  ]) {
+    const r = setupU1({ getReply: reply });
+    await tick();
+    await tick();
+    assert.strictEqual(r.sets.length, 0, JSON.stringify(reply));
+  }
+});
+
+test('background U1: 백업의 허용 밖 키는 복원하지 않음', async () => {
+  const r = setupU1({
+    getReply: {
+      ok: true,
+      data: { 'sdrhdr.mode': 'diag', 'sdrhdr.diag': {}, 'sdrhdr.hud': false, evil: 1 },
+    },
+  });
+  await tick();
+  await tick();
+  const o = plain(r.sets[0]);
+  assert.deepStrictEqual(Object.keys(o).sort(), ['sdrhdr.hud', RESTORED].sort());
+  const r2 = setupU1({ getReply: { ok: true, data: { 'sdrhdr.mode': 'diag', evil: 1 } } });
+  await tick();
+  await tick();
+  assert.strictEqual(r2.sets.length, 0);
+});
+
+test('background U1: 복원은 이벤트가 여러 번 와도 1회', async () => {
+  const r = setupU1({ getReply: { ok: true, data: { 'sdrhdr.hud': true } } });
+  r.h.startup();
+  r.h.installed({ reason: 'install' });
+  await tick();
+  await tick();
+  r.h.startup();
+  await tick();
+  await tick();
+  assert.strictEqual(r.sent.filter((s) => s.msg.type === 'backup:get').length, 1);
+  assert.strictEqual(r.sets.length, 1);
+});
+
+test('background U1: sendNativeMessage 없음·예외·reject는 무시하고 배지·아이콘 정상', async () => {
+  const seen = [];
+  const on = (e) => seen.push(e);
+  process.on('unhandledRejection', on);
+  for (const sendMode of ['absent', 'throw', 'reject']) {
+    const r = setupU1({ sendMode, getReply: { ok: true, data: { 'sdrhdr.hud': true } } });
+    await tick();
+    await tick();
+    assert.strictEqual(r.sets.length, 0, sendMode);
+    assert.doesNotThrow(() => r.h.changed({ 'sdrhdr.hud': { newValue: 1 } }, 'local'));
+    assert.doesNotThrow(() => r.timers[0].fn());
+    await tick();
+  }
+  const r = setupU1({ noRuntimeEvents: true });
+  await tick();
+  process.off('unhandledRejection', on);
+  assert.strictEqual(seen.length, 0);
+});
+
+test('background U1: BACKUP_KEYS는 params.BACKUP_KEYS와 같은 목록(전송 data 순서로 검증)', async () => {
+  const store = {};
+  for (const k of paramsKeys) store[k] = 1;
+  const r = setupU1({ store });
+  await tick();
+  r.h.changed({ [paramsKeys[0]]: { newValue: 1 } }, 'local');
+  r.timers[0].fn();
+  await tick();
+  assert.deepStrictEqual(Object.keys(r.sent.at(-1).msg.data), paramsKeys);
+  // 각 params 키가 개별로 백업을 트리거
+  for (const k of paramsKeys) {
+    const n = r.timers.length;
+    r.h.changed({ [k]: { newValue: 1 } }, 'local');
+    assert.strictEqual(r.timers.length, n + 1, k);
+  }
+  // 복원 쪽도 같은 목록만 허용
+  const backup = {};
+  for (const k of paramsKeys) backup[k] = 2;
+  backup['sdrhdr.extra'] = 3;
+  const r2 = setupU1({ getReply: { ok: true, data: backup } });
+  await tick();
+  await tick();
+  assert.deepStrictEqual(Object.keys(r2.sets[0]).sort(), [...paramsKeys, RESTORED].sort());
+});

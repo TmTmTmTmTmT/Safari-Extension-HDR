@@ -14,6 +14,7 @@
   const PROBE_POLL_MS = 500;
   const PROBE_PENDING_MS = 1000; // 경로 보류 중 재시도 주기 (FIX_GUIDE Q1)
   const PENDING_MAX = 60; // 보류 결과가 이 횟수에 이르면 더 시도하지 않는다
+  const MAX_INFLIGHT = 2; // U2-A: 제출 후 미완료 렌더가 이 수 이상이면 tick을 건너뛴다
   const VF_FAIL_LIMIT = 3; // VideoFrame 생성 실패가 연속 이 횟수에 이르면 errors에 기록하고 다음 경로로 전환 (FIX_GUIDE R3)
   const BUF_UNIFORM = 0x40;
   const UNIFORM_BYTES = 48; // ItmParams: f32 12개(필드 9 + 패딩 3), params.UNIFORM_FLOATS와 같다
@@ -58,6 +59,12 @@
     let rafId = null;
     let frames = 0;
     let sameFrameSkipped = 0;
+    // U2-A: 제출 후 완료되지 않은 렌더 수. MAX_INFLIGHT 이상이면 그 tick은 렌더하지 않는다.
+    // gpuGen은 device 세대 번호로, 이전 device의 늦은 settle이 새 카운터를 건드리지 않게 한다.
+    let inflight = 0;
+    let gpuGen = 0;
+    let gpuBusySkipped = 0;
+    let devicesCreated = 0;
     // TA: 다시 그려야 함 플래그. 첫 렌더(GPU 초기화 직후)는 항상 그린다.
     let dirty = true;
     let lastVfTs = null; // 직전에 실제로 그린 VideoFrame.timestamp
@@ -163,6 +170,9 @@
       api.adapter = !!adapter;
       if (!adapter) throw new Error('requestAdapter()가 null');
       device = await withTimeout(adapter.requestDevice(), GPU_TIMEOUT_MS, 'requestDevice');
+      devicesCreated += 1;
+      gpuGen += 1;
+      inflight = 0;
       api.device = true;
       dirty = true;
       const lostDevice = device;
@@ -318,13 +328,37 @@
       return typeof t === 'number' && Number.isFinite(t) ? t : null;
     }
 
+    // 렌더 submit 직후 호출. onSubmittedWorkDone이 없으면 세지 않는다(상한도 없음).
+    function trackSubmit() {
+      const q = device.queue;
+      if (!q || typeof q.onSubmittedWorkDone !== 'function') return;
+      const gen = gpuGen;
+      let p;
+      try {
+        p = q.onSubmittedWorkDone();
+      } catch (e) {
+        return;
+      }
+      if (!p || typeof p.then !== 'function') return;
+      inflight += 1;
+      const done = () => {
+        if (gen === gpuGen && inflight > 0) inflight -= 1;
+      };
+      p.then(done, done);
+    }
+
     // 렌더 1회. video 모드에서 준비되지 않은 video는 그리지 않고 false.
-    // 반환: false(그리지 못함) | true(실제 렌더) | 'skip'(같은 소스 프레임이라 생략, TA).
+    // 반환: false(그리지 못함) | true(실제 렌더) | 'skip'(같은 소스 프레임이라 생략, TA) | 'busy'(GPU 적체로 생략, U2-A).
     function renderOnce() {
       lastSrc = null;
       if (mode === 'baseline') return false;
       const isVideo = mode !== 'stripes';
       if (isVideo && (video.readyState < 2 || !pathReady())) return false;
+      // U2-A: VideoFrame·복사·import 전에 적체를 확인한다. dirty는 건드리지 않는다.
+      if (inflight >= MAX_INFLIGHT) {
+        gpuBusySkipped += 1;
+        return 'busy';
+      }
       const useCopy = isVideo && path === 'copy';
       const useVf = isVideo && path === 'vf';
       const copyState = useCopy ? updateCopyTexture() : null;
@@ -398,6 +432,7 @@
         pass.draw(3);
         pass.end();
         device.queue.submit([enc.finish()]);
+        trackSubmit();
         if (isVideo) lastSrc = srcOf(frame);
         dirty = false;
         lastW = canvas ? canvas.width : null;
@@ -419,7 +454,11 @@
       } else {
         try {
           const res = renderOnce();
-          if (res) {
+          if (res === 'busy') {
+            // 화면은 직전 소스 프레임을 유지한다. srcTs도 같이 넣어 loopTs와 인덱스 정렬을 지킨다 (FIX_GUIDE S2).
+            push(loopTs, ts);
+            push(srcTs, lastSrc);
+          } else if (res) {
             push(frameTimes, performance.now() - t0);
             push(loopTs, ts);
             push(srcTs, lastSrc);
@@ -801,6 +840,8 @@
         // 정리 중 오류는 무시한다.
       }
       device = null;
+      gpuGen += 1;
+      inflight = 0;
       ctx = null;
       sampler = null;
       uniformBuf = null;
@@ -917,6 +958,8 @@
       } catch (e) {
         // 정리 중 오류는 무시한다.
       }
+      gpuGen += 1;
+      inflight = 0;
     }
 
     function getStats() {
@@ -949,6 +992,10 @@
         copyTimesMs: copyTimes.slice(),
         copySkipped,
         sameFrameSkipped,
+        gpuBusySkipped,
+        inflight,
+        uptimeS: Math.round((performance.now() - createdAt) / 1000),
+        devicesCreated,
         vfTimesMs: vfTimes.slice(),
         videoDropped: vq ? vq.droppedVideoFrames : null,
         videoTotal: vq ? vq.totalVideoFrames : null,

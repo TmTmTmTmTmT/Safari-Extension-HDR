@@ -231,7 +231,7 @@ test('buildDiag: M2-4 스키마 필드 존재·타입', () => {
     'lifecycle',
     'errors',
   ]);
-  assert.strictEqual(d.schemaVersion, 12);
+  assert.strictEqual(d.schemaVersion, 13);
   assert.strictEqual(d.milestone, 'M2');
   assert.strictEqual(typeof d.extVersion, 'string');
   assert.ok(!Number.isNaN(Date.parse(d.createdAt)));
@@ -623,7 +623,7 @@ test('buildDiag v3: render 비용 필드와 frameProbe 시간, 스키마 선언 
       frameProbe: { n: 1, ms: 9.5, extSyncMs: 1, copySyncMs: 2, c2dSyncMs: 3, vf: 50, vfErr: null },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 12);
+  assert.strictEqual(d.schemaVersion, 13);
   assert.strictEqual(d.render.sameFrameSkipped, 12);
   assert.strictEqual(d.render.path, 'copy');
   assert.strictEqual(d.render.displayHz, 120);
@@ -1026,7 +1026,7 @@ test('buildDiag v9: custom·effectivePeak·flags.hud (M5-4)', () => {
       flags: { hud: true },
     }),
   );
-  assert.strictEqual(d.schemaVersion, 12);
+  assert.strictEqual(d.schemaVersion, 13);
   assert.strictEqual(d.render.preset, 'custom');
   assert.deepStrictEqual(d.render.custom, { P: 2.6, k: 0.5, n: 2.5, g: 1, s: 1.1, hs: 0.9 });
   assert.strictEqual(d.render.effectivePeak, 1.8);
@@ -1158,4 +1158,20 @@ test('BACKUP_KEYS: 설정 키만, 진단 모드·진단·곡선 백업·복원 �
   ])
     assert.ok(!keys.includes(k), k);
   assert.strictEqual(P.KEYS.restoredAt, 'sdrhdr.restoredAt');
+});
+
+test('buildDiag v13: gpuBusySkipped·devicesCreated·uptimeS·sameFrameSkipped (U2-B)', () => {
+  const d = plain(
+    ns.hud.buildDiag({
+      render: { gpuBusySkipped: 3, devicesCreated: 2, uptimeS: 90, sameFrameSkipped: 12 },
+    }),
+  );
+  assert.strictEqual(d.schemaVersion, 13);
+  assert.strictEqual(d.render.gpuBusySkipped, 3);
+  assert.strictEqual(d.render.devicesCreated, 2);
+  assert.strictEqual(d.render.uptimeS, 90);
+  assert.strictEqual(d.render.sameFrameSkipped, 12);
+  const e = plain(ns.hud.buildDiag({}));
+  for (const k of ['gpuBusySkipped', 'devicesCreated', 'uptimeS'])
+    assert.strictEqual(e.render[k], null);
 });
