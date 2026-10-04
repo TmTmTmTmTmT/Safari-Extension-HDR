@@ -1086,7 +1086,11 @@ test('statusOf: 상태별 level·문구·배지 (M8-1)', () => {
 
 test('MSG·notify·setEnabled (M8-1)', () => {
   const P = ns.params;
-  assert.deepStrictEqual(plain(P.MSG), { getState: 'sdrhdr:getState', state: 'sdrhdr:state' });
+  assert.deepStrictEqual(plain(P.MSG), {
+    getState: 'sdrhdr:getState',
+    getDiag: 'sdrhdr:getDiag',
+    state: 'sdrhdr:state',
+  });
   assert.strictEqual(P.normalizeSettings({}).notify, true);
   assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: false }).notify, false);
   assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: 'x' }).notify, true);
@@ -1278,4 +1282,50 @@ test('내 프리셋: 백업 대상이지만 기본값 복원 대상은 아니다
   assert.ok(!P.RESETTABLE_KEYS.includes(P.KEYS.userPresets));
   assert.strictEqual(P.USER_PRESET_MAX, 20);
   assert.strictEqual(P.KEYS.userPresets, 'sdrhdr.userPresets');
+});
+
+test('setWithRetry: 실패하면 1초 뒤 1회 재시도, 결과는 true/false, LEGACY_KEYS (V1)', async () => {
+  const mk = (results) => {
+    const calls = [];
+    const waits = [];
+    const c = vm.createContext({
+      browser: {
+        storage: {
+          local: {
+            set: (o) => {
+              calls.push(o);
+              const r = results.shift();
+              if (r === 'throw') throw new Error('x');
+              return r === 'ok' ? Promise.resolve() : Promise.reject(new Error('Disk I/O error'));
+            },
+          },
+        },
+      },
+    });
+    for (const f of ['ns.js', 'params.js'])
+      vm.runInContext(fs.readFileSync(path.join(root, 'content', f), 'utf8'), c, { filename: f });
+    const wait = (ms) => {
+      waits.push(ms);
+      return Promise.resolve();
+    };
+    return { P: c.__sdrhdr.params, calls, waits, wait };
+  };
+  let t = mk(['ok']);
+  assert.strictEqual(await t.P.setWithRetry({ a: 1 }, t.wait), true);
+  assert.strictEqual(t.calls.length, 1);
+  assert.deepStrictEqual(t.waits, []);
+  t = mk(['fail', 'ok']);
+  assert.strictEqual(await t.P.setWithRetry({ a: 1 }, t.wait), true);
+  assert.strictEqual(t.calls.length, 2);
+  assert.deepStrictEqual(t.waits, [1000]);
+  t = mk(['throw', 'fail']);
+  assert.strictEqual(await t.P.setWithRetry({ a: 1 }, t.wait), false);
+  assert.strictEqual(t.calls.length, 2, '재시도는 1회만');
+  t = mk(['fail', 'ok']);
+  assert.strictEqual(await t.P.setEnabled(0, t.wait), true);
+  assert.deepStrictEqual(plain(t.calls), [
+    { 'sdrhdr.enabled': false },
+    { 'sdrhdr.enabled': false },
+  ]);
+  assert.deepStrictEqual(plain(ns.params.LEGACY_KEYS), ['sdrhdr.diag', 'sdrhdr.diagRequest']);
 });

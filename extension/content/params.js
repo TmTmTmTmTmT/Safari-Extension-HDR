@@ -308,7 +308,7 @@
   }
 
   // 메시지 타입 (PLAN D-M8 M8-1, GUIDELINES 2.1-5). popup -> content 요청, content -> background 배지 알림.
-  const MSG = { getState: 'sdrhdr:getState', state: 'sdrhdr:state' };
+  const MSG = { getState: 'sdrhdr:getState', getDiag: 'sdrhdr:getDiag', state: 'sdrhdr:state' };
 
   const BADGE_GRAY = '#8e8e93';
   const BADGE_ORANGE = '#ff9500';
@@ -379,9 +379,33 @@
     return out('wait', '대상 영상을 찾는 중', 'YouTube 영상 페이지에서 재생');
   }
 
-  // 단축키·popup이 켜기 상태를 뒤집을 때 쓴다 (PLAN D-M8 M8-1).
-  function setEnabled(v) {
-    return browser.storage.local.set({ [KEYS.enabled]: !!v });
+  // 이전 버전이 진단에 쓰던 키. 진단은 이제 저장하지 않고 메시지로만 주고받는다 (FIX_GUIDE V1). background가 1회 지운다.
+  const LEGACY_KEYS = [KEYS.diag, KEYS.diagRequest];
+  const STORAGE_RETRY_MS = 1000; // 저장 실패 시 1회 재시도 간격 (FIX_GUIDE V1 (b))
+
+  // storage.local.set을 쓰고 실패(reject·예외)하면 1초 뒤 1회 재시도한다. 결과는 true/false로만 알린다(오류 원문 없음).
+  // wait는 테스트용 주입(기본 setTimeout).
+  function setWithRetry(obj, wait) {
+    const sleep =
+      typeof wait === 'function'
+        ? wait
+        : (ms) => new Promise((r) => (typeof setTimeout === 'function' ? setTimeout(r, ms) : r()));
+    const once = () => {
+      try {
+        return Promise.resolve(browser.storage.local.set(obj)).then(
+          () => true,
+          () => false,
+        );
+      } catch (e) {
+        return Promise.resolve(false);
+      }
+    };
+    return once().then((ok) => (ok ? true : sleep(STORAGE_RETRY_MS).then(once)));
+  }
+
+  // 단축키·popup이 켜기 상태를 뒤집을 때 쓴다 (PLAN D-M8 M8-1). 실패하면 1회 재시도 (FIX_GUIDE V1).
+  function setEnabled(v, wait) {
+    return setWithRetry({ [KEYS.enabled]: !!v }, wait);
   }
 
   // 최신 진단 1개만 유지 (GUIDELINES 2.6-2).
@@ -442,6 +466,9 @@
     MSG,
     statusOf,
     setEnabled,
+    setWithRetry,
+    LEGACY_KEYS,
+    STORAGE_RETRY_MS,
     normalizeStrength,
     normalizeSettings,
     toUniformArray,
