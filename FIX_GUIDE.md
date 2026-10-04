@@ -13,6 +13,7 @@
 
 - 메모리 (a) 확장 끔 15분: Safari 페이지 1.4~1.8 GB 오르내림, `kernel_task` 거의 없음. 진단 JSON `results/result-U-20261004-a.json`(schemaVersion 13, extVersion 1.3.0, 4K 3840×1772 60fps, 끔 직전까지 itm 경로 vf, `devicesCreated` 3, `gpuBusySkipped` 0, 갱신 누락 4.0%, 드롭 0, errors 없음).
 - 메모리 (b) `baseline` 진행 중 **"Error: Invalid call to browser.storage.local.set(). Disk I/O error."** 발생. Safari 페이지 1.3 GB대, `kernel_task` 문제없음.
+- 오류 표시 위치(사용자 회신): **Safari 설정 › 확장 프로그램 › SDR HDR 창 맨 아래**. 이 자리는 확장의 background 쪽 오류가 보이는 곳으로 본다 [추정]. background가 `storage.local.set`을 부르는 곳은 U1 **복원** 하나뿐이고, 복원은 "저장소가 비어 있을 때"만 실행된다. 즉 Safari 시작 시 저장소가 이미 비어 있었고(U1 현상 재발), 백업에서 되살리려 쓰다가 저장소 자체가 쓰기를 거부한 것으로 해석한다. 진단 쓰기(popup·content)가 같은 저장소를 손상시킨 원인인지는 미확인.
 - (c) 정상(itm)은 이 오류 수정 후 측정 예정. 설정 유지(U1) 회신은 아직 없음.
 - 판단: 이전 보고(13 GB)는 이번 (a)(b)에서 재현되지 않았다. U2 판정은 (c) 결과 후 한다.
 
@@ -28,6 +29,7 @@
 **수정 방향**
 
 - (a) **진단 전달을 메시징으로 바꾼다**: `params.MSG.getDiag = 'sdrhdr:getDiag'` 추가. popup 진단 영역이 열려 있는 동안 2초마다 `tabs.sendMessage(현재 탭, {type: getDiag})` → content가 `buildDiag(collectState())`를 **응답으로 반환**(저장하지 않음). 응답이 없으면(대상 탭 아님) 진단 상자에 기존 "아직 상태 정보가 없습니다…" 문구. 이로써 `sdrhdr.diagRequest`·`sdrhdr.diag` 쓰기를 **없앤다**(`requestDiag`·`subscribeDiagRequest`·`writeDiag`·`writeDiagIfChanged`의 저장 부분 삭제, visibilitychange 때 쓰기도 삭제). GUIDELINES 2.6-2("최신 1개를 storage.local에 유지")는 "진단은 저장하지 않고 요청 시 응답만 한다"로 Opus가 개정한다. 진단 출처 줄은 응답의 `createdAt` 기준, 숨긴 탭은 응답하지 않던 T2 규칙은 메시징 대상이 활성 탭이라 자연히 지켜진다.
+- (b0) **background 복원 쓰기 재시도 강화**(이번 오류의 직접 지점): 복원 `set`이 reject되면 1초·5초·15초 뒤 최대 3회 재시도. 모두 실패하면 `console.warn` 한 줄(`'SDR HDR: 설정 복원 실패, Safari를 완전히 종료 후 다시 여세요'`, 오류 원문 없이)만 남기고 중단한다. 재시도 중 사용자가 popup에서 값을 바꾸면(저장소에 BACKUP_KEYS 중 하나라도 생기면) 재시도를 멈춘다(사용자 값 우선). 복원 실패를 popup이 알 수 있게 background는 아무 키도 쓰지 않는다(쓰기가 실패하는 상황이므로) — popup은 열릴 때 저장소가 비어 있고 `restoredAt`도 없으면 진단 영역에 "설정을 읽지 못했거나 초기화됨. 내 프리셋에서 다시 불러오거나 Safari를 재시작하세요"를 한 줄 보인다.
 - (b) **남은 쓰기의 실패 처리**: 설정(popup `save`), `setEnabled`(단축키), background 백업 복원 `set`에서 reject를 잡아 **1초 뒤 1회 재시도**. 재시도도 실패하면 popup은 기존 '저장 실패' 자리에 "저장 실패(Safari 저장소 오류). Safari를 완전히 종료 후 다시 여세요"를 표시하고, content는 진단 `errors`에 `{at: 'storage.set', name: 'StorageError'}`를 남긴다(메시지 원문은 남기지 않음). background는 조용히 무시(현행).
 - (c) 이전 버전이 남긴 `sdrhdr.diag`·`sdrhdr.diagRequest` 키는 background 시작 시 1회 `storage.local.remove`로 지운다(저장소 크기 축소). 실패는 무시.
 - (d) 진단 스키마는 바꾸지 않는다(schemaVersion 13 유지). 내용은 같고 전달 방식만 바뀐다. "JSON 저장"(Blob)과 복사는 마지막으로 받은 응답을 쓴다.
