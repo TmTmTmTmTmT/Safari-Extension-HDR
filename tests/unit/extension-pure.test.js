@@ -1086,7 +1086,11 @@ test('statusOf: 상태별 level·문구·배지 (M8-1)', () => {
 
 test('MSG·notify·setEnabled (M8-1)', () => {
   const P = ns.params;
-  assert.deepStrictEqual(plain(P.MSG), { getState: 'sdrhdr:getState', state: 'sdrhdr:state' });
+  assert.deepStrictEqual(plain(P.MSG), {
+    getState: 'sdrhdr:getState',
+    getDiag: 'sdrhdr:getDiag',
+    state: 'sdrhdr:state',
+  });
   assert.strictEqual(P.normalizeSettings({}).notify, true);
   assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: false }).notify, false);
   assert.strictEqual(P.normalizeSettings({ [P.KEYS.notify]: 'x' }).notify, true);
@@ -1099,40 +1103,6 @@ test('MSG·notify·setEnabled (M8-1)', () => {
   c2.__sdrhdr.params.setEnabled(0);
   c2.__sdrhdr.params.setEnabled(true);
   assert.deepStrictEqual(plain(sets), [{ 'sdrhdr.enabled': false }, { 'sdrhdr.enabled': true }]);
-});
-
-test('진단 요청 키 (FIX_GUIDE T2): requestDiag는 시각을 쓰고, subscribeDiagRequest는 그 키 변경에만 반응한다', async () => {
-  const ctx = vm.createContext({});
-  const written = [];
-  let listener = null;
-  ctx.browser = {
-    storage: {
-      local: { set: async (o) => written.push(o) },
-      onChanged: {
-        addListener: (fn) => (listener = fn),
-        removeListener: (fn) => {
-          if (listener === fn) listener = null;
-        },
-      },
-    },
-  };
-  for (const f of manifest.content_scripts[0].js) {
-    vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
-  }
-  const p = ctx.__sdrhdr.params;
-  assert.strictEqual(p.KEYS.diagRequest, 'sdrhdr.diagRequest');
-  await p.requestDiag();
-  assert.strictEqual(written.length, 1);
-  assert.ok(typeof written[0]['sdrhdr.diagRequest'] === 'number');
-  let n = 0;
-  const off = p.subscribeDiagRequest(() => n++);
-  listener({ 'sdrhdr.strength': {} }, 'local');
-  listener({ 'sdrhdr.diagRequest': {} }, 'sync');
-  assert.strictEqual(n, 0);
-  listener({ 'sdrhdr.diagRequest': {} }, 'local');
-  assert.strictEqual(n, 1);
-  off();
-  assert.strictEqual(listener, null);
 });
 
 test('BACKUP_KEYS: 설정 키만, 진단 모드·진단·곡선 백업·복원 시각 제외 (U1)', () => {
@@ -1278,4 +1248,50 @@ test('내 프리셋: 백업 대상이지만 기본값 복원 대상은 아니다
   assert.ok(!P.RESETTABLE_KEYS.includes(P.KEYS.userPresets));
   assert.strictEqual(P.USER_PRESET_MAX, 20);
   assert.strictEqual(P.KEYS.userPresets, 'sdrhdr.userPresets');
+});
+
+test('setWithRetry: 실패하면 1초 뒤 1회 재시도, 결과는 true/false, LEGACY_KEYS (V1)', async () => {
+  const mk = (results) => {
+    const calls = [];
+    const waits = [];
+    const c = vm.createContext({
+      browser: {
+        storage: {
+          local: {
+            set: (o) => {
+              calls.push(o);
+              const r = results.shift();
+              if (r === 'throw') throw new Error('x');
+              return r === 'ok' ? Promise.resolve() : Promise.reject(new Error('Disk I/O error'));
+            },
+          },
+        },
+      },
+    });
+    for (const f of ['ns.js', 'params.js'])
+      vm.runInContext(fs.readFileSync(path.join(root, 'content', f), 'utf8'), c, { filename: f });
+    const wait = (ms) => {
+      waits.push(ms);
+      return Promise.resolve();
+    };
+    return { P: c.__sdrhdr.params, calls, waits, wait };
+  };
+  let t = mk(['ok']);
+  assert.strictEqual(await t.P.setWithRetry({ a: 1 }, t.wait), true);
+  assert.strictEqual(t.calls.length, 1);
+  assert.deepStrictEqual(t.waits, []);
+  t = mk(['fail', 'ok']);
+  assert.strictEqual(await t.P.setWithRetry({ a: 1 }, t.wait), true);
+  assert.strictEqual(t.calls.length, 2);
+  assert.deepStrictEqual(t.waits, [1000]);
+  t = mk(['throw', 'fail']);
+  assert.strictEqual(await t.P.setWithRetry({ a: 1 }, t.wait), false);
+  assert.strictEqual(t.calls.length, 2, '재시도는 1회만');
+  t = mk(['fail', 'ok']);
+  assert.strictEqual(await t.P.setEnabled(0, t.wait), true);
+  assert.deepStrictEqual(plain(t.calls), [
+    { 'sdrhdr.enabled': false },
+    { 'sdrhdr.enabled': false },
+  ]);
+  assert.deepStrictEqual(plain(ns.params.LEGACY_KEYS), ['sdrhdr.diag', 'sdrhdr.diagRequest']);
 });

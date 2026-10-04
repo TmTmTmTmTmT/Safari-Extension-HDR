@@ -111,16 +111,17 @@ async function setup(mode = 'itm', enabled = true) {
   });
   ns.params.subscribe = (cb) => (settingsCb = cb);
   const enabledWrites = [];
+  const t = { intervals, setEnabledResult: true, storageSets: [] };
   ns.params.setEnabled = async (v) => {
     enabledWrites.push(v);
+    return t.setEnabledResult;
   };
-  let diagReqCb = null;
-  ns.params.subscribeDiagRequest = (cb) => (diagReqCb = cb);
-  const t = { intervals, diag: null, diagWrites: 0 };
-  ns.params.writeDiag = async (d) => {
-    t.diag = d;
+  // 진단 저장 함수가 다시 쓰이면 기록한다 (FIX_GUIDE V1: 진단은 저장하지 않는다).
+  t.diagWrites = 0;
+  ns.params.writeDiag = async () => {
     t.diagWrites += 1;
   };
+  browser.storage = { local: { set: async (o) => t.storageSets.push(o) } };
   const renderers = [];
   // 상태 칩도 스텁으로 바꾼다 (PLAN M8-3).
   t.chips = [];
@@ -204,15 +205,12 @@ async function setup(mode = 'itm', enabled = true) {
     sent,
     enabledWrites,
     settings: (s) => settingsCb(s),
-    diagRequest: () => diagReqCb(),
   });
 }
 
-// popup 진단 요청을 흉내 내 lifecycle 상태를 읽는다 (FIX_GUIDE T2).
+// popup의 getDiag 메시지를 흉내 내 응답 진단을 읽는다 (FIX_GUIDE V1).
 async function diagOf(t) {
-  t.diagRequest();
-  await Promise.resolve();
-  return plain(t.diag);
+  return plain(await t.rt.listeners[0]({ type: 'sdrhdr:getDiag' }));
 }
 
 test('attach: 설정 읽고 video가 있으면 probing으로 시작하고 renderer를 시작한다', async () => {
@@ -833,34 +831,43 @@ test('꺼진 채 시작하면 lifecycle은 idle이 아니라 skipped(disabled) (
   assert.strictEqual((await diagOf(t)).lifecycle.state === 'skipped', false);
 });
 
-test('보이지 않는 탭은 진단을 쓰지 않고, 다시 보이면 즉시 1회 기록한다 (M7-2)', async () => {
+test('진단은 저장하지 않는다: 타이머·visibilitychange·숨긴 탭에서 writeDiag·storage.set 0회 (FIX_GUIDE V1)', async () => {
   const t = await setup();
-  t.doc.visibilityState = 'hidden';
   t.intervals.forEach((fn) => fn());
-  await Promise.resolve();
-  assert.strictEqual(t.diag, null);
+  t.doc.hidden = true;
+  t.doc.visibilityState = 'hidden';
+  t.doc.fire('visibilitychange');
+  t.intervals.forEach((fn) => fn());
+  t.doc.hidden = false;
   t.doc.visibilityState = 'visible';
   t.doc.fire('visibilitychange');
   await Promise.resolve();
-  assert.notStrictEqual(t.diag, null);
-  assert.strictEqual(t.diag.lifecycle.state, 'probing');
+  assert.strictEqual(t.diagWrites, 0);
+  assert.deepStrictEqual(t.storageSets, []);
 });
 
-test('진단은 popup 요청 때만 쓴다: 타이머 주기 저장 없음, 숨긴 탭은 무시 (FIX_GUIDE T2)', async () => {
+test('getDiag 응답은 buildDiag 형태이고 저장소 쓰기를 일으키지 않는다 (FIX_GUIDE V1)', async () => {
   const t = await setup();
-  t.intervals.forEach((fn) => fn());
-  await Promise.resolve();
-  assert.strictEqual(t.diagWrites, 0, '요청 없이는 0회');
-  t.doc.hidden = true;
-  t.doc.visibilityState = 'hidden';
-  t.diagRequest();
-  await Promise.resolve();
-  assert.strictEqual(t.diagWrites, 0, '숨긴 탭은 응답하지 않는다');
-  t.doc.hidden = false;
-  t.doc.visibilityState = 'visible';
-  t.diagRequest();
-  await Promise.resolve();
-  assert.strictEqual(t.diagWrites, 1);
+  const d = await diagOf(t);
+  assert.strictEqual(d.schemaVersion, 13);
+  assert.strictEqual(d.lifecycle.state, 'probing');
+  await diagOf(t);
+  assert.strictEqual(t.diagWrites, 0);
+  assert.deepStrictEqual(t.storageSets, []);
+});
+
+test('단축키 setEnabled가 false를 돌려주면 errors에 StorageError, true면 기록 없음 (FIX_GUIDE V1)', async () => {
+  const t = await setup();
+  down(t, { shiftKey: true });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepStrictEqual((await diagOf(t)).errors, []);
+  t.setEnabledResult = false;
+  down(t, { shiftKey: true });
+  await new Promise((r) => setTimeout(r, 0));
+  const errs = (await diagOf(t)).errors;
+  assert.strictEqual(errs.length, 1);
+  assert.strictEqual(errs[0].at, 'storage.set');
+  assert.strictEqual(errs[0].name, 'StorageError');
 });
 
 test('HUD 갱신은 숨긴 탭에서 건너뛴다 (FIX_GUIDE T3)', async () => {

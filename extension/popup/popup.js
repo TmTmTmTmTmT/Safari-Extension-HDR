@@ -14,6 +14,7 @@
   let blobUrl = null;
   let latestText = ''; // 진단 영역이 닫혀 있으면 textarea 대신 여기에 보관 (FIX_GUIDE T4)
   let diagTimer = null;
+  let diagSeq = 0; // 늦게 도착한 이전 진단 응답을 무시하는 요청 번호
   // 현재 UI 값. 유효 피크와 상세 슬라이더 시작값을 저장소 재조회 없이 계산하는 데 쓴다.
   let cur = null;
   let prevCustom = null; // 마지막 백업(되돌리기 대상)
@@ -69,21 +70,14 @@
     return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
   }
 
-  // 저장. 실패(reject·예외)는 '저장 실패'로 보인다. set이 promise를 안 돌려줘도 죽지 않는다.
+  // 저장. 실패(reject·예외)하면 1초 뒤 1회 재시도하고, 그래도 실패하면 안내 문구를 보인다 (FIX_GUIDE V1 (b)).
+  // set이 promise를 안 돌려줘도 죽지 않는다(params.setWithRetry).
+  const SAVE_FAIL_TEXT = '저장 실패(Safari 저장소 오류). Safari를 완전히 종료 후 다시 여세요';
   function setSaveStatus(ok) {
-    $('save-status').textContent = ok ? '' : '저장 실패';
+    $('save-status').textContent = ok ? '' : SAVE_FAIL_TEXT;
   }
   function save(obj) {
-    try {
-      const p = browser.storage.local.set(obj);
-      if (p && typeof p.then === 'function')
-        p.then(
-          () => setSaveStatus(true),
-          () => setSaveStatus(false),
-        );
-    } catch (e) {
-      setSaveStatus(false);
-    }
+    params.setWithRetry(obj).then(setSaveStatus, () => setSaveStatus(false));
   }
 
   // textarea에는 진단 영역이 열려 있을 때만 쓴다. 스크롤 위치는 갱신 뒤에도 유지한다.
@@ -104,16 +98,38 @@
     showSource();
   }
 
-  // 진단 영역이 열려 있는 동안만 content에 진단을 요청한다: 열 때 1회, 이후 2초마다 (FIX_GUIDE T2).
+  // 진단 영역이 열려 있는 동안만 현재 탭 content에 진단을 메시지로 묻는다: 열 때 1회, 이후 2초마다 (FIX_GUIDE V1 (a)).
+  // 탭 id만 쓰고 URL은 읽지 않는다. 저장소에는 아무것도 쓰지 않는다. 무응답·실패는 '상태 정보 없음'으로 본다.
+  async function pollDiag() {
+    const seq = ++diagSeq;
+    let diag = null;
+    try {
+      const tabs = browser.tabs;
+      if (!tabs || typeof tabs.query !== 'function' || typeof tabs.sendMessage !== 'function')
+        throw new Error('no tabs api');
+      const list = await tabs.query({ active: true, currentWindow: true });
+      const id = list && list[0] ? list[0].id : undefined;
+      if (typeof id !== 'number') throw new Error('no tab');
+      const res = await tabs.sendMessage(id, { type: params.MSG.getDiag });
+      if (res && typeof res === 'object') diag = res;
+    } catch (e) {
+      diag = null;
+    }
+    if (seq !== diagSeq) return;
+    // 이미 '없음' 문구면 다시 그리지 않는다.
+    if (diag === null && shownDiag === null && pendingDiag === null) return;
+    onDiag(diag);
+  }
   function startDiagRequests() {
     if (diagTimer !== null || typeof setInterval !== 'function') return;
-    params.requestDiag();
-    diagTimer = setInterval(() => params.requestDiag(), DIAG_REQUEST_MS);
+    pollDiag();
+    diagTimer = setInterval(pollDiag, DIAG_REQUEST_MS);
   }
   function stopDiagRequests() {
     if (diagTimer === null) return;
     clearInterval(diagTimer);
     diagTimer = null;
+    diagSeq++; // 닫은 뒤 늦게 오는 응답은 무시한다
   }
   function onDiagToggle() {
     if ($('diag-section').open) {
@@ -152,27 +168,38 @@
     el.classList.toggle('stale', ago > STALE_S);
   }
 
-  // 재시작 뒤 설정을 백업에서 복원했으면 진단 영역에 한 줄 알린다 (FIX_GUIDE U1). 진단 영역 밖에는 쓰지 않는다.
-  function showRestored(ms) {
+  // 진단 영역의 한 줄 안내 (FIX_GUIDE U1·V1 (b0)). 진단 영역 밖에는 쓰지 않는다.
+  // 복원 문구가 우선이고, 없으면 '설정 초기화 의심' 문구를 보인다.
+  const RESET_NOTE =
+    '설정을 읽지 못했거나 초기화됨. 내 프리셋에서 다시 불러오거나 Safari를 재시작하세요';
+  let restoredMs = null;
+  let resetSuspect = false;
+  function renderNote() {
     const el = $('restored-note');
-    if (typeof ms !== 'number' || !Number.isFinite(ms)) {
+    if (typeof restoredMs === 'number' && Number.isFinite(restoredMs)) {
+      const d = new Date(restoredMs);
+      el.textContent =
+        d.getMonth() +
+        1 +
+        '월 ' +
+        d.getDate() +
+        '일 ' +
+        pad(d.getHours()) +
+        ':' +
+        pad(d.getMinutes()) +
+        ' 재시작 후 설정을 백업에서 복원함';
+      el.hidden = false;
+    } else if (resetSuspect) {
+      el.textContent = RESET_NOTE;
+      el.hidden = false;
+    } else {
       el.hidden = true;
       el.textContent = '';
-      return;
     }
-    const d = new Date(ms);
-    el.textContent =
-      d.getMonth() +
-      1 +
-      '월 ' +
-      d.getDate() +
-      '일 ' +
-      pad(d.getHours()) +
-      ':' +
-      pad(d.getMinutes()) +
-      ' 재시작 후 설정을 백업에서 복원함';
-    el.hidden = false;
   }
+  // 설정 키(BACKUP_KEYS 중 내 프리셋 제외)가 모두 비어 있는데 내 프리셋은 있으면 초기화로 본다.
+  // 처음 설치와 구분할 수 없어 내 프리셋이 없으면 의심하지 않는다.
+  const SETTING_ONLY_KEYS = params.BACKUP_KEYS.filter((k) => k !== K.userPresets);
 
   // 표시 문자열 (UX-30): P·g ×, s·hs %, k·n 소수. step이 0.1이면 1자리, 0.01이면 2자리.
   const decimals = (step) => Math.round(-Math.log10(step));
@@ -622,14 +649,18 @@
   }
 
   async function init() {
-    const raw = await browser.storage.local.get([...Object.values(K)]);
+    const raw = await browser.storage.local.get(
+      Object.values(K).filter((k) => !params.LEGACY_KEYS.includes(k)),
+    );
     cur = params.normalizeSettings(raw);
     userPresets = params.normalizeUserPresets(raw[K.userPresets]);
     bindDetails();
     render(true);
     renderUserPresets('');
-    showDiag(raw[K.diag]);
-    showRestored(raw[K.restoredAt]);
+    showDiag(null);
+    restoredMs = raw[K.restoredAt];
+    resetSuspect = SETTING_ONLY_KEYS.every((k) => raw[k] === undefined) && userPresets.length > 0;
+    renderNote();
 
     $('enabled').addEventListener('change', () => {
       cur.enabled = $('enabled').checked;
@@ -683,12 +714,14 @@
     if ($('diag-section').open) startDiagRequests();
     browser.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
-      if (K.diag in changes) onDiag(changes[K.diag].newValue);
       if (K.userPresets in changes) {
         userPresets = params.normalizeUserPresets(changes[K.userPresets].newValue);
         renderUserPresets();
       }
-      if (K.restoredAt in changes) showRestored(changes[K.restoredAt].newValue);
+      if (SETTING_ONLY_KEYS.some((k) => k in changes && changes[k].newValue !== undefined))
+        resetSuspect = false;
+      if (K.restoredAt in changes) restoredMs = changes[K.restoredAt].newValue;
+      renderNote();
     });
     // 경과 시간 갱신(타이머가 없는 환경에서는 건너뜀)
     if (typeof setInterval === 'function') {

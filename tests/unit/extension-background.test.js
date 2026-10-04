@@ -128,9 +128,18 @@ const paramsKeys = (() => {
 const RESTORED = 'sdrhdr.restoredAt';
 
 // store: storage.local 내용, backup: backup:get 응답(생략 시 native 미지원), 타이머 주입
-function setupU1({ store = {}, getReply, sendMode = 'ok', noRuntimeEvents = false } = {}) {
+function setupU1({
+  store = {},
+  getReply,
+  sendMode = 'ok',
+  noRuntimeEvents = false,
+  setFails = 0,
+} = {}) {
   const sent = [];
   const sets = [];
+  const removes = [];
+  const warns = [];
+  let failLeft = setFails;
   const timers = [];
   const cleared = [];
   const h = {};
@@ -157,8 +166,15 @@ function setupU1({ store = {}, getReply, sendMode = 'ok', noRuntimeEvents = fals
           return o;
         },
         set: async (o) => {
-          sets.push(o);
+          sets.push(JSON.parse(JSON.stringify(o)));
+          if (failLeft > 0) {
+            failLeft -= 1;
+            throw new Error('Disk I/O error');
+          }
           Object.assign(store, o);
+        },
+        remove: async (keys) => {
+          removes.push([].concat(keys));
         },
       },
       onChanged: { addListener: (f) => (h.changed = f) },
@@ -167,11 +183,12 @@ function setupU1({ store = {}, getReply, sendMode = 'ok', noRuntimeEvents = fals
   const sandbox = {
     browser,
     Date,
+    console: { warn: (m) => warns.push(m) },
     setTimeout: (fn, ms) => (timers.push({ fn, ms }), timers.length),
     clearTimeout: (id) => cleared.push(id),
   };
   vm.runInNewContext(src, sandbox);
-  return { h, sent, sets, timers, cleared, store };
+  return { h, sent, sets, removes, warns, timers, cleared, store };
 }
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
@@ -337,4 +354,89 @@ test('background U1: BACKUP_KEYS는 params.BACKUP_KEYS와 같은 목록(전송 d
   await tick();
   await tick();
   assert.deepStrictEqual(Object.keys(r2.sets[0]).sort(), [...paramsKeys, RESTORED].sort());
+});
+
+const drain = async (n = 8) => {
+  for (let i = 0; i < n; i++) await tick();
+};
+const BACKUP = { ok: true, data: { 'sdrhdr.strength': 0.7, 'sdrhdr.userPresets': [{ id: 'a' }] } };
+
+test('background V1: 이전 진단 키 2개를 시작 시 1회 remove', async () => {
+  const t = setupU1({ store: { 'sdrhdr.strength': 0.5 } });
+  await drain();
+  assert.deepStrictEqual(plain(t.removes), [['sdrhdr.diag', 'sdrhdr.diagRequest']]);
+});
+
+test('background V1: 복원 쓰기 실패 -> 1·5·15초 재시도, 성공하면 멈춤', async () => {
+  const t = setupU1({ getReply: BACKUP, setFails: 2 });
+  await drain();
+  assert.strictEqual(t.sets.length, 1);
+  assert.deepStrictEqual(
+    t.timers.map((x) => x.ms),
+    [1000],
+  );
+  t.timers.shift().fn();
+  await drain();
+  assert.strictEqual(t.sets.length, 2);
+  assert.deepStrictEqual(
+    t.timers.map((x) => x.ms),
+    [5000],
+  );
+  t.timers.shift().fn();
+  await drain();
+  assert.strictEqual(t.sets.length, 3, '세 번째 시도에서 성공');
+  assert.strictEqual(t.store['sdrhdr.strength'], 0.7);
+  assert.strictEqual(t.timers.length, 0);
+  assert.strictEqual(t.warns.length, 0);
+});
+
+test('background V1: 재시도 모두 실패하면 경고 1줄(원문 없음)로 중단', async () => {
+  const t = setupU1({ getReply: BACKUP, setFails: 99 });
+  await drain();
+  for (const ms of [1000, 5000, 15000]) {
+    assert.strictEqual(t.timers[0].ms, ms);
+    t.timers.shift().fn();
+    await drain();
+  }
+  assert.strictEqual(t.sets.length, 4);
+  assert.strictEqual(t.timers.length, 0);
+  assert.strictEqual(t.warns.length, 1);
+  assert.ok(!t.warns[0].includes('Disk'));
+});
+
+test('background V1: 재시도 사이 사용자가 값을 쓰면 복원 중단(사용자 값 우선)', async () => {
+  const t = setupU1({ getReply: BACKUP, setFails: 1 });
+  await drain();
+  t.store['sdrhdr.preset'] = 'balanced'; // popup이 쓴 값
+  t.timers.shift().fn();
+  await drain();
+  assert.strictEqual(t.sets.length, 1, '재시도 쓰기 없음');
+});
+
+test('background V1: 복원 미완료 동안 백업은 네이티브 백업에 저장소 값을 덮어 보낸다(내 프리셋 보존)', async () => {
+  const t = setupU1({ getReply: BACKUP, setFails: 1 });
+  await drain();
+  t.store['sdrhdr.preset'] = 'balanced';
+  t.h.changed({ 'sdrhdr.preset': { newValue: 'balanced' } }, 'local');
+  const deb =
+    t.timers.find((x) => x.ms === 1000 && x !== t.timers[0]) || t.timers[t.timers.length - 1];
+  deb.fn();
+  await drain();
+  const set = t.sent.filter((x) => x.msg.type === 'backup:set').pop();
+  assert.deepStrictEqual(plain(set.msg.data), {
+    'sdrhdr.preset': 'balanced',
+    'sdrhdr.strength': 0.7,
+    'sdrhdr.userPresets': [{ id: 'a' }],
+  });
+});
+
+test('background V1: 복원 성공 뒤 백업은 저장소 기준', async () => {
+  const t = setupU1({ getReply: BACKUP });
+  await drain();
+  delete t.store['sdrhdr.userPresets'];
+  t.h.changed({ 'sdrhdr.strength': { newValue: 0.7 } }, 'local');
+  t.timers[t.timers.length - 1].fn();
+  await drain();
+  const set = t.sent.filter((x) => x.msg.type === 'backup:set').pop();
+  assert.ok(!('sdrhdr.userPresets' in set.msg.data));
 });
