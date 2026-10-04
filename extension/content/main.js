@@ -36,7 +36,6 @@
   let mutationTimer = null;
   let observer = null;
   let observedPlayer = null;
-  let lastDiagKey = null;
   let started = false;
   let hudState = null; // { container, hud }: attach와 독립 수명 (PLAN M8-3, UX-13)
   let chipState = null; // { container, chip }
@@ -52,6 +51,12 @@
       name: (e && e.name) || 'Error',
       message: String((e && e.message) || e).slice(0, 200),
     });
+  }
+
+  // 저장 실패는 메시지 원문 없이 이름만 남긴다 (FIX_GUIDE V1 (b)).
+  function addStorageError() {
+    if (errors.length >= MAX_ERRORS) return;
+    errors.push({ at: 'storage.set', name: 'StorageError', message: '' });
   }
 
   function logEvent(ev) {
@@ -300,7 +305,13 @@
       const next = !settings.enabled;
       try {
         const p = ns.params.setEnabled(next);
-        if (p && typeof p.catch === 'function') p.catch(() => {});
+        if (p && typeof p.then === 'function')
+          p.then(
+            (ok) => {
+              if (ok === false) addStorageError();
+            },
+            () => addStorageError(),
+          );
       } catch (err) {
         // 저장 실패는 무시한다.
       }
@@ -717,27 +728,6 @@
     };
   }
 
-  function writeDiagIfChanged() {
-    // 보이지 않는 탭은 다른 탭의 진단을 덮어쓰지 않는다 (PLAN M7-2, GUIDELINES 2.6-2).
-    if (document.visibilityState !== 'visible') return;
-    pollMode();
-    const diag = ns.hud.buildDiag(collectState());
-    const key = JSON.stringify(Object.assign({}, diag, { createdAt: null }));
-    if (key === lastDiagKey) return;
-    lastDiagKey = key;
-    ns.params.writeDiag(diag).catch(() => {});
-  }
-
-  // popup 진단 요청 (FIX_GUIDE T2): 보이는 탭만 응답한다. 숨긴 탭은 쓰지 않는다.
-  function onDiagRequest() {
-    if (document.visibilityState !== 'visible') return;
-    try {
-      writeDiagIfChanged();
-    } catch (e) {
-      // 진단 실패는 무시한다.
-    }
-  }
-
   // 유일한 부작용 시작점. 로드 시점 접근을 피하려고 마이크로태스크로 미룬다.
   async function start() {
     if (started) return;
@@ -746,7 +736,6 @@
       startedAt = performance.now();
       settings = await ns.params.readSettings();
       ns.params.subscribe(onSettings);
-      ns.params.subscribeDiagRequest(onDiagRequest);
       document.addEventListener(ns.detect.NAV_EVENT, onNav);
       document.addEventListener('fullscreenchange', pollMode);
       document.addEventListener('webkitfullscreenchange', pollMode);
@@ -761,14 +750,8 @@
           releaseBypass(); // 탭을 떠나면 원본 보기 해제
           return;
         }
-        // 탭이 다시 보이면 비교 키를 비우고 즉시 1회 기록하고, 배지 상태도 다시 보낸다.
-        lastDiagKey = null;
+        // 탭이 다시 보이면 배지 상태를 다시 보낸다. 진단은 저장하지 않는다 (FIX_GUIDE V1).
         lastSentKey = null;
-        try {
-          writeDiagIfChanged();
-        } catch (e) {
-          // 진단 실패는 무시한다.
-        }
         try {
           refreshUi();
         } catch (e) {
@@ -782,6 +765,15 @@
         globalThis.addEventListener('blur', releaseBypass);
       try {
         browser.runtime.onMessage.addListener((msg) => {
+          if (msg && msg.type === ns.params.MSG.getDiag) {
+            // 진단은 저장하지 않고 요청 시 응답만 한다 (FIX_GUIDE V1).
+            try {
+              pollMode();
+              return Promise.resolve(ns.hud.buildDiag(collectState()));
+            } catch (e) {
+              return Promise.resolve(null);
+            }
+          }
           if (!msg || msg.type !== ns.params.MSG.getState) return undefined;
           const input = currentStatusInput();
           return Promise.resolve({ status: ns.params.statusOf(input), input });

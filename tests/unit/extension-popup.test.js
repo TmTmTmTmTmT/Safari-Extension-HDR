@@ -73,6 +73,7 @@ async function setup(stored = {}, opts = {}) {
   const intervalMs = [];
   const blobs = [];
   const changed = [];
+  const globalHandlers = {};
   const clock = { now: opts.now || Date.parse('2026-10-02T05:00:00Z') };
   const body = makeEl();
   const document = {
@@ -116,6 +117,7 @@ async function setup(stored = {}, opts = {}) {
         blobs.push(parts.join(''));
       }
     },
+    addEventListener: (t, fn) => (globalHandlers[t] = globalHandlers[t] || []).push(fn),
     setTimeout: (fn) => timers.push(fn) - 1,
     clearTimeout: (i) => {
       timers[i] = null;
@@ -140,8 +142,6 @@ async function setup(stored = {}, opts = {}) {
   const tick = () => intervals.forEach((fn) => fn());
   const emitStore = (key, newValue) =>
     changed.forEach((fn) => fn({ [key]: { newValue } }, 'local'));
-  const emitDiag = (diag) =>
-    changed.forEach((fn) => fn({ 'sdrhdr.diag': { newValue: diag } }, 'local'));
   const flush = () => new Promise((r) => setImmediate(r));
   return {
     els,
@@ -155,8 +155,8 @@ async function setup(stored = {}, opts = {}) {
     clock,
     document,
     body,
-    emitDiag,
     emitStore,
+    fireGlobal: (t) => (globalHandlers[t] || []).forEach((fn) => fn()),
     changed,
     flush,
     params: ctx.__sdrhdr.params,
@@ -185,7 +185,7 @@ const tabsStub = (res, tabList = [{ id: 7 }]) => {
     },
     sendMessage: async (id, msg) => {
       calls.send.push([id, msg]);
-      return typeof res === 'function' ? res() : res;
+      return typeof res === 'function' ? res(id, msg) : res;
     },
   };
 };
@@ -322,11 +322,8 @@ test('mode가 itm이면 진단은 접힌 채, 안내 없음', async () => {
 test('[정상 모드로]: mode=itm 저장, 컨트롤 재활성, 안내 숨김', async () => {
   const { els, sets } = await setup({ 'sdrhdr.mode': 'baseline' });
   els['normal-mode'].fire('click');
-  // 모드가 itm이 아니면 진단 영역이 자동으로 열려 진단 요청 키도 쓰인다(FIX_GUIDE T2). 그 외 저장은 mode뿐.
-  assert.deepStrictEqual(
-    sets.filter((o) => !('sdrhdr.diagRequest' in o)),
-    [{ 'sdrhdr.mode': 'itm' }],
-  );
+  // 진단 영역이 자동으로 열려도 진단은 메시지로만 묻는다(저장소 쓰기 없음). 저장은 mode뿐.
+  assert.deepStrictEqual(sets, [{ 'sdrhdr.mode': 'itm' }]);
   assert.strictEqual(els.mode.value, 'itm');
   assert.strictEqual(els.preset.disabled, false);
   assert.strictEqual(els.strength.disabled, false);
@@ -502,23 +499,60 @@ test('init 실패: 안내 표시 + 컨트롤 비활성', async () => {
   }
 });
 
-test('storage.set 실패: 저장 실패 표시, 성공하면 지움, undefined 반환도 안전', async () => {
+const SAVE_FAIL = '저장 실패(Safari 저장소 오류). Safari를 완전히 종료 후 다시 여세요';
+
+test('storage.set 실패: 1초 뒤 1회 재시도, 성공이면 문구 없음 (V1 b)', async () => {
+  let n = 0;
+  const { els, sets, flush, runTimers } = await setup(
+    {},
+    { setResult: () => (++n === 1 ? Promise.reject(new Error('x')) : Promise.resolve()) },
+  );
+  els.hud.checked = true;
+  els.hud.fire('change');
+  await flush();
+  assert.strictEqual(sets.length, 1, '재시도는 타이머 뒤');
+  assert.strictEqual(els['save-status'].textContent, '');
+  runTimers();
+  await flush();
+  assert.strictEqual(sets.length, 2);
+  assert.deepStrictEqual(sets[1], sets[0]);
+  assert.strictEqual(els['save-status'].textContent, '');
+});
+
+test('storage.set 재시도도 실패: 새 문구, 이후 성공하면 지움, undefined 반환도 안전', async () => {
   let fail = true;
-  const { els, flush } = await setup(
+  const { els, sets, flush, runTimers } = await setup(
     {},
     { setResult: () => (fail ? Promise.reject(new Error('x')) : Promise.resolve()) },
   );
   els.hud.checked = true;
   els.hud.fire('change');
   await flush();
-  assert.strictEqual(els['save-status'].textContent, '저장 실패');
+  runTimers();
+  await flush();
+  assert.strictEqual(sets.length, 2);
+  assert.strictEqual(els['save-status'].textContent, SAVE_FAIL);
   fail = false;
   els.hud.fire('change');
   await flush();
   assert.strictEqual(els['save-status'].textContent, '');
   const plainSet = await setup();
   plainSet.els.hud.fire('change'); // set이 undefined를 반환해도 예외 없음
+  await plainSet.flush();
   assert.strictEqual(plainSet.els['save-status'].textContent, '');
+  const throwing = await setup(
+    {},
+    {
+      setResult: () => {
+        throw new Error('sync');
+      },
+    },
+  );
+  throwing.els.hud.fire('change');
+  await throwing.flush();
+  throwing.runTimers();
+  await throwing.flush();
+  assert.strictEqual(throwing.els['save-status'].textContent, SAVE_FAIL);
 });
 
 const DIAG = {
@@ -526,10 +560,26 @@ const DIAG = {
   lifecycle: { state: 'active' },
   page: { path: '/watch', v: 'abc' },
 };
+const withState = (state, extra) => Object.assign({}, DIAG, { lifecycle: { state } }, extra);
+const isGetDiag = (msg) => msg && msg.type === 'sdrhdr:getDiag';
+// getDiag에는 box.diag(없으면 무응답)로 답한다. getState에는 ok 상태.
+const diagBox = (diag) => {
+  const box = { diag };
+  box.tabs = tabsStub((id, msg) => (isGetDiag(msg) ? box.diag : { status: okStatus }));
+  return box;
+};
+const getDiagCalls = (tabs) => tabs.calls.send.filter(([, m]) => isGetDiag(m));
+async function openDiag(ctx) {
+  ctx.els['diag-section'].open = true;
+  ctx.els['diag-section'].fire('toggle');
+  await flushN();
+}
 
 test('진단 출처 줄: 기록 시각·경과·상태, 30초 넘으면 흐림, URL·제목 없음', async () => {
   const t0 = Date.parse(DIAG.createdAt);
-  const { els, tick, clock } = await setup({ 'sdrhdr.diag': DIAG }, { now: t0 + 12000 });
+  const ctx = await setup({}, { now: t0 + 12000, tabs: diagBox(DIAG).tabs });
+  const { els, tick, clock } = ctx;
+  await openDiag(ctx);
   assert.strictEqual(
     els['diag-source'].textContent,
     `마지막 기록 ${hms(t0)}(12초 전) · 상태 active`,
@@ -553,7 +603,9 @@ test('진단 없으면 출처 줄 생략', async () => {
 test('복사 성공: 복사됨 (HH:MM:SS 진단) 표시 후 2초 뒤 비움', async () => {
   const written = [];
   const clipboard = { writeText: async (t) => written.push(t) };
-  const { els, flush, runTimers } = await setup({ 'sdrhdr.diag': DIAG }, { clipboard });
+  const ctx = await setup({}, { clipboard, tabs: diagBox(DIAG).tabs });
+  const { els, flush, runTimers } = ctx;
+  await openDiag(ctx);
   els.copy.fire('click');
   await flush();
   assert.strictEqual(written.length, 1);
@@ -566,12 +618,12 @@ test('복사 성공: 복사됨 (HH:MM:SS 진단) 표시 후 2초 뒤 비움', as
 });
 
 test('복사 실패·clipboard 없음: textarea 선택 + Command-C 안내', async () => {
-  const none = await setup({ 'sdrhdr.diag': DIAG });
+  const none = await setup();
   none.els.copy.fire('click');
   assert.strictEqual(none.els.diag.selected, true);
   assert.strictEqual(none.els['copy-status'].textContent, 'Command-C를 누르세요');
   const clipboard = { writeText: () => Promise.reject(new Error('denied')) };
-  const bad = await setup({ 'sdrhdr.diag': DIAG }, { clipboard });
+  const bad = await setup({}, { clipboard });
   bad.els.copy.fire('click');
   await bad.flush();
   assert.strictEqual(bad.els.diag.selected, true);
@@ -579,13 +631,17 @@ test('복사 실패·clipboard 없음: textarea 선택 + Command-C 안내', asyn
 });
 
 test('textarea 포커스 중에는 진단 갱신 보류, 갱신 버튼으로 반영하고 scrollTop 복원', async () => {
-  const { els, document, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
-  els['diag-section'].open = true;
-  els['diag-section'].fire('toggle');
+  const box = diagBox(DIAG);
+  const ctx = await setup({}, { tabs: box.tabs });
+  const { els, document, tick } = ctx;
+  await openDiag(ctx);
   const before = els.diag.value;
+  assert.ok(before.includes('active'));
   document.activeElement = els.diag;
   els.diag.scrollTop = 40;
-  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
+  box.diag = withState('probing');
+  tick();
+  await flushN();
   assert.strictEqual(els.diag.value, before);
   assert.strictEqual(els['diag-refresh'].hidden, false);
   els['diag-refresh'].fire('click');
@@ -596,12 +652,16 @@ test('textarea 포커스 중에는 진단 갱신 보류, 갱신 버튼으로 반
   document.activeElement = null;
   els.diag.selectionStart = 0;
   els.diag.selectionEnd = 5;
-  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'idle' } }));
+  box.diag = withState('idle');
+  tick();
+  await flushN();
   assert.ok(!els.diag.value.includes('idle'));
   assert.strictEqual(els['diag-refresh'].hidden, false);
   // 포커스·선택이 없으면 즉시 갱신
   els.diag.selectionEnd = 0;
-  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'active', n: 2 } }));
+  box.diag = withState('active', { n: 2 });
+  tick();
+  await flushN();
   assert.ok(els.diag.value.includes('"n": 2'));
 });
 
@@ -772,40 +832,148 @@ test('단축키 안내 문구와 진단 없음 개정 문구', async () => {
   );
 });
 
-const reqs = (sets) => sets.filter((o) => 'sdrhdr.diagRequest' in o);
+const NO_DIAG_TEXT =
+  '아직 상태 정보가 없습니다. ① www.youtube.com 영상 페이지에서 재생 ② Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근 허용 ③ 새로고침. 이 창은 자동으로 갱신됩니다';
 
-test('진단 영역이 닫혀 있으면 요청 0회, textarea 불변, 2초 타이머 없음 (FIX_GUIDE T2·T4)', async () => {
-  const { els, sets, intervalMs, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
-  assert.strictEqual(reqs(sets).length, 0);
+test('진단 영역이 닫혀 있으면 getDiag 0회, textarea 불변, 2초 타이머 없음 (V1 a)', async () => {
+  const box = diagBox(DIAG);
+  const { els, sets, intervalMs, tick } = await setup({}, { tabs: box.tabs });
+  await flushN();
+  assert.strictEqual(getDiagCalls(box.tabs).length, 0);
   assert.ok(!intervalMs.includes(2000));
-  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
+  tick();
+  await flushN();
+  assert.strictEqual(getDiagCalls(box.tabs).length, 0);
   assert.strictEqual(els.diag.value, '', '닫힌 동안 textarea를 건드리지 않는다');
+  assert.strictEqual(sets.length, 0);
 });
 
-test('진단 영역 열기: 즉시 1회 + 2초마다 1회, 닫으면 중단, 열면 최신 진단 반영', async () => {
-  const { els, sets, intervalMs, tick, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
-  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
-  els['diag-section'].open = true;
-  els['diag-section'].fire('toggle');
-  assert.strictEqual(reqs(sets).length, 1);
+test('진단 영역 열기: 즉시 1회 + 2초마다 getDiag 1회, 저장소 쓰기 0회, 닫으면 중단', async () => {
+  const box = diagBox(withState('probing'));
+  const ctx = await setup({}, { tabs: box.tabs });
+  const { els, sets, intervalMs, tick } = ctx;
+  await openDiag(ctx);
+  assert.strictEqual(getDiagCalls(box.tabs).length, 1);
   assert.ok(els.diag.value.includes('probing'));
   assert.strictEqual(intervalMs.filter((ms) => ms === 2000).length, 1);
   tick();
-  assert.ok(reqs(sets).length >= 2);
+  await flushN();
+  assert.ok(getDiagCalls(box.tabs).length >= 2);
+  // 탭 id만 사용: 질의는 {active, currentWindow}, 메시지는 {type}만
+  for (const q of box.tabs.calls.query)
+    assert.deepStrictEqual(plain(q), { active: true, currentWindow: true });
+  for (const [id, m] of getDiagCalls(box.tabs)) {
+    assert.strictEqual(id, 7);
+    assert.deepStrictEqual(plain(m), { type: 'sdrhdr:getDiag' });
+  }
   els['diag-section'].open = false;
   els['diag-section'].fire('toggle');
-  const n = reqs(sets).length;
+  const n = getDiagCalls(box.tabs).length;
   tick();
-  assert.strictEqual(reqs(sets).length, n, '닫으면 요청 중단');
+  await flushN();
+  assert.strictEqual(getDiagCalls(box.tabs).length, n, '닫으면 요청 중단');
+  assert.strictEqual(sets.length, 0, '진단 때문에 저장소에 쓰지 않는다');
 });
 
-test('Blob은 JSON 저장 클릭 시에만 만들고 최신 진단을 담는다 (FIX_GUIDE T4)', async () => {
-  const { els, blobs, emitDiag } = await setup({ 'sdrhdr.diag': DIAG });
-  emitDiag(Object.assign({}, DIAG, { lifecycle: { state: 'probing' } }));
-  assert.strictEqual(blobs.length, 0);
-  els.save.fire('click');
-  assert.strictEqual(blobs.length, 1);
-  assert.ok(blobs[0].includes('probing'));
+test('진단 영역 열린 동안 pagehide에 요청 중단', async () => {
+  const box = diagBox(DIAG);
+  const ctx = await setup({}, { tabs: box.tabs });
+  await openDiag(ctx);
+  assert.strictEqual(getDiagCalls(box.tabs).length, 1);
+  ctx.fireGlobal('pagehide');
+  ctx.tick();
+  await flushN();
+  assert.strictEqual(getDiagCalls(box.tabs).length, 1);
+});
+
+test('getDiag 무응답·reject·탭 없음: 안내 문구, 같은 문구면 다시 그리지 않음', async () => {
+  const cases = [
+    ['무응답', (box) => (box.diag = undefined), [{ id: 7 }]],
+    ['reject', null, [{ id: 7 }]],
+    ['탭 없음', (box) => (box.diag = undefined), []],
+  ];
+  for (const [name, mut, list] of cases) {
+    const box = { diag: undefined };
+    box.tabs = tabsStub((id, msg) => {
+      if (!isGetDiag(msg)) return { status: okStatus };
+      if (name === 'reject') throw new Error('no receiver');
+      return box.diag;
+    }, list);
+    if (mut) mut(box);
+    const ctx = await setup({}, { tabs: box.tabs });
+    await openDiag(ctx);
+    assert.strictEqual(ctx.els.diag.value, NO_DIAG_TEXT, name);
+    assert.strictEqual(ctx.els['diag-source'].textContent, '', name);
+    if (name === '탭 없음') assert.strictEqual(getDiagCalls(box.tabs).length, 0);
+  }
+  // 이미 같은 문구면 textarea에 다시 쓰지 않는다
+  const box = diagBox(undefined);
+  const ctx = await setup({}, { tabs: box.tabs });
+  await openDiag(ctx);
+  ctx.els.diag.scrollTop = 33;
+  let writes = 0;
+  let v = ctx.els.diag.value;
+  Object.defineProperty(ctx.els.diag, 'value', {
+    get: () => v,
+    set: (x) => {
+      writes++;
+      v = x;
+    },
+  });
+  ctx.tick();
+  await flushN();
+  assert.strictEqual(writes, 0);
+  // 진단이 있다가 응답이 끊기면 안내 문구로
+  box.diag = DIAG;
+  ctx.tick();
+  await flushN();
+  assert.ok(v.includes('active'));
+  box.diag = undefined;
+  ctx.tick();
+  await flushN();
+  assert.strictEqual(v, NO_DIAG_TEXT);
+});
+
+test('늦게 도착한 이전 getDiag 응답은 무시', async () => {
+  const waiters = [];
+  const tabs = {
+    calls: { query: [], send: [] },
+    query: async () => [{ id: 7 }],
+    sendMessage: (id, msg) => {
+      if (!isGetDiag(msg)) return Promise.resolve({ status: okStatus });
+      return new Promise((r) => waiters.push(r));
+    },
+  };
+  const ctx = await setup({}, { tabs });
+  await openDiag(ctx); // 요청 1
+  ctx.tick();
+  await flushN(); // 요청 2
+  assert.strictEqual(waiters.length, 2);
+  waiters[1](withState('new'));
+  await flushN();
+  assert.ok(ctx.els.diag.value.includes('new'));
+  waiters[0](withState('old'));
+  await flushN();
+  assert.ok(ctx.els.diag.value.includes('new'));
+  assert.ok(!ctx.els.diag.value.includes('old'));
+});
+
+test('storage.onChanged의 sdrhdr.diag는 무시, 초기 표시도 저장소 진단을 읽지 않음', async () => {
+  const ctx = await setup({ 'sdrhdr.diag': DIAG });
+  await openDiag(ctx);
+  assert.strictEqual(ctx.els.diag.value, NO_DIAG_TEXT);
+  ctx.emitStore('sdrhdr.diag', withState('probing'));
+  assert.strictEqual(ctx.els.diag.value, NO_DIAG_TEXT);
+});
+
+test('Blob은 JSON 저장 클릭 시에만 만들고 마지막 응답을 담는다', async () => {
+  const box = diagBox(withState('probing'));
+  const ctx = await setup({}, { tabs: box.tabs });
+  await openDiag(ctx);
+  assert.strictEqual(ctx.blobs.length, 0);
+  ctx.els.save.fire('click');
+  assert.strictEqual(ctx.blobs.length, 1);
+  assert.ok(ctx.blobs[0].includes('probing'));
 });
 
 test('복원 안내: restoredAt이 있으면 진단 영역에 한 줄, 없으면 숨김, 변경 시 갱신 (U1)', async () => {
@@ -828,6 +996,45 @@ test('복원 안내: 저장소 변경 이벤트로 나중에 생겨도 표시', 
   );
   assert.strictEqual(els['restored-note'].hidden, false);
   assert.ok(els['restored-note'].textContent.startsWith('10월 3일 23:59'));
+});
+
+const RESET_NOTE =
+  '설정을 읽지 못했거나 초기화됨. 내 프리셋에서 다시 불러오거나 Safari를 재시작하세요';
+const oneUp = [{ id: 'a', name: 'A', createdAt: 1, values: { strength: 0.5 } }];
+
+test('초기화 안내: 설정 키가 모두 비고 내 프리셋이 있으면 표시 (V1 b0)', async () => {
+  const { els } = await setup({ 'sdrhdr.userPresets': oneUp });
+  assert.strictEqual(els['restored-note'].hidden, false);
+  assert.strictEqual(els['restored-note'].textContent, RESET_NOTE);
+});
+
+test('초기화 안내: 내 프리셋이 없으면(처음 설치) 표시하지 않음', async () => {
+  const { els } = await setup({});
+  assert.strictEqual(els['restored-note'].hidden, true);
+});
+
+test('초기화 안내: 설정 키가 하나라도 있으면 표시하지 않음', async () => {
+  const { els } = await setup({ 'sdrhdr.userPresets': oneUp, 'sdrhdr.strength': 0.6 });
+  assert.strictEqual(els['restored-note'].hidden, true);
+});
+
+test('초기화 안내: restoredAt이 있으면 복원 문구가 우선', async () => {
+  const { els } = await setup({
+    'sdrhdr.userPresets': oneUp,
+    'sdrhdr.restoredAt': new Date(2026, 9, 3, 9, 5).getTime(),
+  });
+  assert.strictEqual(
+    els['restored-note'].textContent,
+    '10월 3일 09:05 재시작 후 설정을 백업에서 복원함',
+  );
+});
+
+test('초기화 안내: 이후 설정 키가 생기면 숨김', async () => {
+  const { els, emitStore } = await setup({ 'sdrhdr.userPresets': oneUp });
+  assert.strictEqual(els['restored-note'].hidden, false);
+  emitStore('sdrhdr.hud', true);
+  assert.strictEqual(els['restored-note'].hidden, true);
+  assert.strictEqual(els['restored-note'].textContent, '');
 });
 
 // ---- 내 프리셋 (PLAN D-M9 M9-3) ----

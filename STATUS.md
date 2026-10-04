@@ -185,6 +185,14 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - → verify: lint 통과, npm test 339/339, test:dom 18/18, pytest sim 157/157 / (1) 로컬 Mac. **popup 화면·불러오기 반영·재시작 뒤 유지는 미검증(사용자 Mac 필요)**
 - 해석(Opus 확인 요청): ① 불러오기는 현재 preset 종류와 무관하게 `custom`이 불러올 곡선과 다르면 백업(같으면 이전 안내를 숨김). ② 저장 직후 이름 입력을 비움. ③ `up-list`·`up-name`은 진단 모드에서 잠그지 않고 저장·불러오기·삭제 버튼만 잠금
 
+## V 회차 구현 (브랜치 claude/v-fixes, 2026-10-04, Sonnet)
+
+- 사용자 회신: U 회차 메모리 (a) 확장 끔 Safari 1.4~1.8 GB·(b) baseline 1.3 GB, kernel_task 문제없음(13 GB 재현 안 됨). (b) 중 Safari 설정 › 확장 창에 "storage.local.set Disk I/O error". 진단 JSON `results/result-U-20261004-a.json`
+- 본 세션: `params.js`(`MSG.getDiag`, `setWithRetry`(1초 뒤 1회), `setEnabled` 재시도, `LEGACY_KEYS`, 진단 저장 함수 3개 삭제), `background.js`(복원 쓰기 1·5·15초 재시도·사용자 값 우선·실패 시 경고 1줄, 복원 미완료 동안 백업은 네이티브 백업에 저장소 값을 덮어 보냄(내 프리셋 보존), 이전 진단 키 1회 삭제), 1.3.1, install.md·체크리스트 V 절
+- W-A `main.js`: 진단 저장 제거, `getDiag` 메시지 응답, 단축키 setEnabled 실패 시 errors `StorageError`. W-B `popup.js`: 진단을 `tabs.sendMessage(getDiag)`로 2초 폴링(저장소 쓰기 0), `save()`가 `setWithRetry` 사용·실패 문구, 설정 초기화 안내
+- → verify: lint 통과, npm test 356/356, test:dom 18/18 / (1) 로컬 Mac. **Safari의 메시징 진단·Disk I/O 재발 여부·재시도 효과는 미검증(사용자 Mac 필요)**
+- 해석(Opus 확인 요청): ① 복원 재시도 중 백업이 네이티브 값을 잃지 않도록 병합하는 처리를 추가(FIX_GUIDE에 명시 없음, 내 프리셋 손실 방지). ② 초기화 안내 조건이 FIX_GUIDE 문구대로면 성립 불가(userPresets가 BACKUP_KEYS에 포함) → "userPresets 제외 설정 키가 모두 비고 userPresets는 있음"으로 구현. 내 프리셋만 저장하고 설정을 한 번도 안 바꾼 사용자에게도 안내가 뜰 수 있음. ③ 숨긴 탭도 getDiag에 응답(popup은 활성 탭에만 보냄)
+
 ## 다음 단계
 
 1. (완료) 로컬 Mac 세션 준비
