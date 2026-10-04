@@ -22,7 +22,7 @@
 2. **[필수]** 전역 이름은 `globalThis.__sdrhdr` 하나만 쓴다. `ns.js`가 첫 번째로 로드되어 객체를 만들고, 이후 파일은 자기 하위 키(`__sdrhdr.detect`, `__sdrhdr.params` 등)에만 할당한다.
 3. **[필수]** 각 파일은 IIFE로 감싸 지역 스코프를 유지한다. 파일 최상위에서 DOM 조회, `navigator.gpu` 접근, 이벤트 등록 같은 부작용을 실행하지 않는다. 부작용 시작점은 `main.js` 하나다.
 4. **[필수]** 파일 간 의존은 manifest 순서로만 해결한다. 뒤에 로드되는 파일의 심볼을 앞 파일이 로드 시점에 참조하지 않는다(호출 시점 참조는 허용).
-5. **[필수]** `browser.*` API 접근은 `params.js`(storage), `main.js`(수명주기·메시지), `popup.js`, `background.js`에만 둔다. 메시지는 두 종류만 쓴다(PLAN D-M8 M8-1 `MSG`): popup → 현재 탭 content `sdrhdr:getState`(응답: 상태 객체), content → background `sdrhdr:state`(배지 정보). 네이티브 메시지(`runtime.sendNativeMessage`)는 background만 쓰며 `backup:set`·`backup:get` 두 종류, 데이터는 설정 키(`params.BACKUP_KEYS`)뿐이다(FIX_GUIDE U1). 메시지·응답에 URL·제목을 넣지 않는다(2.6-1). 새 권한은 Opus 승인 없이 추가하지 않는다(D-M8 M8-0 (a)의 `activeTab` 예외와 FIX_GUIDE U1의 `nativeMessaging`만 허용).
+5. **[필수]** `browser.*` API 접근은 `params.js`(storage), `main.js`(수명주기·메시지), `popup.js`, `background.js`에만 둔다. 메시지는 세 종류만 쓴다(PLAN D-M8 M8-1 `MSG`, FIX_GUIDE V1): popup → 현재 탭 content `sdrhdr:getState`(응답: 상태 객체)·`sdrhdr:getDiag`(응답: 진단 객체), content → background `sdrhdr:state`(배지 정보). 네이티브 메시지(`runtime.sendNativeMessage`)는 background만 쓰며 `backup:set`·`backup:get` 두 종류, 데이터는 설정 키(`params.BACKUP_KEYS`)뿐이다(FIX_GUIDE U1). 메시지·응답에 URL·제목을 넣지 않는다(2.6-1). 새 권한은 Opus 승인 없이 추가하지 않는다(D-M8 M8-0 (a)의 `activeTab` 예외와 FIX_GUIDE U1의 `nativeMessaging`만 허용).
 
 ### 2.2 순수 함수 / 부작용 분리
 1. **[필수]** 다음은 순수 함수로 작성한다. 입력은 인자로만 받고, DOM·GPU·`browser.*`·시간에 의존하지 않는다.
@@ -57,7 +57,7 @@
 
 ### 2.6 진단·개인정보 (M2 추가)
 1. **[필수]** 진단 JSON(`sdrhdr.diag`, 결과 파일)에는 영상 제목, 채널, 쿠키, 계정 정보, 전체 URL을 넣지 않는다. 페이지는 경로와 `v` 쿼리만 기록한다.
-2. **[필수]** 진단 기록은 `storage.local`에 최신 1개만 유지하고 외부로 전송하지 않는다. content script는 주기적으로 진단을 쓰지 않고, popup의 요청 키(`sdrhdr.diagRequest`)가 바뀔 때 **보이는 탭만** 1회 쓴다(FIX_GUIDE T2).
+2. **[필수]** 진단은 저장소에 쓰지 않는다. popup이 현재 탭에 `sdrhdr:getDiag` 메시지로 요청하면 content가 응답으로만 돌려준다(FIX_GUIDE V1). 외부로 전송하지 않는다. content script는 주기적으로 진단을 쓰지 않고, popup의 요청 키(`sdrhdr.diagRequest`)가 바뀔 때 **보이는 탭만** 1회 쓴다(FIX_GUIDE T2).
 3. **[필수]** `stripes`·`identity`·`baseline` 모드는 진단용이며 popup의 "진단" 영역(`<details>`, 기본 접힘) 밖으로 노출하지 않는다(PLAN D-M5 M5-2). 페이지 HUD는 사용자 확인용이라 이 규칙 대상이 아니지만 개인정보 규칙(2.6-1)은 따른다.
    - 해석(PLAN D-M7 M7-0 (a)): 모드가 `itm`이 아닐 때 진단 영역을 자동으로 펼치는 것, 일반 영역에 모드 이름 없이 "진단 모드라 조정이 잠김" 안내를 두는 것은 허용한다. 모드 select와 모드 이름은 진단 영역 안에만 둔다.
 

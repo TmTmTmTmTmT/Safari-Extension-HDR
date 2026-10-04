@@ -1,9 +1,52 @@
-# FIX_GUIDE.md — 설정 초기화·메모리 증가 (U 회차)
+# FIX_GUIDE.md — 저장소 쓰기 오류 (V 회차) · U 회차 (설정 초기화·메모리)
 
 > 작성: Opus (2026-10-03). 근거: 사용자 보고(2026-10-03), STATUS.md "조사: 메모리 증가·재부팅 후 설정 초기화"(Sonnet 코드 읽기), `extension/content/{renderer,main,params,background}.js`, `extension/popup/popup.js`, `xcode/SDRHDR/SDRHDR Extension/SafariWebExtensionHandler.swift`.
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
 > 이전 회차(T 포함)는 git 이력에 있다. T 회차 판정 보류 항목(TA 깜박임, T2 popup)은 체크리스트 "T 회차 확인" 절로 계속 받는다.
 > 브랜치: `claude/m8-plan`의 PR #14가 머지된 뒤 새 브랜치 `claude/u-fixes`(base는 PR #14가 머지된 브랜치). 버전 1.2.0 → 1.2.1.
+
+## V 회차 (2026-10-04, Opus) — `storage.local.set` Disk I/O 오류
+
+> 브랜치 `claude/v-fixes`(base `claude/amazing-hypatia-3rbspr`, 1.3.0). 버전 1.3.0 → 1.3.1. 아래 U 회차 절은 기록으로 남긴다.
+
+### 사용자 회신 (2026-10-04, U 회차 체크리스트)
+
+- 메모리 (a) 확장 끔 15분: Safari 페이지 1.4~1.8 GB 오르내림, `kernel_task` 거의 없음. 진단 JSON `results/result-U-20261004-a.json`(schemaVersion 13, extVersion 1.3.0, 4K 3840×1772 60fps, 끔 직전까지 itm 경로 vf, `devicesCreated` 3, `gpuBusySkipped` 0, 갱신 누락 4.0%, 드롭 0, errors 없음).
+- 메모리 (b) `baseline` 진행 중 **"Error: Invalid call to browser.storage.local.set(). Disk I/O error."** 발생. Safari 페이지 1.3 GB대, `kernel_task` 문제없음.
+- (c) 정상(itm)은 이 오류 수정 후 측정 예정. 설정 유지(U1) 회신은 아직 없음.
+- 판단: 이전 보고(13 GB)는 이번 (a)(b)에서 재현되지 않았다. U2 판정은 (c) 결과 후 한다.
+
+### V1. 저장소 쓰기 오류(Disk I/O)
+
+**원인 분석**
+
+- 오류는 Safari의 확장 저장소(내부 데이터베이스) 쓰기 실패다. 확장 코드가 막을 수 있는 종류가 아니지만, **쓰기 빈도**는 줄일 수 있다.
+- 현재 쓰기 경로: popup 진단 영역이 열려 있는 동안 `requestDiag`가 **2초마다** `sdrhdr.diagRequest`를 쓰고, content는 요청마다 바뀐 진단 JSON(수 KB)을 `sdrhdr.diag`에 쓴다(재생 중에는 매번 바뀜). 측정 절차가 진단 영역을 열어 둔 채 15분을 보내게 하므로 **약 1초에 1회, 15분에 약 900회** 쓰기가 생긴다. 탭이 다시 보일 때도 1회 쓴다. 설정·백업 쓰기는 사용자 조작 때만이라 무시할 수준이다.
+- Xcode Run으로 앱을 다시 설치하면 Safari가 열어 둔 저장소 파일이 바뀔 수 있고, 그 상태에서 잦은 쓰기가 I/O 오류로 이어졌을 가능성이 있다 [추정]. 이 경우 U1(설정 초기화)과 같은 뿌리일 수 있다.
+- M8에서 popup ↔ 현재 탭 메시징(`getState`)이 생겼으므로, 진단을 저장소를 거쳐 주고받을 이유가 없어졌다.
+
+**수정 방향**
+
+- (a) **진단 전달을 메시징으로 바꾼다**: `params.MSG.getDiag = 'sdrhdr:getDiag'` 추가. popup 진단 영역이 열려 있는 동안 2초마다 `tabs.sendMessage(현재 탭, {type: getDiag})` → content가 `buildDiag(collectState())`를 **응답으로 반환**(저장하지 않음). 응답이 없으면(대상 탭 아님) 진단 상자에 기존 "아직 상태 정보가 없습니다…" 문구. 이로써 `sdrhdr.diagRequest`·`sdrhdr.diag` 쓰기를 **없앤다**(`requestDiag`·`subscribeDiagRequest`·`writeDiag`·`writeDiagIfChanged`의 저장 부분 삭제, visibilitychange 때 쓰기도 삭제). GUIDELINES 2.6-2("최신 1개를 storage.local에 유지")는 "진단은 저장하지 않고 요청 시 응답만 한다"로 Opus가 개정한다. 진단 출처 줄은 응답의 `createdAt` 기준, 숨긴 탭은 응답하지 않던 T2 규칙은 메시징 대상이 활성 탭이라 자연히 지켜진다.
+- (b) **남은 쓰기의 실패 처리**: 설정(popup `save`), `setEnabled`(단축키), background 백업 복원 `set`에서 reject를 잡아 **1초 뒤 1회 재시도**. 재시도도 실패하면 popup은 기존 '저장 실패' 자리에 "저장 실패(Safari 저장소 오류). Safari를 완전히 종료 후 다시 여세요"를 표시하고, content는 진단 `errors`에 `{at: 'storage.set', name: 'StorageError'}`를 남긴다(메시지 원문은 남기지 않음). background는 조용히 무시(현행).
+- (c) 이전 버전이 남긴 `sdrhdr.diag`·`sdrhdr.diagRequest` 키는 background 시작 시 1회 `storage.local.remove`로 지운다(저장소 크기 축소). 실패는 무시.
+- (d) 진단 스키마는 바꾸지 않는다(schemaVersion 13 유지). 내용은 같고 전달 방식만 바뀐다. "JSON 저장"(Blob)과 복사는 마지막으로 받은 응답을 쓴다.
+
+**영향 범위**: `params.js`(MSG 추가, 진단 저장 함수 제거), `main.js`(getDiag 응답, 진단 쓰기 제거, set 재시도·errors 기록), `popup.js`(진단 요청을 메시징으로, 저장 실패 문구·재시도), `background.js`(이전 키 정리, 복원 set 재시도), GUIDELINES 2.6-2·2.1-5(메시지 3종), 테스트, install.md·체크리스트 문구. 렌더·곡선·수명주기·배지·내 프리셋 불변.
+
+**검증**
+
+- (1) 단위: popup이 진단 영역을 열면 2초마다 getDiag 메시지(저장소 쓰기 0회), 응답을 표시·복사·저장에 사용, 무응답 시 안내 문구, content가 getDiag에 진단 객체로 응답하고 storage.set을 부르지 않음, 설정 저장 reject → 1초 뒤 재시도 → 재실패 시 문구, content set 재실패 시 errors 기록, background가 이전 키 2개를 1회 remove. 기존 진단 내용 테스트(buildDiag)는 그대로.
+- (2) 사용자 Mac: 체크리스트 "V 회차 확인" — 진단 영역을 열어 둔 채 15분 재생해도 오류가 나지 않는지, 진단 상자가 2초마다 갱신되는지, 복사가 되는지. 이어서 U 회차 메모리 (c) 측정과 설정 유지 확인.
+
+### 버전·분할
+
+- 1.3.1, popup 헤더 버전 문자열 동기화.
+- 본 세션(Sonnet): `params.js` 먼저(MSG.getDiag, 함수 정리) → impl-worker 2개 병렬: W-A `main.js`+main 테스트, W-B `popup/*`+popup 테스트 → 본 세션 `background.js`+테스트, 문서·체크리스트("V 회차 확인" 절, 기존 "T 회차 확인" 2번·"U 회차 확인"의 진단 영역 설명을 새 방식에 맞게), STATUS, 전체 검증 → PR.
+
+---
+
+# U 회차 (2026-10-03, 기록)
 
 ## 사용자 보고 (2026-10-03)
 
