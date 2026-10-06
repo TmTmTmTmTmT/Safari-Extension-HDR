@@ -220,3 +220,7 @@
 - CI(X4): ubuntu에 `bash -n`·shellcheck(로컬에서 shellcheck-py 0.11로 경고 0 확인), macos에 `scripts/test-swift.sh`·앱 Swift `swiftc -typecheck`(로컬 통과)·`install.sh --dry-run` 환경 점검 스텝
 - → verify: lint 통과, `npm test` 364/364, `test:dom` 24/24, `test-swift` OK, `bash -n`·shellcheck 깨끗, 비대화형 `--dry-run`에서 사본 정리 mv가 출력되지 않음(`-y`면 출력) / (1) 로컬 Mac
 - 미검증: macos CI 새 스텝 3개(러너 Xcode의 프로젝트 열림 여부에 따라 dry-run 스텝 출력이 달라질 수 있음, 실패 시 grep 패턴 조정), 깨끗한 계정에서 Xcode 팀 ID만으로 인증서가 생성되는지(사용자 시험), 보호 규칙·v1.3.3 릴리스는 병합 후
+
+- Opus 판정(2026-10-06, W 회차 계획 이탈 3건): ① `SetupCheck.swift` 미생성·기존 파일 사용 → 인정, GUIDELINES 2.8-1로 규칙화 ② `youtube:0|1` 메시지 → 인정, GUIDELINES 2.8-4에 반영 ③ 배포 타깃 → 앱 26.0 해결, 확장 타깃 12.0은 스크립트 설치가 명령행으로 덮어써 사용자 영향 없음(Xcode 재생성 회차에서 정리)
+- 문서 정리(X 회차 마무리): GUIDELINES v1.8(2.8 컨테이너 앱, 2.9 설치 스크립트, 7-2 커밋 trailer에도 모델 식별자 금지 — 2026-10-06 사용자 확정, 7-3 `main` 보호·PR, 7-5 프로젝트 파일 규칙 현행화), 버전 1.3.3(manifest·popup 헤더)
+- 사용자 지시로 보류(나중에): W·V·U 회차 체크리스트, X3(c) 깨끗한 계정 시험. 앱 기능 백로그(M3 [미확인], M6 이월, K1, S2, M4 수치, c2dSync, Xcode 재생성) 보류

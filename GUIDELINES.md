@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.7 (2026-10-01, T 회차: 2.5-7 재렌더 생략, 2.6-2 요청 시 진단, 3-1 JS 미러 런타임 미로드). 개정은 Opus만 한다.
+> 버전: v1.8 (2026-10-06, X 회차: 2.8 컨테이너 앱, 2.9 설치 스크립트, 7-2 trailer 금지 명시, 7-3·7-5 현행화). 이전: v1.7 (2026-10-01, T 회차: 2.5-7 재렌더 생략, 2.6-2 요청 시 진단, 3-1 JS 미러 런타임 미로드). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -67,6 +67,20 @@
 3. **[필수]** MutationObserver는 `#movie_player` 범위로 한정하고 디바운스한다. `document` 전체 관찰 금지.
 4. **[필수]** 셀렉터 확정은 실제 DOM 스냅샷(`tests/dom/fixtures/yt-*.html`) 커밋 후에 한다. 추측 셀렉터는 [미확인] 주석과 함께 두고 실패 시 no-op 한다.
 
+### 2.8 컨테이너 앱 (`xcode/SDRHDR/SDRHDR/`, W 회차 추가)
+1. **[필수]** 새 Swift 파일을 만들지 않는다(프로젝트 파일 등록이 필요해 7-5와 충돌). 앱 코드는 `AppDelegate.swift`·`ViewController.swift`에 둔다. 테스트가 필요한 판정 로직은 `AppDelegate.swift`의 `// MARK: - PureLogic BEGIN`~`END` 구간에 Foundation만 써서 두고 `scripts/test-swift.sh`·`tests/swift/logic_test.swift`로 검사한다.
+2. **[필수]** 실행 종류 판정(`classifyLaunch`): 로그인 항목 Apple Event, 또는 `launchIsDefault == false`이면서 디버거 미연결일 때만 시스템 실행(창 없음, `.accessory`). 애매하면 사용자 실행(창 표시). 판정은 `os_log`(subsystem = 앱 번들 ID)에 신호값과 결과만 남기고 경로·사용자명은 남기지 않는다.
+3. **[필수]** 다른 사본 정리는 휴지통 이동만 한다. `NSOpenPanel`에서 사용자가 그 사본을 직접 고른 경우에만 `trashItem`, 자기 자신·최신 사본·판정 불가 사본은 이동 제안하지 않는다. 영구 삭제, LaunchServices·pluginkit 등록 조작, 샌드박스 해제·임시 예외 entitlement 금지.
+4. **[필수]** 점검 화면 브리지: Swift → JS는 `render(state)` 하나, JS → Swift 메시지는 `open-preferences`·`recheck`·`open-newest`·`done`·`youtube:0|1`·`reveal:<id>`·`trash:<id>`로 고정한다. id는 Swift가 만든 인덱스이며 JS가 경로를 보내지 않는다. 페이지 CSP(`default-src 'self'`)를 유지하고 DOM은 `textContent`로만 채운다.
+5. **[필수]** Safari 설정·개발자 메뉴("서명되지 않은 확장 허용")를 자동으로 바꾸는 코드(`defaults write`, AppleScript UI 스크립팅 등)를 넣지 않는다.
+
+### 2.9 설치 스크립트 (`scripts/install.sh`, `scripts/lib/install-lib.sh`, W·X 회차 추가)
+1. **[필수]** 서명 팀·배포 타깃·버전은 `xcodebuild` 명령행으로만 넘기고 프로젝트 파일을 수정하지 않는다.
+2. **[필수]** 하지 않는 일: `sudo` 실행(명령만 안내), Apple ID·비밀번호 처리, Safari 설정 조작, 로그인 항목 등록, `rm`으로 앱 삭제, `git pull` 외 네트워크 다운로드. 팀 ID 외의 인증서 이름·이메일·Apple ID를 출력하지 않는다.
+3. **[필수]** 사본 정리는 휴지통(`~/.Trash`) 이동만 하고, `-y`가 없으면 터미널에서 확인받는다. 비대화형이면서 `-y`가 없으면 정리하지 않는다. 상태를 바꾸는 명령은 모두 `run`을 거쳐 `--dry-run`에서 출력만 되게 한다.
+4. **[필수]** 파싱·비교 같은 순수 함수는 `install-lib.sh`에 두고 `tests/unit/install-lib.test.js`(가짜 픽스처)로 검사한다. macOS 기본 bash 3.2에서 동작해야 한다(연관 배열·`mapfile` 금지). CI의 `bash -n`·`shellcheck -S warning`을 통과해야 한다.
+5. **[권장]** 실패 메시지는 한국어로 원인과 사용자가 할 일을 함께 쓴다.
+
 ## 3. 셰이더·수치 일관성
 
 1. **[필수]** ITM 수식은 세 곳에 존재한다: WGSL(`itm.wgsl.js`), JS 미러, numpy(`sim/`). 하나를 바꾸면 **같은 커밋에서** 셋 다 갱신한다.
@@ -116,10 +130,10 @@
 ## 7. 커밋·브랜치·PR
 
 1. **[필수]** 커밋 메시지: `feat|fix|sim|test|ci|docs|chore(scope): 요약`. scope 예: `detect`, `renderer`, `probe`, `sim`, `hook`.
-2. **[필수]** 커밋 메시지, PR 제목·본문, 코드 주석에 모델 식별자를 넣지 않는다.
-3. **[필수]** `main`에 직접 push하지 않는다. 세션 지정 브랜치에서 작업하고 마일스톤당 draft PR 1개를 연다.
+2. **[필수]** 커밋 메시지(본문 끝 `Co-Authored-By:` 등 trailer 포함), PR 제목·본문, 코드 주석에 모델 식별자를 넣지 않는다. 도구 안내가 trailer를 요구해도 이 규칙이 우선한다(2026-10-06 사용자 확정). 이전 커밋의 trailer는 이력 재작성 없이 둔다.
+3. **[필수]** `main`에 직접 push하지 않는다(`main`은 보호 규칙: CI `ubuntu`·`macos` 통과 필수). 작업 브랜치 `claude/<회차·마일스톤>-<주제>`에서 작업하고 `main`으로 PR을 연다. 병합 후 브랜치는 자동 삭제된다.
 4. **[필수]** PR 본문에 verify 결과를 (1)/(2)/(3)으로 구분하고, 수동 미완 항목은 "미검증"으로 명시한다.
-5. **[필수]** Xcode 프로젝트(`xcode/`, `*.pbxproj`)는 클라우드에서 수기 편집하지 않는다. 사용자 Mac에서 push한 커밋만 인정한다.
+5. **[필수]** Xcode 프로젝트 파일(`project.xcproj`/`project.pbxproj`)은 수기 편집하지 않는다. 설정 변경은 사용자가 Xcode GUI로 하고, 재생성은 사용자 지시가 있을 때 `scripts/make-xcode.sh`로만 한다. 커밋 전 `DEVELOPMENT_TEAM`·`CODE_SIGN_IDENTITY` 등 개인 서명 줄은 제거한다(Xcode 저장으로 바뀐 객체 id는 원래 값으로 되돌려도 된다). Swift·storyboard·`Resources/`는 일반 소스처럼 편집한다.
 6. **[필수]** 게이트 마일스톤(M1, M2)은 사용자 회신 JSON(`results/`)과 Opus 판정(PLAN.md 게이트 판정 기록)이 있어야 머지 대상이 된다.
 7. **[필수]** 사용자에게 보이는 변경을 담은 PR은 `manifest.json` version을 올린다(기능 minor, 수정 patch). popup 헤더의 정적 버전 문자열은 manifest와 같아야 하며 단위 테스트로 검사한다(PLAN D-M7).
 
