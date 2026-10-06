@@ -2,7 +2,7 @@
 
 ## 현재 단계
 
-M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md D-M3, GUIDELINES v1.3, 브랜치 `claude/m3-lifecycle`). 다음: **로컬 Mac 세션(Sonnet)에서 M3 1단계 구현**. 클라우드 세션은 종료하고 이후 작업은 로컬 세션에서 한다(docs/local-session.md).
+1.3.2 릴리스 완료(PR #20, `56825df`, 태그 v1.3.2, 2026-10-06). 기본 브랜치 `main`, 저장소 이름 `Safari-Extension-HDR`. 진행 중: FIX_GUIDE X 회차(공개 저장소 정리, 1.3.3, 브랜치 `claude/x-fixes`). 사용자 Mac 대기: docs/manual-checklist.md "W 회차 확인"(재부팅 숨김 실행·사본 정리·설치 자동화·개인 팀 서명만으로 미서명 허용 불필요한지). 아래는 M2~M3 시점부터의 기록이며 과거 항목은 git 이력과 FIX_GUIDE에 있다.
 
 ## 완료
 
@@ -211,3 +211,12 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 - W5 구현(설치 자동화, 커밋 전): `scripts/install.sh`(환경 점검→팀 ID 자동 탐색→명령행 서명 빌드(project.xcproj 수정 안 함)→이전 사본 확인 후 휴지통→/Applications 설치→앱 실행→Safari 재시작 선택, 옵션 `--update -y --no-open --dry-run`), `scripts/lib/install-lib.sh`(순수 함수), `tests/unit/install-lib.test.js`, `README.md`, `docs/install.md` 3·4·5장, manual-checklist W5(12~16), `.gitignore`에 `.local/`
 - → verify: lint 통과, `npm test` 361/361, `bash -n`, `--dry-run -y`로 단계 1~8 출력·사본 2개(DerivedData·/Applications) 탐지·팀 자동 탐색 확인, macOS 15.6·Safari 18.2 주입 시 오류 문구 확인 / (1) 로컬 Mac. shellcheck 미설치로 미실행
 - 미검증(사용자 Mac): 실제 서명 빌드(`-allowProvisioningUpdates`)·`ditto` 설치·`lsregister`·Safari 재시작·팀 여러 개 선택 흐름. 사용자가 Xcode에서 배포 타깃 프로젝트 기본값을 26.0으로 바꿈(확장 타깃은 12.0 그대로, 스크립트 빌드는 명령행으로 둘 다 26.0). `project.xcproj` 로컬 변경은 여전히 미커밋(팀·서명 줄 제외 필요)
+
+## X 회차 (1.3.3 준비, 브랜치 claude/x-fixes, 2026-10-06) — FIX_GUIDE X 회차
+
+- GitHub 작업 완료: 병합된 `claude/*` 브랜치 20개 삭제(각각 `main` 포함 확인 후), 저장소 이름 `Safari-Extension-HDR`로 변경(옛 주소 301 리디렉션 확인), 로컬 remote 갱신. `main` 보호는 이 PR 병합 후 설정(CI 스텝 확정 뒤)
+- 구현: README·install.md 주소·폴더명 갱신, install.md 머리말·5장 정리, local-session.md `.venv` 절차, `.gitignore`에 `.venv/`, PLAN.md 기본 브랜치 한 줄 갱신, STATUS 현재 단계 갱신, `.github/ISSUE_TEMPLATE/bug_report.md`·`config.yml`, `package.json` description
+- `install.sh` 보완(X3): 비대화형(stdin 비터미널)에서 `-y` 없이는 사본 정리를 하지 않음, 팀 캐시가 키체인 팀 목록에 없으면 재선택·빌드 실패 시 캐시 안내, 인증서가 없으면 `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier`의 팀 ID를 후보로 사용(자동 서명이 인증서를 만드는지 [미확인]), 프로젝트 열기 실패 문구에 Xcode 버전, `--help`가 환경 변수 설명까지 출력. 순수 함수 `il_teams_from_xcode_defaults`·`il_list_contains` 추가
+- CI(X4): ubuntu에 `bash -n`·shellcheck(로컬에서 shellcheck-py 0.11로 경고 0 확인), macos에 `scripts/test-swift.sh`·앱 Swift `swiftc -typecheck`(로컬 통과)·`install.sh --dry-run` 환경 점검 스텝
+- → verify: lint 통과, `npm test` 364/364, `test:dom` 24/24, `test-swift` OK, `bash -n`·shellcheck 깨끗, 비대화형 `--dry-run`에서 사본 정리 mv가 출력되지 않음(`-y`면 출력) / (1) 로컬 Mac
+- 미검증: macos CI 새 스텝 3개(러너 Xcode의 프로젝트 열림 여부에 따라 dry-run 스텝 출력이 달라질 수 있음, 실패 시 grep 패턴 조정), 깨끗한 계정에서 Xcode 팀 ID만으로 인증서가 생성되는지(사용자 시험), 보호 규칙·v1.3.3 릴리스는 병합 후

@@ -4,12 +4,12 @@ macOS Safari에서 DRM 없는 SDR 영상(주 대상 YouTube)을 실시간으로 
 
 ## 요구 환경
 
-macOS 26 이상, Safari 26 이상(WebGPU), EDR 디스플레이, Xcode(앱 설치 후 한 번 실행), Apple ID(무료 개인 팀으로 충분). 실측은 macOS 27.2 · Safari 27.2 · M1 Pro 내장 XDR뿐입니다.
+macOS 26 이상, Safari 26 이상(WebGPU), EDR 디스플레이, Xcode(앱 설치 후 한 번 실행. 저장소의 프로젝트는 Xcode 27.2 베타로 만들었고 안정판 호환은 확인하지 못했습니다), Apple ID(무료 개인 팀으로 충분). 실측은 macOS 27.2 · Safari 27.2 · M1 Pro 내장 XDR뿐입니다.
 
 ## 설치
 
 ```bash
-git clone https://github.com/TmTmTmTmTmT/Safari_Extention-HDR.git && cd Safari_Extention-HDR
+git clone https://github.com/TmTmTmTmTmT/Safari-Extension-HDR.git && cd Safari-Extension-HDR
 scripts/install.sh
 ```
 
@@ -18,7 +18,7 @@ scripts/install.sh
 필요한 파일만 받고 싶다면(개발 문서·테스트 제외, 선택 사항):
 
 ```bash
-git clone --filter=blob:none --sparse https://github.com/TmTmTmTmTmT/Safari_Extention-HDR.git && cd Safari_Extention-HDR
+git clone --filter=blob:none --sparse https://github.com/TmTmTmTmTmT/Safari-Extension-HDR.git && cd Safari-Extension-HDR
 git sparse-checkout set --no-cone /extension /xcode /scripts/install.sh /scripts/lib /scripts/make-xcode.sh /README.md /docs/install.md
 scripts/install.sh
 ```

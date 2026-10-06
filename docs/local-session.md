@@ -8,7 +8,7 @@
 xcode-select -p                 # /Applications/Xcode-beta.app/... (또는 안정판 Xcode)
 node --version                  # v22.x (없으면 brew install node@22)
 python3 --version               # 3.11 이상
-python3 -m pip install --user pytest numpy
+python3 -m venv .venv && .venv/bin/pip install pytest numpy
 git --version
 claude --version                # Claude Code CLI (없으면 설치)
 ```
@@ -26,7 +26,7 @@ git checkout claude/m3-lifecycle
 git pull origin claude/m3-lifecycle
 npm ci
 npx playwright install webkit   # test:dom 실행용
-npm run lint && npm test && npm run test:dom && python3 -m pytest sim
+npm run lint && npm test && npm run test:dom && .venv/bin/python -m pytest sim
 ```
 
 마지막 줄이 모두 통과하면 준비 완료다. Xcode에서 개인 팀을 지정한 변경은 커밋하지 않는다(`git status`에 `xcode/` 변경이 보이면 `git restore xcode` 전에 내용을 확인).

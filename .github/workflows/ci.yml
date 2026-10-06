@@ -18,6 +18,10 @@ jobs:
       - run: npm ci
       - run: pip install pytest numpy
       - run: npm run lint
+      - name: shell scripts (bash -n, shellcheck)
+        run: |
+          bash -n scripts/install.sh scripts/lib/install-lib.sh scripts/test-swift.sh scripts/make-xcode.sh
+          shellcheck -S warning scripts/install.sh scripts/lib/install-lib.sh scripts/test-swift.sh scripts/make-xcode.sh
       - run: npm test
       - run: pytest sim
       - run: npx playwright install --with-deps webkit
@@ -27,6 +31,19 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Swift pure logic tests
+        run: scripts/test-swift.sh
+      - name: Swift typecheck (app sources)
+        run: |
+          cd xcode/SDRHDR/SDRHDR
+          swiftc -typecheck -parse-as-library -target "$(uname -m)-apple-macos26.0" AppDelegate.swift ViewController.swift
+      - name: install.sh dry-run (환경 점검 분기만 확인, 서명·설치는 하지 않음)
+        run: |
+          set +e
+          out="$(SDRHDR_SAFARI_VERSION=26.0 TEAM_ID=ABCDE12345 scripts/install.sh --dry-run -y --no-open 2>&1)"
+          echo "$out"
+          # 러너 Xcode 가 베타 형식 프로젝트를 못 열면 1단계에서 안내 문구와 함께 멈춘다. 그 문구 형식만 확인한다.
+          echo "$out" | grep -E "환경 점검|3\] 빌드|Xcode 가 .* 를 열지 못했습니다|Xcode 앱을 가리키지|최초 실행 구성"
       - name: Xcode build (unsigned)
         shell: bash
         run: |
