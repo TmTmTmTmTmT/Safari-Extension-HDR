@@ -64,14 +64,3 @@ scripts/install.sh --update
 - 무료 개인 팀 서명은 만료될 수 있습니다. 확장이 사라지면 `scripts/install.sh`를 다시 실행하세요.
 
 자세한 사용법·문제 해결·제거 방법은 [docs/install.md](docs/install.md)를 보세요. 문제는 [이슈](https://github.com/TmTmTmTmTmT/Safari-Extension-HDR/issues/new/choose)로 알려 주세요(진단 JSON 첨부 안내가 템플릿에 있습니다).
-
-## 개발
-
-```bash
-npm ci
-npm run lint && npm test && npm run test:dom   # 단위·DOM(WebKit) 테스트
-python3 -m pytest sim                          # 알고리즘 시뮬레이션
-scripts/test-swift.sh                          # 앱 판정 로직(Swift)
-```
-
-설계·코딩 규칙·진행 기록은 `PLAN.md`, `GUIDELINES.md`, `FIX_GUIDE.md`, `STATUS.md`에 있습니다(이 저장소에서는 계획 단계와 구현 단계를 나누어 작업합니다. 자세한 내용은 `CLAUDE.md`). 구조: `extension/`(Safari 확장), `xcode/`(컨테이너 앱·Xcode 프로젝트), `scripts/`(설치·도구), `sim/`(알고리즘 시뮬레이션), `probe/`(초기 WebGPU 프로브), `tests/`, `docs/`.
