@@ -27,7 +27,7 @@ SDR 영상을 실시간으로 확장해 EDR(HDR 밝기)로 보여 주는 Safari 
 ### 3-1. 자동 설치 (권장)
 
 ```bash
-git clone <저장소 주소> && cd Safari_Extention-HDR
+git clone https://github.com/TmTmTmTmTmT/Safari_Extention-HDR.git && cd Safari_Extention-HDR
 scripts/install.sh
 ```
 
@@ -48,7 +48,7 @@ scripts/install.sh
 
 ### 3-2. 수동 설치 (Xcode에서 Run)
 
-1. 저장소를 받습니다: `git clone <저장소 주소>` 후 해당 폴더로 이동.
+1. 저장소를 받습니다: `git clone https://github.com/TmTmTmTmTmT/Safari_Extention-HDR.git` 후 해당 폴더로 이동.
 2. Xcode 프로젝트는 저장소의 `xcode/`에 이미 있습니다. `scripts/make-xcode.sh`는 `xcode/`가 없을 때만 쓰며, 있는 상태에서 실행하면 덮어쓰지 않고 오류로 중단합니다.
 3. `xcode/SDRHDR/SDRHDR.xcodeproj`를 Xcode로 엽니다(저장소의 프로젝트는 Xcode 베타 형식이라 같은 형식을 여는 Xcode가 필요합니다. 안정판 호환은 [확인 필요]).
 4. **SDRHDR와 SDRHDR Extension 두 타깃 모두** Signing & Capabilities에서 Team을 개인 팀(Apple ID, 무료)으로 지정합니다. `DEVELOPMENT_TEAM` 변경은 커밋하지 않습니다. 이 단계가 빠지면 Safari가 확장을 서명되지 않은 것으로 보고 재시작마다 "서명되지 않은 확장 허용"을 요구합니다.
