@@ -1,9 +1,65 @@
-# FIX_GUIDE.md — X 회차(공개 저장소 정리) · W · V · U 회차
+# FIX_GUIDE.md — Y 회차(보안 보완) · X · W · V · U 회차
 
 > 작성: Opus (2026-10-03). 근거: 사용자 보고(2026-10-03), STATUS.md "조사: 메모리 증가·재부팅 후 설정 초기화"(Sonnet 코드 읽기), `extension/content/{renderer,main,params,background}.js`, `extension/popup/popup.js`, `xcode/SDRHDR/SDRHDR Extension/SafariWebExtensionHandler.swift`.
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
 > 이전 회차(T 포함)는 git 이력에 있다. T 회차 판정 보류 항목(TA 깜박임, T2 popup)은 체크리스트 "T 회차 확인" 절로 계속 받는다.
 > 브랜치: `claude/m8-plan`의 PR #14가 머지된 뒤 새 브랜치 `claude/u-fixes`(base는 PR #14가 머지된 브랜치). 버전 1.2.0 → 1.2.1.
+
+## Y 회차 (2026-10-06, Opus) — 1.3.4: 보안 점검 후속
+
+> 근거: 설치·실행 전 과정 보안 점검(읽기 전용, 2026-10-06). 높음·중간 위험 없음, 낮음 6건 중 사용자가 1·3·4·6 진행 지시(2 `--update` 원격 코드 신뢰, 5 CI 액션 해시 고정은 제외). 4(GitHub secret scanning·push protection)는 Opus가 `gh api`로 켜서 완료.
+> 브랜치 `claude/y-security`(base `main`). 버전 1.3.3 → 1.3.4. 대상: Sonnet. 커밋에 trailer 금지(GUIDELINES 7-2).
+
+### Y1. "최신 사본 열기"는 같은 서명 팀 사본에만
+
+**원인**: `ViewController.recheck`는 번들 ID가 같은 모든 사본 중 버전·빌드 시각이 가장 높은 것을 "최신"으로 보고, 자기보다 새로우면 "최신 사본 열기"(`NSWorkspace.openApplication`)를 제안한다. 누군가 같은 번들 ID에 높은 버전을 적은 앱을 Mac에 두면, 사용자가 그 앱을 실행하도록 유도된다(공격자가 이미 파일을 쓸 수 있어야 하므로 낮음).
+
+**수정 방향**
+
+- (a) `CopyInfo`(PureLogic)에 `teamID: String?` 추가. 수집(`describe`/`signing`)에서 `kSecCodeInfoTeamIdentifier`를 함께 반환(앱·appex 둘 다 같은 팀일 때만 그 값, 다르거나 하나라도 없으면 nil). 샌드박스에서 읽을 수 없는 사본(홈 아래 등)은 nil.
+- (b) PureLogic에 순수 함수 `canOfferOpen(selfTeam: String?, otherTeam: String?) -> Bool`: 둘 다 nil이 아니고 같을 때만 true. 자기 서명이 ad-hoc(팀 nil)이면 항상 false.
+- (c) `newestOtherIndex`는 최신 판정이 다른 사본이고 `canOfferOpen`이 true일 때만 설정. 아니면 nil로 두고 상태에 `newestUnverified: true`를 넣는다.
+- (d) 점검 화면(Script.js): `newestUnverified`이면 "최신 사본 열기" 버튼 없이 "더 새로워 보이는 사본이 있지만 같은 개발자 서명인지 확인할 수 없습니다. Finder에서 확인한 뒤 직접 여세요."와 Finder 보기만. 휴지통 이동 제안(자기가 최신일 때)은 현행 유지(자기 자신은 열지 않으므로 위험 없음).
+- (e) `openNewest`에서도 실행 직전에 같은 조건을 다시 확인(상태가 바뀌었을 수 있음). 실패하면 아무것도 열지 않고 notice.
+- (f) GUIDELINES 2.8-3에 규칙 추가(Opus가 이 회차에서 개정 완료).
+
+**영향 범위**: `AppDelegate.swift` PureLogic(구조체 필드·함수 1개), `ViewController.swift`(수집·판정·openNewest), `Resources/Script.js`, `tests/swift/logic_test.swift`, `tests/dom/w4-setup.spec.js`. 확장·설치 스크립트 불변.
+
+**검증**: `scripts/test-swift.sh`(canOfferOpen 표: 같음/다름/nil 조합, CopyInfo 필드 추가 후 기존 케이스 유지), `test:dom`(newestUnverified 상태에서 열기 버튼 없음·Finder 보기만), 무서명 빌드, CI typecheck. 사용자 Mac: 체크리스트 W 회차 6번에 "서명 팀이 다르거나 확인 불가한 더 새 사본이면 열기 버튼이 없는가" 한 줄 추가.
+
+### Y3. 빌드 로그 공유 시 개인정보
+
+**원인**: `.local/build.log`에는 사용자 홈 경로(`/Users/<이름>`)와 팀 ID가 들어간다. 이슈 템플릿이 "빌드 로그는 `.local/build.log`"라고만 안내해 전체 로그를 공개 이슈에 붙일 수 있다.
+
+**수정 방향**
+
+- `.github/ISSUE_TEMPLATE/bug_report.md` "설치 문제라면": "`scripts/install.sh` 화면 출력의 오류 줄만 붙여 주세요. `.local/build.log` 전체는 사용자 경로(/Users/이름)·팀 ID가 들어 있으니 올리지 말고, 필요하면 `error:` 줄만 경로를 가려서 붙여 주세요."
+- `install.sh` 빌드 실패 메시지의 "자세한 내용: $BUILD_LOG" 다음에 "(공유할 때는 오류 줄만, 경로를 가려서)" 한 줄.
+- `install.sh` 화면에 출력하는 `error:` 줄(마지막 5줄)에서 `$HOME`을 `~`로 바꿔 출력(`sed "s#$HOME#~#g"`, `$HOME`에 `#`가 있으면 치환 생략).
+
+**검증**: lint, shellcheck, `npm test`. 실패 경로는 `TEAM_ID=ABCDE12345 scripts/install.sh --no-open -y`로 빌드 실패를 일부러 내지 않는다(설치 시도가 되므로). 대신 치환 함수를 `install-lib.sh`의 `il_redact_home`(stdin, 인자 HOME)으로 두고 단위 테스트.
+
+### Y6. "서명되지 않은 확장 허용"은 꺼 두기
+
+**원인**: 문서와 점검 화면이 "서명이 확인되면 필요 없다"고만 해, 이미 켠 사용자가 켜 둔 채로 쓸 수 있다. 켜져 있는 동안에는 서명되지 않은 다른 확장도 로드된다.
+
+**수정 방향**
+
+- 점검 화면 1번 서명 ✓ 문구: "개인 팀 서명 확인 — 개발자 메뉴의 '서명되지 않은 확장 허용'은 **꺼 두세요**. 켜 두면 서명되지 않은 다른 확장도 로드될 수 있습니다. (macOS 27.2 · Safari 27.2에서 이 상태로 동작 확인)".
+- `docs/install.md` 3-1 마지막 문단, 3-2의 6번, 5장 3번째 항목, README "직접 해야 하는 단계" 아래에 같은 취지 한 줄. 3-2의 6번(서명 확인 안 될 때만 켜기)에는 "확인이 끝나면 다시 끄기"를 덧붙인다.
+- 앱이 이 옵션 상태를 읽거나 바꾸지 않는다(GUIDELINES 2.8-5).
+
+**검증**: lint, `test:dom`(문구 변경이 기존 테스트에 걸리면 기대값 갱신).
+
+### 버전·분할
+
+- 1.3.4(manifest·popup 헤더·manifest 테스트). Y1·Y6의 Script.js가 겹치므로 앱 쪽(Y1+Y6 점검 화면 문구)은 한 작업 단위, 문서·템플릿·스크립트(Y3+Y6 문서)는 impl-worker 1개로 병렬 가능. 본 세션: STATUS, 검증, PR(trailer 없음), 병합은 사용자 지시 후. 병합 후 v1.3.4 릴리스는 사용자 지시 시.
+
+### 이번 범위 밖
+
+- `--update`의 원격 코드 신뢰(Y2), CI 액션 해시 고정(Y5): 사용자 제외 결정.
+
+---
 
 ## X 회차 (2026-10-06, Opus) — 1.3.3: 공개 저장소 정리
 

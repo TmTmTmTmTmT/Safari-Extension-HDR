@@ -58,7 +58,7 @@ function render(state) {
     // 1. 서명
     if (state.signed) {
         steps.appendChild(
-            step('ok', '개인 팀 서명 확인', '개발자 메뉴의 ‘서명되지 않은 확장 허용’은 꺼 두어도 됩니다. (macOS 27.2 · Safari 27.2에서 확인한 동작)').li
+            step('ok', '개인 팀 서명 확인', '개발자 메뉴의 ‘서명되지 않은 확장 허용’은 꺼 두세요. 켜 두면 서명되지 않은 다른 확장도 로드될 수 있습니다. (macOS 27.2 · Safari 27.2에서 이 상태로 동작 확인)').li
         );
     } else {
         allOk = false;
@@ -84,6 +84,10 @@ function render(state) {
             const row = el('div', 'row');
             row.appendChild(button('최신 사본 열기', 'open-newest'));
             s.body.appendChild(row);
+        } else if (state.newestUnverified) {
+            s.body.appendChild(
+                el('div', 'detail', '더 새로워 보이는 사본이 있지만 같은 개발자 서명인지 확인할 수 없습니다. Finder에서 확인한 뒤 직접 여세요.')
+            );
         } else {
             s.body.appendChild(el('div', 'detail', '어느 사본이 최신인지 판단할 수 없습니다. Finder에서 직접 확인해 주세요.'));
         }

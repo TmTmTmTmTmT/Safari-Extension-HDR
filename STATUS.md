@@ -224,3 +224,10 @@
 - Opus 판정(2026-10-06, W 회차 계획 이탈 3건): ① `SetupCheck.swift` 미생성·기존 파일 사용 → 인정, GUIDELINES 2.8-1로 규칙화 ② `youtube:0|1` 메시지 → 인정, GUIDELINES 2.8-4에 반영 ③ 배포 타깃 → 앱 26.0 해결, 확장 타깃 12.0은 스크립트 설치가 명령행으로 덮어써 사용자 영향 없음(Xcode 재생성 회차에서 정리)
 - 문서 정리(X 회차 마무리): GUIDELINES v1.8(2.8 컨테이너 앱, 2.9 설치 스크립트, 7-2 커밋 trailer에도 모델 식별자 금지 — 2026-10-06 사용자 확정, 7-3 `main` 보호·PR, 7-5 프로젝트 파일 규칙 현행화), 버전 1.3.3(manifest·popup 헤더)
 - 사용자 지시로 보류(나중에): W·V·U 회차 체크리스트, X3(c) 깨끗한 계정 시험. 앱 기능 백로그(M3 [미확인], M6 이월, K1, S2, M4 수치, c2dSync, Xcode 재생성) 보류
+
+## Y 회차 (1.3.4, 브랜치 claude/y-security, 2026-10-06) — FIX_GUIDE Y 회차
+
+- GitHub: secret scanning·push protection 켬(Opus). 1.3.x는 이후 버그 개선만(사용자 지시)
+- 구현: Y1 `CopyInfo.teamID`·`canOfferOpen`(PureLogic), 점검 시 같은 서명 팀일 때만 `newestOtherIndex`, 아니면 `newestUnverified`(열기 버튼 없이 Finder 보기만), `openNewest`에서 실행 직전 재확인 / Y3 `il_redact_home`로 install.sh 오류 줄의 홈 경로를 `~`로, 이슈 템플릿·실패 안내에 로그 공유 주의 / Y6 점검 화면·README·install.md에 "미서명 허용은 꺼 두기", manifest·popup·테스트 1.3.4
+- → verify: lint 통과, `npm test` 365/365, `test:dom` 26/26, `scripts/test-swift.sh` OK(canOfferOpen 6 케이스 추가), shellcheck 경고 0, 앱 Swift typecheck·무서명 빌드 / (1) 로컬 Mac
+- 미검증(사용자 Mac): 같은 팀/다른 팀/읽기 불가 사본에서 열기 버튼 표시. 샌드박스에서 홈 아래 사본은 팀 ID를 읽을 수 없어 항상 "확인 불가"가 될 가능성이 높음(DerivedData 사본이 더 새로우면 열기 대신 Finder 보기)

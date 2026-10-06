@@ -42,6 +42,8 @@ struct CopyInfo {
     var version: String?
     var builtAt: Date?
     var signing: Signing
+    /// 앱·확장 둘 다 같은 팀 ID로 서명됐을 때만 값이 있다. 읽을 수 없으면 nil.
+    var teamID: String? = nil
 }
 
 /// 점 구분 숫자 비교. 숫자가 아닌 조각은 0으로 본다.
@@ -67,6 +69,12 @@ func isNewer(_ a: CopyInfo, than b: CopyInfo) -> Bool? {
         return ta > tb
     }
     return nil
+}
+
+/// Y1: 다른 사본을 열라고 제안해도 되는지. 두 팀 ID가 모두 있고 같을 때만 true (ad-hoc·읽기 불가는 false).
+func canOfferOpen(selfTeam: String?, otherTeam: String?) -> Bool {
+    guard let a = selfTeam, let b = otherTeam, !a.isEmpty else { return false }
+    return a == b
 }
 
 /// 가장 최신 사본의 인덱스. 하나라도 비교 불가이면 nil (삭제 제안 안 함).

@@ -127,3 +127,13 @@ test('install.sh --help 에 테스트용 환경 변수가 나온다', () => {
   assert.ok(r.stdout.includes('TEAM_ID'));
   assert.ok(r.stdout.includes('SDRHDR_SAFARI_VERSION'));
 });
+
+test('il_redact_home: 홈 경로를 ~ 로', () => {
+  assert.strictEqual(
+    sh('il_redact_home /Users/someone', 'error: /Users/someone/proj/a.swift:1\n').out,
+    'error: ~/proj/a.swift:1',
+  );
+  assert.strictEqual(sh('il_redact_home ""', 'x /Users/a\n').out, 'x /Users/a');
+  assert.strictEqual(sh('il_redact_home "/"', 'x /Users/a\n').out, 'x /Users/a');
+  assert.strictEqual(sh('il_redact_home "/a#b"', 'x /a#b/c\n').out, 'x /a#b/c');
+});

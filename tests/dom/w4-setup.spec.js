@@ -105,6 +105,31 @@ test('사본 2개·자기가 최신 아님: 삭제 버튼 없음, 최신 사본 
   expect(await page.evaluate(() => window.__sent)).toEqual(['open-newest']);
 });
 
+test('더 새롭지만 서명 팀 확인 불가: 열기 버튼 없이 Finder 보기만', async ({ page }) => {
+  const copies = [
+    { id: 0, path: '/x/SDRHDR.app', version: '9.9.9', builtAt: null, signing: 'unknown' },
+  ];
+  await open(page, {
+    ...base,
+    selfIsNewest: false,
+    newestOtherIndex: null,
+    newestUnverified: true,
+    copies,
+  });
+  expect(await page.$$eval('button', (b) => b.map((x) => x.textContent))).toEqual([
+    'Finder에서 보기',
+    '나중에 하고 닫기',
+  ]);
+  expect(await page.textContent('#steps')).toContain('같은 개발자 서명인지 확인할 수 없습니다');
+});
+
+test('서명 확인 문구: 미서명 허용은 꺼 두라고 안내', async ({ page }) => {
+  await open(page, base);
+  const t = await page.textContent('#steps');
+  expect(t).toContain('꺼 두세요');
+  expect(t).toContain('다른 확장도 로드될 수 있습니다');
+});
+
 test('판정 불가: 삭제·열기 없이 Finder 보기만', async ({ page }) => {
   const copies = [
     { id: 0, path: '/x/SDRHDR.app', version: null, builtAt: null, signing: 'unknown' },

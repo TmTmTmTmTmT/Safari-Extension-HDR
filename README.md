@@ -37,4 +37,6 @@ scripts/install.sh --update
 2. Safari 설정 › 확장 프로그램에서 SDR HDR 켜기
 3. 확장의 웹사이트 접근에서 www.youtube.com 허용
 
+개발자 메뉴의 "서명되지 않은 확장 허용"은 서명이 확인되면 꺼 두세요(켜 두면 서명되지 않은 다른 확장도 로드될 수 있습니다).
+
 열린 SDR HDR 창이 점검 목록으로 남은 항목을 안내합니다. 자세한 내용과 문제 해결은 [docs/install.md](docs/install.md).
