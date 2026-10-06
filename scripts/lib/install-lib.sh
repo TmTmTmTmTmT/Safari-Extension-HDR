@@ -67,3 +67,28 @@ il_redact_home() {
     *) sed "s#${home}#~#g" ;;
   esac
 }
+
+# il_parse_ls_paths : stdin 은 `lsregister -dump` 출력. "path:" 줄에서 SDRHDR.app / SDRHDR Extension.appex 로 끝나는 경로를
+# 중복 없이 한 줄에 하나씩 출력한다 (AA4: 파일이 없는 낡은 등록을 찾는 데 쓴다). 끝의 " (0x…)" 표지는 떼어낸다.
+il_parse_ls_paths() {
+  sed -n -e 's/^[[:space:]]*path:[[:space:]]\{1,\}\(\/.*\)$/\1/p' |
+    sed -e 's/[[:space:]]*(0x[0-9a-fA-F]*)[[:space:]]*$//' |
+    grep -e '/SDRHDR\.app$' -e '/SDRHDR Extension\.appex$' |
+    awk '!seen[$0]++' || true
+}
+
+# il_pluginkit_paths : stdin 은 `pluginkit -m -v -A -D -i <id>` 출력. 줄 끝의 .appex 절대 경로만 한 줄에 하나씩, 중복 없이 출력한다.
+il_pluginkit_paths() {
+  sed -n 's/^[^/]*\(\/.*\.appex\)[[:space:]]*$/\1/p' | awk '!seen[$0]++' || true
+}
+
+# il_app_of_appex : stdin 은 .appex 경로 목록. `<앱>.app/Contents/PlugIns/…appex` 형태에서 `.app` 까지만 뽑아 중복 없이 출력한다.
+# 앱 안에 있지 않은 독립 appex 는 출력하지 않는다(il_standalone_appex 가 다룬다).
+il_app_of_appex() {
+  sed -n 's/^\(\/.*\.app\)\/Contents\/PlugIns\/[^/]*\.appex$/\1/p' | awk '!seen[$0]++' || true
+}
+
+# il_standalone_appex : stdin 은 .appex 경로 목록. 앱 번들 안에 있지 않은 독립 appex 만 출력한다.
+il_standalone_appex() {
+  grep -v '\.app/Contents/PlugIns/' | grep '\.appex$' || true
+}

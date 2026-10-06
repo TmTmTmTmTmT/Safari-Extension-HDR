@@ -136,6 +136,7 @@
 5. **[필수]** Xcode 프로젝트 파일(`project.xcproj`/`project.pbxproj`)은 수기 편집하지 않는다. 설정 변경은 사용자가 Xcode GUI로 하고, 재생성은 사용자 지시가 있을 때 `scripts/make-xcode.sh`로만 한다. 커밋 전 `DEVELOPMENT_TEAM`·`CODE_SIGN_IDENTITY` 등 개인 서명 줄은 제거한다(Xcode 저장으로 바뀐 객체 id는 원래 값으로 되돌려도 된다). Swift·storyboard·`Resources/`는 일반 소스처럼 편집한다.
 6. **[필수]** 게이트 마일스톤(M1, M2)은 사용자 회신 JSON(`results/`)과 Opus 판정(PLAN.md 게이트 판정 기록)이 있어야 머지 대상이 된다.
 7. **[필수]** 사용자에게 보이는 변경을 담은 PR은 `manifest.json` version을 올린다(기능 minor, 수정 patch). popup 헤더의 정적 버전 문자열은 manifest와 같아야 하며 단위 테스트로 검사한다(PLAN D-M7).
+8. **[필수]** Claude가 검증용으로 scratchpad 등에 Release 빌드를 만들면 끝날 때 `pluginkit -r`·`lsregister -u` 후 삭제한다. 가능하면 `CODE_SIGNING_ALLOWED=NO` + `-derivedDataPath`를 쓰고 앱을 실행하지 않는다(AA6, 사본이 Safari 확장 목록에 남는 것을 막는다).
 
 ## 8. 역할·문서 규칙 (요약)
 
