@@ -15,6 +15,16 @@ scripts/install.sh
 
 서명 팀 탐색, 빌드, 이전 사본 정리, `/Applications` 설치, 앱 실행까지 자동입니다.
 
+필요한 파일만 받고 싶다면(개발 문서·테스트 제외, 선택 사항):
+
+```bash
+git clone --filter=blob:none --sparse <저장소 주소> && cd Safari_Extention-HDR
+git sparse-checkout set --no-cone /extension /xcode /scripts/install.sh /scripts/lib /scripts/make-xcode.sh /README.md /docs/install.md
+scripts/install.sh
+```
+
+GitHub의 "Download ZIP"과 Release 소스 압축본에도 개발 전용 파일은 들어 있지 않습니다. ZIP으로 받은 경우 `--update`는 쓸 수 없고, 새 ZIP을 받아 `scripts/install.sh`를 다시 실행하세요.
+
 ## 업데이트
 
 ```bash

@@ -40,6 +40,8 @@ scripts/install.sh
 5. `/Applications`에 설치하고 앱을 엽니다(설정 점검 화면).
 6. Safari 재시작 여부를 묻습니다(기본 아니오).
 
+받는 방법: `git clone`, 필요한 폴더만 받는 sparse checkout(README 참고), GitHub ZIP 모두 가능합니다. ZIP은 `.git`이 없어 `--update`를 쓸 수 없습니다(새 ZIP으로 다시 설치). 서명·빌드는 어느 경우든 받는 사람의 Mac에서 그 사람의 개인 팀으로 합니다.
+
 옵션: `--update`(먼저 `git pull --ff-only`), `-y`(확인 생략, Safari는 재시작하지 않음), `--no-open`(앱 실행·Safari 재시작 생략), `--dry-run`(명령만 출력, 아무것도 바꾸지 않음).
 
 자동화하지 않는 것(직접 해야 함): Apple ID를 Xcode에 로그인하는 것(처음 한 번), Safari 설정 › 확장 프로그램에서 SDR HDR 켜기, 웹사이트 접근에서 www.youtube.com 허용. 열린 SDR HDR 창의 점검 목록이 남은 항목을 알려 줍니다. 서명이 팀으로 확인되면 "서명되지 않은 확장 허용"은 보통 필요 없습니다(2026-10-06 관측, macOS 27.2 · Safari 27.2, 다른 환경 [확인 필요]).

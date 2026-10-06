@@ -67,10 +67,11 @@ ask() {
   case "$ans" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac
 }
 
-[ -f package.json ] && [ -f extension/manifest.json ] && [ -d "$PROJECT" ] || die "저장소가 완전하지 않습니다." "extension/manifest.json 과 $PROJECT 가 필요합니다."
+[ -f extension/manifest.json ] && [ -d "$PROJECT" ] || die "저장소가 완전하지 않습니다." "extension/manifest.json 과 $PROJECT 가 필요합니다."
 
 # ---------------------------------------------------------------- 0. 업데이트
 if [ "$UPDATE" -eq 1 ]; then
+  [ -d .git ] || die "--update 는 git clone 으로 받은 저장소에서만 쓸 수 있습니다." "ZIP 으로 받았다면 새 ZIP 을 받아 scripts/install.sh 를 실행하세요."
   step 0 "git pull --ff-only"
   run git pull --ff-only || die "git pull 이 실패했습니다." "로컬 변경이나 갈라진 이력이 있는지 확인하세요."
 fi
