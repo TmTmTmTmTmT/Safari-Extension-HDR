@@ -18,15 +18,14 @@
 - CI(`ci.yml`): push·PR 전부에서 ubuntu(lint·`npm test`·pytest·DOM)와 macos(러너 converter 임시 프로젝트 무서명 빌드). 커밋된 `project.xcproj`(베타 형식)는 러너에서 빌드하지 않아 **W1·W4의 Swift·storyboard 변경은 CI에서 한 번도 컴파일되지 않는다**. `scripts/test-swift.sh`·`install.sh`도 CI에 없다.
 - v1.3.2 릴리스 소스 압축본의 README·install.md에는 `<저장소 주소>`가 남아 있다(PR #21 이전 커밋).
 
-### X0. 사용자 결정 (Opus 권장)
+### X0. 사용자 결정 (2026-10-06 확정)
 
-| 항목                            | 선택지                                         | 권장                                                                                                             |
-| ------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 라이선스                        | MIT / Apache-2.0 / GPL-3.0 / 없음(비공개 의도) | MIT(개인 공개 도구, 재사용 허용)                                                                                 |
-| 병합된 브랜치 21개              | 삭제 / 유지                                    | 삭제(커밋은 `main`에 남음, 브랜치 이름은 PR 페이지에서 복원 가능)                                                |
-| `main` 브랜치 보호              | CI 통과 필수 + 강제 push 금지 / 없음           | 켬(1인 작업이라 리뷰 필수는 끔)                                                                                  |
-| 저장소 이름 오타 `Extention`    | `Safari-Extension-HDR`로 변경 / 유지           | 유지 또는 변경 — 변경 시 GitHub가 옛 주소를 리디렉션하지만 README·install.md·릴리스 노트·로컬 remote를 바꿔야 함 |
-| 안정판 Xcode 형식 재생성(W3(d)) | 지금 / 보류                                    | 보류(안정판 Xcode가 나오면 별도 회차). 대신 X3에서 요구 Xcode를 문서·스크립트에 명시                             |
+- 라이선스: **넣지 않음**(모든 권리 보유 유지). X2의 LICENSE·README 라이선스 줄·`package.json` license 필드는 하지 않는다.
+- 병합된 `claude/*` 브랜치 21개: **삭제**.
+- `main` 브랜치 보호: **켬**(필수 체크 `ubuntu`·`macos`, 강제 push·삭제 금지, 관리자 우회 허용, 리뷰 필수 없음).
+- 저장소 이름: **`Safari_Extention-HDR` → `Safari-Extension-HDR`로 변경**. README·install.md·릴리스 노트의 주소, `scripts/install.sh` 안내 문구(있다면), `git clone` 뒤 폴더명(`cd Safari-Extension-HDR`), 로컬 `git remote set-url`을 함께 바꾼다. 로컬 작업 폴더 이름(`~/Safari_Extention-HDR`)은 바꾸지 않는다(Claude 메모리·세션 경로가 이 경로에 묶여 있음).
+- 안정판 Xcode 재생성: 보류.
+- 순서: PR #21 병합 → 계획 push → (Sonnet) X5 GitHub 작업 중 **이름 변경과 브랜치 삭제를 먼저**, 보호 규칙은 X 회차 PR 병합 **후**(X4 CI 스텝이 확정된 뒤) 설정.
 
 ### X1. 문서 최신화 (Sonnet, 코드 영향 없음)
 
@@ -41,9 +40,9 @@
 
 ### X2. 공개 저장소 기본 파일
 
-- `LICENSE`: X0에서 고른 라이선스 원문, 저작권자는 GitHub 사용자명(`TmTmTmTmTmT`)과 연도 2026. 실명·이메일 넣지 않는다. README 끝에 "라이선스: <이름>" 한 줄. `package.json`에 `"license"` 필드, `"private": true` 유지 확인.
+- `LICENSE`: 넣지 않음(X0). `package.json`의 `"private": true` 유지 확인.
 - `.github/ISSUE_TEMPLATE/bug_report.md`(한국어): 환경(macOS·Safari·디스플레이), 설치 방법(install.sh/Xcode), popup 상태 줄 문구, 진단 JSON 첨부 안내("복사" 버튼, URL·제목은 포함되지 않음), 재현 절차. `config.yml`로 빈 이슈 허용.
-- `.gitattributes`: 새로 추가하는 `.github/ISSUE_TEMPLATE`은 이미 `.github export-ignore`에 포함됨. `LICENSE`는 압축본에 **포함**(export-ignore 하지 않음).
+- `.gitattributes`: 새로 추가하는 `.github/ISSUE_TEMPLATE`은 이미 `.github export-ignore`에 포함됨.
 - `package.json` `version` "0.0.0"은 개발 도구용이라 유지하되 `description`에 "개발 도구(확장 버전은 extension/manifest.json)" 명시(이미 그렇다면 생략).
 
 ### X3. 설치 스크립트 보완 (`scripts/install.sh`, `scripts/lib/install-lib.sh`)
@@ -75,13 +74,13 @@
 
 ### 재현/검증
 
-- (1) 로컬(Sonnet → sim-runner): lint, `npm test`(install-lib 새 테스트: 비대화형 정리 거부, Xcode defaults 파싱), `test:dom`, pytest, `scripts/test-swift.sh`, `bash -n`, `install.sh --dry-run`(대화형/비대화형 `</dev/null` 두 경우: 비대화형에서 mv 줄이 출력되지 않아야 함), `git archive HEAD | tar -t`에 LICENSE 포함·개발 파일 제외.
+- (1) 로컬(Sonnet → sim-runner): lint, `npm test`(install-lib 새 테스트: 비대화형 정리 거부, Xcode defaults 파싱), `test:dom`, pytest, `scripts/test-swift.sh`, `bash -n`, `install.sh --dry-run`(대화형/비대화형 `</dev/null` 두 경우: 비대화형에서 mv 줄이 출력되지 않아야 함), `git archive HEAD | tar -t`에 개발 파일 제외 유지, README·install.md 주소가 새 이름.
 - (2) CI: PR에서 새 스텝 모두 통과.
 - (3) 사용자: X3(c) 깨끗한 계정 시험, X5 설정 결과 확인(브랜치 목록·보호 규칙 화면).
 
 ### 분할
 
-- 사용자 X0 결정 → impl-worker 2개 병렬: X-A `scripts/*`·`tests/unit/install-lib.test.js`·`.github/workflows/ci.yml`(X3·X4), X-B 문서·`LICENSE`·`.github/ISSUE_TEMPLATE`·`package.json`(X1·X2). 본 세션: STATUS, 검증, PR, X5(`gh` 실행은 사용자 확인 후).
+- 사용자 X0 결정 → impl-worker 2개 병렬: X-A `scripts/*`·`tests/unit/install-lib.test.js`·`.github/workflows/ci.yml`(X3·X4), X-B 문서·`.github/ISSUE_TEMPLATE`·`package.json`·저장소 주소 갱신(X0·X1·X2). 본 세션: STATUS, 검증, PR, X5(`gh` 실행은 사용자 확인 후).
 
 ---
 
