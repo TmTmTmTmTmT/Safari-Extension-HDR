@@ -109,6 +109,12 @@
       #status.status-error #status-text {
         color: var(--err);
       }
+      #status.status-other {
+        border-left-color: var(--err);
+      }
+      #status.status-other #status-text {
+        color: var(--err);
+      }
       #status.status-diag {
         border-left-color: var(--diag);
       }
@@ -157,7 +163,7 @@
   <body>
     <header>
       <h1>SDR HDR</h1>
-      <span class="ver" id="version">v1.3.6</span>
+      <span class="ver" id="version">v1.3.7</span>
       <label class="switch"
         ><span id="enabled-state">켜짐</span>
         <input type="checkbox" id="enabled" switch checked aria-label="HDR 변환" />

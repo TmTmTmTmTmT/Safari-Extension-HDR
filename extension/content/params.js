@@ -314,13 +314,24 @@
   // 메시지 타입 (PLAN D-M8 M8-1, GUIDELINES 2.1-5). popup -> content 요청, content -> background 배지 알림.
   const MSG = { getState: 'sdrhdr:getState', getDiag: 'sdrhdr:getDiag', state: 'sdrhdr:state' };
 
+  // 페이지 단일 소유권 (FIX_GUIDE AB1). 격리 세계끼리 공유되는 DOM 속성으로 한 인스턴스만 동작시킨다.
+  // 값은 로드마다 만드는 무작위 토큰이며 확장 id·버전 같은 식별 정보를 넣지 않는다.
+  const OWNER_ATTR = 'data-sdrhdr-owner';
+  const OWNER_CONFIRM_MS = 50; // 쓴 뒤 다시 읽기까지의 지연(동시 쓰기 경합 대비, 마지막에 쓴 쪽이 이김)
+
+  // 순수: 현재 속성값과 내 토큰 -> 'acquire'(비어 있음, 제거 후 재획득 포함) | 'yield'(남의 토큰) | 'keep'(내 토큰).
+  function ownerAction(current, token) {
+    if (typeof current !== 'string' || current === '') return 'acquire';
+    return typeof token === 'string' && token !== '' && current === token ? 'keep' : 'yield';
+  }
+
   const BADGE_GRAY = '#8e8e93';
   const BADGE_ORANGE = '#ff9500';
   const BADGE_RED = '#ff3b30';
   const OFF = { text: '' };
 
   // 순수: 현재 탭 상태 -> 표시용 {level, text, hint, badge:{text,color}} (PLAN D-M8 M8-1).
-  // 입력: {enabled, mode, state, skip, undecided, errorName, drmNow, bypass}. URL·제목은 받지 않는다 (GUIDELINES 2.6-1).
+  // 입력: {enabled, mode, state, skip, undecided, errorName, drmNow, bypass, other}. URL·제목은 받지 않는다 (GUIDELINES 2.6-1).
   function statusOf(input) {
     const i = input && typeof input === 'object' ? input : {};
     const out = (level, text, hint, badge) => ({
@@ -331,6 +342,13 @@
     });
     if (i.enabled === false || (i.state === 'skipped' && i.skip === 'disabled'))
       return out('off', '꺼짐', 'Option+Shift+H 또는 위 스위치로 켜기');
+    if (i.other === true)
+      return out(
+        'other',
+        '다른 SDR HDR 사본이 동작 중',
+        'Safari 설정 › 확장에 SDR HDR가 여러 개입니다. SDR HDR 앱을 열어 이전 사본을 정리한 뒤 Safari를 재시작하세요',
+        { text: '!', color: BADGE_ORANGE },
+      );
     if (typeof i.mode === 'string' && i.mode !== 'itm')
       return out('diag', '진단 모드: HDR 변환 안 함', '진단 영역에서 정상 모드로', {
         text: 'D',
@@ -458,6 +476,9 @@
     effectivePeak,
     peakAdvice,
     MSG,
+    OWNER_ATTR,
+    OWNER_CONFIRM_MS,
+    ownerAction,
     statusOf,
     setEnabled,
     setWithRetry,

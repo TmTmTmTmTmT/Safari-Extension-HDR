@@ -249,3 +249,10 @@
 - 미검증(사용자 Mac): `standard` toneMapping이 실제로 EDR을 끄는지·Z2 판정, install.sh 실제 실행 시 등록 해제·삭제, shellcheck(이 Mac에 없음, CI에서 확인)
 - 계획 이탈·해석(Opus 판단 요청): ① GUIDELINES 2.9-2 "rm으로 앱 삭제 금지"와 AA2 `rm -rf .local/build/Build/Products`(빌드 산출물)의 충돌 여부 ② AB 버전이 FIX_GUIDE에 1.3.6으로 적혀 Z2와 충돌 → AB는 1.3.7로 미룸(Z2가 1.3.6 선점) ③ 결과 스키마 enum 추가(MODES 순서와 일치)는 Z2 (b) 해석으로 직접 수정
 - 남음: AB(사본 중복 동작 방어, Z2와 파일 겹쳐 별도), M10(부분 대비, Z 체감 회신 후). 사용자 임시 조치: 임시 빌드 폴더·scratchpad 사본 등록 해제 후 Safari ⌘Q
+
+## AB 회차 (1.3.7, 2026-10-07) — FIX_GUIDE AB
+
+- 구현: 페이지 단일 소유권. `document.documentElement`의 `data-sdrhdr-owner`(무작위 토큰) 확인·획득(50ms 뒤 재확인), 소유자가 아니면 attach·키 리스너·상태 알림 없이 `getState`가 `other`. 속성이 사라지면 MutationObserver로 재시도, 소유자는 끌 때·`pagehide`에 제거, `pageshow`에서 재획득. `params.ownerAction`(순수)·`statusOf` other 레벨, popup 안내 문구, 버전 1.3.7
+- → verify: lint 통과, `npm test` 386/386, `test:dom` 28/28(`ab-owner.spec.js` 신규), pytest sim 164/164 / (1) 로컬 Mac
+- 계획 밖 해석(Opus 확인 요청): ① 꺼진 인스턴스는 표지를 쓰지 않음, 남의 표지가 있으면 popup은 "꺼짐" ② `pageshow` 재획득 추가(bfcache) ③ 양보한 사본은 background에 알리지 않아 툴바 배지 '!'는 표시되지 않음 ④ 소유자가 죽었는데 문서가 살아 있으면(확장 재로드) 표지가 남아 새로고침 전까지 `other`로 보일 수 있음(설계 범위 밖, 체크리스트에 한계로 기재)
+- 미검증(사용자 Mac): 실제 Safari 격리 세계에서 사본 2개 동작, 배지·popup 표시
