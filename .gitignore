@@ -7,3 +7,4 @@ xcode/**/xcuserdata/
 xcode/**/build/
 *.xcuserstate
 .DS_Store
+.local/

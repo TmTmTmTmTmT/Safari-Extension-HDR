@@ -5,6 +5,206 @@
 > 이전 회차(T 포함)는 git 이력에 있다. T 회차 판정 보류 항목(TA 깜박임, T2 popup)은 체크리스트 "T 회차 확인" 절로 계속 받는다.
 > 브랜치: `claude/m8-plan`의 PR #14가 머지된 뒤 새 브랜치 `claude/u-fixes`(base는 PR #14가 머지된 브랜치). 버전 1.2.0 → 1.2.1.
 
+## W 회차 (2026-10-06, Opus) — 1.3.2: 부팅 시 숨김 실행 · 사본 정리·설치 안내 · 설치 자동화 · 지원 대상 macOS 26/Safari 26
+
+> 브랜치 `claude/w-fixes`(base `claude/amazing-hypatia-3rbspr`, 1.3.1). 버전 1.3.1 → 1.3.2. 아래 V·U 회차 절은 기록으로 남긴다.
+> 근거: 사용자 요청(2026-10-06), 서브에이전트 조사(Haiku: 코드 읽기, Sonnet: 저장소 사본에서 무서명 빌드·배포 타깃 스윕·Swift API 타입체크·서명 상태 확인. 저장소는 건드리지 않음, 사본은 scratchpad).
+> 작업 트리에 `project.xcproj`의 `DEVELOPMENT_TEAM` 로컬 변경이 있다. 커밋하지 않는다(CLAUDE.md).
+
+### 조사 결과 (사실)
+
+- 앱(`AppDelegate.swift`)에 로그인 항목·`SMAppService`·`LSUIElement`·활성화 정책 코드가 없다. `Main.storyboard`의 초기 컨트롤러(`initialViewController="B8D-0N-5wS"`, 창 `restorable="NO"`)가 실행마다 창을 띄운다. `applicationShouldTerminateAfterLastWindowClosed` = true.
+- 따라서 재부팅 후 앱이 뜨는 경로는 macOS "다시 로그인할 때 윈도우 다시 열기"(종료 시 실행 중이던 앱 재실행) 또는 사용자가 직접 등록한 로그인 항목이다 [추정, 어느 쪽인지 미확인]. 어느 경로든 창이 뜬다.
+- 배포 타깃(Sonnet 확인됨): 프로젝트 기본값 `MACOSX_DEPLOYMENT_TARGET = 27.2`(project.xcproj 236행)를 **앱 타깃이 그대로 상속**, 확장 타깃만 12.0(166행). 즉 지금 빌드한 앱은 macOS 27.2 미만에서 실행되지 않는다(minos 27.2).
+- 설치된 툴체인(Xcode 27.2 베타)이 받는 최저 타깃은 **12.0**. 10.14·10.15·11.0은 `error: ... the range of supported deployment target versions is 12.0 to 27.2.x.`로 실패. 12.0·13.0·14.0·15.0·26.0은 두 타깃 모두 무서명 빌드 성공, 가용성 오류 없음(기존 `#available(macOS 13)` 가드로 충분).
+- 저장소의 Xcode 프로젝트는 `project.xcproj`(Xcode 27 베타 형식)뿐이고 `project.pbxproj`가 없다. 안정판 Xcode가 이 형식을 여는지 [미확인]. GitHub에서 받은 사용자의 빌드 환경을 가장 크게 제한하는 요소다.
+- 기능 최저선은 Safari 쪽이 결정한다: WebGPU(`navigator.gpu`, `importExternalTexture`, `getContext('webgpu')`)는 Safari 26부터 기본 활성 [추정, 높음], `toneMapping: {mode:'extended'}` 지원 시작 버전 [미확인, 낮음], `VideoFrame` Safari 16.4+ [추정], MV3 `service_worker` background Safari 15.4~16.4+ [추정]. Safari 26은 macOS 14 Sonoma 이상에서 설치 가능 [추정]. 앱 배포 타깃을 내려도 Safari가 낮으면 HDR 변환은 동작하지 않는다.
+- WebGPU가 없으면 `renderer.init()`이 `NoWebGPU`를 던지고 → `skipped(noGpu)` → popup "렌더 오류(NoWebGPU)" + "껐다 켜거나 새로고침" 안내(params.js 366행). 페이지는 깨지지 않지만 안내 문구가 원인(Safari 버전)과 맞지 않는다.
+- 서명(Sonnet 확인됨): ad-hoc(`CODE_SIGN_IDENTITY="-"`) 빌드는 `TeamIdentifier=not set`, `spctl` rejected. 무료 개인 팀 서명도 Safari 재시작마다 "서명되지 않은 확장 허용"을 다시 켜야 함(install.md 3-3, 2026-10-02 사용자 확인).
+
+### W1. 재부팅 후 최초 실행 시 창 없이 백그라운드로
+
+**원인**: 실행 방식과 무관하게 storyboard 초기 창이 자동 표시된다. 사용자 실행과 시스템(로그인) 실행을 구분하는 코드가 없다.
+
+**수정 방향**
+
+- (a) **실행 종류 판정**(`AppDelegate.applicationWillFinishLaunching`): 아래 중 하나면 "시스템 실행"으로 본다.
+  1. 현재 Apple Event가 `kAEOpenApplication`이고 `keyAEPropData` 값이 `keyAELaunchedAsLogInItem` (로그인 항목 실행).
+  2. `applicationDidFinishLaunching` 알림 `userInfo[NSApplication.launchIsDefaultUserInfoKey] == false`(저장 상태 복원 재실행 포함)이고 디버거 미연결(`sysctl` `P_TRACED` 검사). Xcode Run은 디버거가 붙으므로 창이 뜬다(install.md 3-2 "Run하면 창이 뜬다" 유지).
+  - 판정 결과는 `os_log`(subsystem = 앱 번들 ID, category `launch`)로 한 줄 남긴다: 각 신호값과 최종 판정. 사용자가 `log show`로 확인할 수 있게 한다. 다른 정보(경로·사용자명)는 남기지 않는다.
+  - 시점: 신호 1은 `willFinishLaunching`에서 읽을 수 있고, 신호 2(`launchIsDefault`)는 `didFinishLaunching` 알림에서만 온다. 따라서 신호 1이 참이면 `willFinishLaunching`에서 바로 숨김 처리, 신호 2로만 판정되면 `didFinishLaunching`에서 숨김 처리(Dock 아이콘이 잠깐 보일 수 있음 [추정], 허용). 창은 어느 경우든 `didFinishLaunching` 판정 뒤에만 만든다.
+- (b) **시스템 실행이면**: `NSApp.setActivationPolicy(.accessory)`(Dock 아이콘·메뉴 막대·포커스 빼앗기 없음), 창을 만들지 않는다. 프로세스는 백그라운드에 남는다(사용자 요청). CPU·타이머·네트워크 작업은 하지 않는다.
+- (c) **창 생성 방식 변경**: storyboard에서 `initialViewController`를 제거하고 창 컨트롤러(`B8D-0N-5wS`)에 `storyboardIdentifier="MainWindow"`를 준다. 메뉴(앱 메뉴)는 storyboard 그대로 둔다(Info.plist `NSMainStoryboardFile` 유지). 사용자 실행이면 `didFinishLaunching`에서 `instantiateController(withIdentifier: "MainWindow")`로 띄우고 `NSApp.activate`. storyboard는 XML 수정이며 pbxproj 수기 편집 금지(GUIDELINES 7-5)와 무관하다. Xcode Interface Builder로 해도 된다.
+- (d) **나중에 사용자가 앱을 열 때**(Finder·Launchpad·Dock): `applicationShouldHandleReopen`에서 창이 없으면 활성화 정책을 `.regular`로 바꾸고 (c)와 같은 방식으로 창을 띄운 뒤 활성화. 창이 이미 있으면 앞으로 가져온다. 창 컨트롤러는 1개만 유지(중복 생성 금지).
+- (e) `applicationShouldTerminateAfterLastWindowClosed`는 true 유지. 시스템 실행에서는 창이 열린 적이 없어 종료되지 않고, 사용자가 연 창을 닫으면 지금처럼 종료된다.
+- (f) **로그인 항목 등록·해제 기능은 이번에 추가하지 않는다**(요구는 "켜질 때 숨김"이지 "자동 실행 추가"가 아님). `NSApp.disableRelaunchOnLogin()`도 부르지 않는다(재실행 자체를 막으면 요구와 반대).
+- (g) 시스템 실행 판정이 틀렸을 때의 안전장치: 판정이 애매하면(Apple Event 없음 + launchIsDefault 키 없음) **창을 띄운다**(사용자 실행으로 본다).
+
+**영향 범위**: `xcode/SDRHDR/SDRHDR/AppDelegate.swift`, `Base.lproj/Main.storyboard`(초기 컨트롤러 속성·식별자 2곳). `ViewController.swift`·확장(`extension/`)·project.xcproj 불변. `ViewController`의 "설정 열기 후 앱 종료" 동작 불변.
+
+**검증**
+
+- (1) 로컬(Sonnet): `xcodebuild` 무서명 빌드 통과(배포 타깃 26.0 적용 후). `open -a`로 실행 시 창 표시, `log show --predicate 'subsystem == "io.github.tmtmtmtmtmt.SDRHDR"' --last 1m`에 판정 줄 확인. 디버거 판정 함수와 판정 규칙(신호 3개 → 결과)을 순수 함수로 분리해 Swift 단위 테스트가 없으면 최소한 `swiftc -typecheck`로 확인. 로그인 실행·재부팅은 Claude가 검증하지 않는다.
+- (2) 사용자 Mac(체크리스트 "W 회차 확인" 절 신설):
+  1. 앱 창이 열린 채로 재부팅 → 로그인 후 SDR HDR 창이 뜨지 않고 Dock에도 없는지, 활동 모니터에 SDRHDR 프로세스가 있는지.
+  2. 그 상태에서 Finder/Launchpad로 SDR HDR 실행 → 창이 1개 뜨고 앞으로 오는지. 창 닫으면 앱 종료되는지.
+  3. 평소처럼 Finder에서 실행 → 창이 뜨는지. Xcode Run → 창이 뜨는지.
+  4. 1번 직후 `log show --predicate 'subsystem == "io.github.tmtmtmtmtmt.SDRHDR"' --last 10m` 출력 회신(판정 신호값). 시스템 설정 › 일반 › 로그인 항목에 SDR HDR가 있는지도 함께 회신.
+  - 1번에서 창이 뜨면 판정 신호가 이 경로에서 오지 않는 것이다. 로그를 받아 Opus가 규칙을 다시 정한다(Sonnet 임의 변경 금지).
+
+### W2. 미서명 확장 허용 유지 — W4로 이관 (2026-10-06)
+
+- 자동 우회는 하지 않는다. 대신 "팀 서명 + 사본 1개" 상태를 만들도록 앱이 점검·안내한다(W4). 아래 조사가 근거.
+- 원칙은 유지: Safari 보안 설정(개발자 메뉴·`defaults write`·UI 스크립팅) 자동 조작 코드는 넣지 않는다.
+
+**W2 조사 (2026-10-06, Haiku 읽기 전용 점검, 기록용)**
+
+- 환경: macOS 27.2, Safari 27.2. 등록된 확장 사본 3개(pluginkit): `/Applications/SDRHDR.app`(ad-hoc, 팀 없음, spctl 거부, 예전 설치본), Xcode DerivedData Debug 빌드(**Apple Development 인증서, 팀 <개인 팀 ID>로 정상 서명**), Sonnet 실험용 scratchpad ad-hoc 빌드(실험 후 삭제함).
+- Safari가 실제로 리소스를 읽는 사본은 DerivedData의 **서명된 Debug 빌드**였다(lsof). Safari 확장 DB의 등록도 팀 <개인 팀 ID> 기준.
+- 해석 [추정]: Safari 27.2는 개인 팀(무료) Apple Development 인증서로 **두 타깃 모두** 서명된 확장을 "서명된 개발 확장"으로 보고 미서명 허용 없이 로드한다. 2026-10-02 "재시작마다 다시 켜야 함" 관측은 두 타깃 중 하나만 팀이 지정됐던 시기(install.md 3-3-1 "두 타깃 모두" 확인 전)였을 가능성. 여러 사본이 있을 때 Safari가 어느 사본을 고르는지 규칙은 [미확인].
+- (W4에서 반영) install.md 3-3을 "두 타깃에 팀을 지정하면 미서명 허용이 필요 없을 수 있음 [확인 필요], 확장이 안 보일 때만 켠다"로 바꾸는 것, 사용자 확인 절차(옵션 끔 + `/Applications` 예전 사본 제거 후 Safari 재시작해도 확장이 켜지는지). 무료 팀 인증서 유효기간(Apple Development 1년)과 7일 만료 문구의 관계도 [미확인].
+
+### W4. 중복 사본 정리 + 최초 실행 안내(스플래시) (2026-10-06 사용자 요청)
+
+**요구**: 사본이 여러 개면 최신 것만 쓰고 이전 것은 지운다. 최초 실행 시 스플래시로 "미서명 허용을 매번 켜지 않아도 되는 상태"(팀 서명 + 사본 1개 + 확장 켜짐)로 유도한다.
+
+**사실(Sonnet 샌드박스 프로브, 확인됨)** — 실제 앱과 같은 App Sandbox + user-selected read-only, macOS 27.2:
+
+| 항목                                                           | /Applications 사본 | 홈 아래 사본(DerivedData) |
+| -------------------------------------------------------------- | ------------------ | ------------------------- |
+| 목록: `NSWorkspace.urlsForApplications(withBundleIdentifier:)` | 나옴               | 나옴                      |
+| Info.plist·appex `manifest.json` 버전                          | 읽힘               | **읽기 거부**(Code=257)   |
+| `Contents/MacOS/SDRHDR` mtime(`attributesOfItem`)              | 읽힘               | 읽힘                      |
+| 서명 팀(`SecStaticCode`)                                       | 읽힘               | 실패(-67028)              |
+| 쓰기·삭제                                                      | 불가               | 불가                      |
+
+- Spotlight(`NSMetadataQuery`)는 홈 사본을 숨기고, `resourceValues` 수정일은 두 사본 모두 같은 옛 값이라 **쓰지 않는다**.
+- Safari가 여러 사본 중 무엇을 고르는지 정할 API는 없다. "최신을 불러오게" 하는 유일한 방법은 **이전 사본을 없애 1개만 남기는 것**이다.
+
+**수정 방향 (앱: `AppDelegate.swift`, `ViewController.swift`, 새 `SetupCheck.swift`, `Resources/Base.lproj/Main.html`·`Script.js`·`Style.css`)**
+
+- (a) **점검 모델 `SetupCheck`**(순수 판정 함수 + 수집 함수 분리):
+  1. 자기 서명: `SecCodeCopySelf` + 서명 정보, 그리고 자기 번들 안 appex(`builtInPlugInsURL`)의 `SecStaticCode`. 둘 다 팀 ID가 있고 ad-hoc 아님 → `signed`. 하나라도 ad-hoc/팀 없음 → `unsigned`.
+  2. 사본 목록: `urlsForApplications`에서 자기 경로(`Bundle.main.bundleURL`, 표준화 후 비교) 제외. 존재하지 않는 경로(유령 등록)는 제외.
+  3. 사본별 정보: 확장 버전(appex `manifest.json` `version`, 못 읽으면 null), 빌드 시각(`Contents/MacOS/SDRHDR` mtime), 서명(읽히면 signed/adhoc, 아니면 unknown).
+  4. 최신 판정: 두 사본 모두 버전이 있으면 버전(점 구분 숫자 비교) → 같으면 mtime. 하나라도 버전 null이면 mtime만. mtime도 없으면 판정 불가(삭제 제안 안 함). 자기 자신 포함 전체에서 최신 1개 선택.
+  5. 확장 켜짐: 기존 `SFSafariExtensionManager.getStateOfSafariExtension`.
+  6. youtube.com 접근 허용: 앱에서 알 수 없음 → 수동 단계로 표시.
+- (b) **이전 사본 정리**(삭제는 휴지통 이동만, 영구 삭제 금지, 항상 사용자 확인):
+  - 자기가 최신이면: 이전 사본마다 경로·버전·빌드 시각을 보여 주고 "휴지통으로 이동" 버튼. 누르면 `NSOpenPanel`(디렉터리 = 그 사본의 상위 폴더, 메시지 "휴지통으로 옮길 이전 SDR HDR 사본을 선택하세요", 앱 번들 선택 허용, 다중 선택 금지)로 사용자가 직접 선택·확인 → 선택 경로가 제안한 사본과 같을 때만 `FileManager.trashItem`. 다르면 아무것도 하지 않고 안내.
+  - 이를 위해 앱 타깃 App Sandbox의 User Selected File을 **Read/Write**로 바꿔야 한다(현재 `ENABLE_USER_SELECTED_FILES = readonly`). project.xcproj 수기 편집 금지 → **사용자가 Xcode Signing & Capabilities에서 변경**(W3(a) 배포 타깃 변경과 같은 커밋). 확장 타깃은 바꾸지 않는다.
+  - `trashItem` 실패 또는 권한 미변경 시 대체: "Finder에서 보기"(`NSWorkspace.activateFileViewerSelecting`) + "Finder에서 휴지통으로 옮기세요" 안내. 이 버튼은 항상 같이 제공한다.
+  - 자기가 최신이 아니면: 삭제를 제안하지 않고 "최신 사본 열기"(`NSWorkspace.openApplication(at:)`) → 연 뒤 자기 종료. 최신 사본이 다시 점검해 이 사본 정리를 제안한다.
+  - 판정 불가 사본은 "알 수 없는 사본"으로 목록만 보이고 Finder 보기만 제공.
+  - 정리 후 "Safari를 완전히 종료(⌘Q) 후 다시 열기" 안내. 등록 해제(`pluginkit -r`, `lsregister -u`)는 하지 않는다(샌드박스 불가 + 시스템 등록 조작).
+- (c) **스플래시(안내 화면)**: 기존 앱 창의 `Main.html`을 한국어 안내 화면으로 바꾼다(별도 창 아님). 순서와 상태(완료 ✓ / 조치 필요 / 수동 확인):
+  1. 서명: `signed`면 ✓ "개인 팀 서명 확인 — 개발자 메뉴의 '서명되지 않은 확장 허용'은 꺼 두어도 됩니다(macOS 27.2 · Safari 27.2에서 확인)". `unsigned`면 "Xcode에서 SDRHDR와 SDRHDR Extension **두 타깃 모두** Team을 지정하고 다시 Run하세요. 그전까지는 Safari 재시작마다 '서명되지 않은 확장 허용'이 필요합니다."
+  2. 사본: 1개면 ✓, 여러 개면 (b) UI.
+  3. 확장 켜짐: 켜짐 ✓ / 꺼짐 → "Safari 확장 설정 열기"(기존 `showPreferencesForExtension`). **설정을 연 뒤 앱을 종료하지 않는다**(현행 terminate 제거). 앱이 다시 활성화되면(`didBecomeActiveNotification`) 전체 재점검·화면 갱신.
+  4. www.youtube.com 접근 허용(수동): install.md 3-5 요약 한 줄 + "확인했어요" 체크.
+  5. 완료 버튼: "시작하기"(창 닫기 → 앱 종료, 현행 규칙).
+- (d) **언제 보이나**: 사용자 실행(W1 판정)에서만. ① 처음 실행(UserDefaults `setupDoneVersion` 없음) ② 확장 버전이 바뀜(`setupDoneVersion` ≠ 현재 manifest 버전) ③ 자동 점검 1~3 중 하나라도 조치 필요. 그 외 사용자 실행에서는 같은 화면을 ✓ 요약 상태로 보인다(별도 화면 없음). 완료 버튼을 누르고 1~3이 모두 ✓일 때만 `setupDoneVersion` 기록. 시스템 실행(W1)에서는 점검도 화면도 하지 않는다.
+- (e) **브리지**: Swift → JS 상태 객체 하나(`render(state)`: signed, copies[{id, path, version, builtAt, signing, newest}], selfIsNewest, extEnabled, firstRun). JS → Swift 메시지 문자열 종류 고정: `open-preferences`, `reveal:<id>`, `trash:<id>`, `open-newest`, `recheck`, `done`. id는 Swift가 만든 인덱스, JS가 경로를 보내지 않는다. 경로는 화면 표시만, `os_log`에는 경로를 남기지 않는다(개수·판정만).
+- (f) 문구·톤은 popup과 맞춘 한국어. 영문 converter 기본 문구 제거. CSP(`default-src 'self'`) 유지, 외부 리소스 금지.
+
+**영향 범위**: 앱 타깃 Swift 3파일 + Resources 3파일, 앱 타깃 sandbox 설정 1곳(사용자 Xcode). 확장(`extension/`)·appex Swift·진단 스키마 불변. install.md 3장(설치 순서를 "Run → 안내 화면 따르기"로 단순화, 3-3 미서명 허용은 "안내 화면 1번이 조치 필요일 때만"), 5장 문구.
+
+**재현/검증**
+
+- (1) 로컬(Sonnet): 판정 순수 함수(버전 비교, 버전 null 시 mtime, 판정 불가, 자기 최신/아님)는 Swift 파일 단독 `swiftc` 테스트 실행 파일 또는 XCTest 없이 `swiftc -typecheck` + 작은 실행 드라이버로 표 기반 확인(sim-runner). 무서명 빌드 통과. `Main.html`/`Script.js`는 Playwright WebKit DOM 테스트로 상태 객체별 렌더(서명 미확인, 사본 2개·자기 최신/아님, 확장 꺼짐, 전부 ✓)와 메시지 문자열 확인(`webkit.messageHandlers` 목업).
+- (2) Claude는 실제 휴지통 이동·Safari 로드를 검증하지 않는다. 사용자 Mac 체크리스트 "W 회차 확인"에 추가:
+  1. 지금 상태(사본 2개: `/Applications` ad-hoc 1.0.1, DerivedData 1.3.x)에서 Xcode Run → 안내 화면에 사본 2개, 최신 = DerivedData, `/Applications` 사본 "휴지통으로 이동" 제안.
+  2. 휴지통 이동 → 패널에서 선택 확인 → 휴지통에 들어갔는지. (실패 시 Finder 보기 경로가 동작하는지)
+  3. Safari ⌘Q 후 재실행, 개발자 메뉴 "서명되지 않은 확장 허용" **끈 채로** 확장이 켜져 있고 YouTube에서 popup 버전이 1.3.2인지.
+  4. 앱 재실행 → 모든 항목 ✓, 처음 실행 때와 달리 바로 요약.
+  5. Safari 확장 설정 열기 버튼 → 앱이 종료되지 않고, 확장을 끄고 돌아오면 3번 항목이 "조치 필요"로 갱신.
+
+### W3. 지원 대상: Safari 26 / macOS 26 (2026-10-06 사용자 확정)
+
+**원인**: 앱 타깃이 프로젝트 기본값 27.2를 상속(converter가 생성 시 현재 SDK로 설정 [추정]). 확장 타깃만 12.0. 두 타깃이 서로 다르고 둘 다 목표와 맞지 않는다.
+
+**수정 방향**
+
+- (a) **배포 타깃 = macOS 26.0**으로 프로젝트 기본값·SDRHDR·SDRHDR Extension 3곳을 통일한다(Sonnet 실험에서 26.0 두 타깃 무서명 빌드 성공, 확인됨).
+  - 방법: project.xcproj 수기 편집 금지(GUIDELINES 7-5). **사용자가 Xcode에서** 프로젝트 › Build Settings › macOS Deployment Target을 3곳 모두 26.0으로 바꾸고 저장 → Sonnet이 diff에 배포 타깃 3곳만 바뀌었는지(`DEVELOPMENT_TEAM` 없음) 확인 후 커밋. `xcodebuild ... MACOSX_DEPLOYMENT_TARGET=26.0` 명령행 지정은 검증용으로만 쓴다.
+  - 기존 `#available(macOS 13, *)` 분기(ViewController)는 항상 참이 되지만 이번에 정리하지 않는다(범위 최소화).
+  - W1은 macOS 26 API 범위에서 자유롭지만 `SMAppService`는 범위 밖이라 쓰지 않는다.
+- (b) **지원 표기**: install.md 2장 요구 환경 표를 "macOS 26 이상, Safari 26 이상(실측은 macOS 27.2 / Safari 27.2), EDR 디스플레이"로 바꾼다. Safari 26.x에서의 동작(WebGPU `importExternalTexture`·`VideoFrame` 입력 경로, `toneMapping: extended`)은 [미확인]으로 표시한다.
+- (c) **WebGPU 미지원 안내**(낮은 우선순위, 작게): `params.js` 상태 문구에서 `noGpu`이고 `errorName === 'NoWebGPU'`이면 "이 Safari는 WebGPU를 지원하지 않음: 원본 표시", 안내 "Safari 26 이상 필요", 배지 회색 "–". 그 밖의 `noGpu`는 기존 "렌더 오류(…)" 유지. 진단 스키마 불변(schemaVersion 13).
+- (d) **빌드 환경**: `xcode/`가 Xcode 27 베타 형식(`project.xcproj`)이라 GitHub 사용자는 같은 형식을 여는 Xcode가 필요하다 [추정]. 안정판 Xcode 재생성은 사용자 지시가 있을 때만(CLAUDE.md). install.md 2장 Xcode 줄은 현행 유지.
+- (e) manifest에 `strict_min_version` 류 키는 추가하지 않는다(Safari 지원 [미확인], 로드 실패 위험).
+
+**영향 범위**: project.xcproj 배포 타깃 3곳(사용자 Xcode 조작), `params.js` noGpu 분기 문구, 상태 문구 단위 테스트, install.md 2장, manual-checklist. 렌더·곡선·수명주기·진단 스키마 불변.
+
+**검증**
+
+- (1) 로컬(Sonnet → sim-runner): 배포 타깃 변경 후 무서명 Release 빌드, `vtool -show-build`로 앱·appex minos 26.0 확인. `npm run lint`, `npm test`(NoWebGPU 문구·회색 배지, 기타 noGpu 기존 문구), `npm run test:dom`, `python3 -m pytest sim`(불변).
+- (2) 사용자 Mac: macOS 27.2에서 회귀 없음(HDR 변환·popup 상태 줄). Safari 26.x 실기는 장비가 있을 때만.
+
+### W5. GitHub에서 받은 사용자의 설치 자동화 (2026-10-06 사용자 요청)
+
+> 작성: Opus. 대상: Sonnet. W1·W3·W4 구현(미커밋, STATUS "W 회차")과 같은 브랜치 `claude/w-fixes`에서 이어서 한다.
+
+**요구**: 다른 사용자가 저장소를 받은 뒤 자동화할 수 있는 부분은 모두 자동화한다.
+
+**자동화 경계 (원칙)**
+
+| 단계                                                             | 처리                                                                                    |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 환경 점검(macOS·Safari·Xcode 버전, xcode-select, 최초 실행 구성) | 스크립트 자동                                                                           |
+| 서명 팀 찾기                                                     | 스크립트 자동(키체인의 Apple Development 인증서에서 팀 ID 추출). 인증서가 없으면 안내만 |
+| Apple ID를 Xcode에 로그인                                        | **수동**(자격 증명 입력은 자동화하지 않는다)                                            |
+| 빌드·서명·설치·이전 사본 정리·앱 실행                            | 스크립트 자동(정리는 확인 1회 후 휴지통 이동)                                           |
+| Safari 재시작                                                    | 스크립트가 묻고(y/N) 실행                                                               |
+| Safari 확장 켜기·웹사이트 접근 허용·미서명 허용                  | **수동**(Safari 보안 설정, 자동 조작 금지 — W2 원칙). 앱 점검 화면(W4)이 안내           |
+| 업데이트                                                         | 같은 스크립트 재실행(`git pull` 포함 옵션)                                              |
+
+**수정 방향**
+
+- (a) **`scripts/install.sh` 신설**(저장소 루트에서 실행, bash, `set -euo pipefail`). 한 번 실행으로 아래를 순서대로 한다. 각 단계는 한 줄로 진행 상황을 출력하고, 실패하면 원인과 사용자가 할 일을 한국어로 출력하고 종료(rc≠0).
+  1. **환경 점검**: `sw_vers -productVersion` ≥ 26.0, Safari(`/Applications/Safari.app` Info.plist `CFBundleShortVersionString`) ≥ 26.0, `xcode-select -p`가 Xcode 앱을 가리킴(CLT면 `sudo xcode-select -s …` 안내, 스크립트가 sudo 실행하지 않음), `xcodebuild -checkFirstLaunchStatus` 실패 시 `sudo xcodebuild -runFirstLaunch` 안내, `xcodebuild -list -project xcode/SDRHDR/SDRHDR.xcodeproj` 성공(실패 = 이 Xcode가 프로젝트 형식을 못 엶 → "Xcode 27 베타 이상 필요 [추정]" 안내).
+  2. **팀 ID**: 우선순위 ① 환경 변수 `TEAM_ID` ② 저장된 값 `.local/team-id`(gitignore) ③ `security find-identity -v -p codesigning`에서 "Apple Development" 인증서를 찾아 `security find-certificate -c <SHA1> -p | openssl x509 -noout -subject`의 `OU=`(팀 ID) 추출. 팀이 1개면 자동 선택, 여러 개면 번호 선택(팀 ID만 표시, 인증서 이름·이메일은 출력하지 않음), 0개면 "Xcode › 설정 › 계정에서 Apple ID를 추가하고 Xcode에서 한 번 아무 프로젝트나 서명(또는 `open xcode/SDRHDR/SDRHDR.xcodeproj` 후 두 타깃 Team 지정)한 뒤 다시 실행" 안내 후 종료. 선택한 팀 ID를 `.local/team-id`에 저장.
+  3. **빌드**: 임시 derivedData(`mktemp -d`)로 `xcodebuild -project xcode/SDRHDR/SDRHDR.xcodeproj -scheme SDRHDR -configuration Release -derivedDataPath <tmp> -allowProvisioningUpdates DEVELOPMENT_TEAM=<팀> CODE_SIGN_STYLE=Automatic MACOSX_DEPLOYMENT_TARGET=26.0 MARKETING_VERSION=<manifest version> CURRENT_PROJECT_VERSION=<git rev-list --count HEAD> build`. 로그는 `.local/build.log`에 저장, 화면에는 마지막 오류 줄만. **project.xcproj는 절대 수정하지 않는다**(명령행 설정으로만 전달 → `DEVELOPMENT_TEAM` 커밋 사고 원천 차단). 빌드 후 `codesign -dv`로 앱·appex 모두 팀 ID = 선택 팀, ad-hoc 아님을 확인(아니면 실패).
+  4. **이전 사본 정리**: 설치 전에 같은 번들 ID 사본을 찾는다 — `mdfind "kMDItemCFBundleIdentifier == 'io.github.tmtmtmtmtmt.SDRHDR'"` + `/Applications/SDRHDR.app`·`~/Applications/SDRHDR.app` 존재 확인 + `~/Library/Developer/Xcode/DerivedData/SDRHDR-*/Build/Products/*/SDRHDR.app`. 임시 빌드 경로는 제외. 목록(경로·확장 버전·빌드 시각)을 보이고 "모두 휴지통으로 옮길까요? (Y/n)" 1회 확인 → 각 사본을 `lsregister -u <경로>`(등록 해제, 실패 무시) 후 `~/.Trash/SDRHDR-<타임스탬프>-<n>.app`로 `mv`. 영구 삭제(`rm`) 금지. `-y` 옵션이면 확인 생략. 거절하면 정리 없이 계속(앱 점검 화면이 다시 안내).
+     - 앱이 실행 중이면 먼저 `osascript -e 'quit app id "io.github.tmtmtmtmtmt.SDRHDR"'`로 종료(실패 시 안내 후 중단).
+  5. **설치**: 빌드 결과 `SDRHDR.app`을 `/Applications`에 `ditto`로 복사(쓰기 불가면 `~/Applications`). 이후 임시 derivedData 삭제(스크립트가 만든 임시 폴더만, `trap`). 결과적으로 사본은 설치본 1개.
+  6. **등록·실행**: `lsregister -f <설치 경로>`(실패 무시) → `open <설치 경로>` → 앱 점검 화면(W4)이 뜬다. `pluginkit -m -i io.github.tmtmtmtmtmt.SDRHDR.Extension` 출력에 설치 경로 1개만 있는지 확인해 다르면 경고만.
+  7. **Safari 재시작**: Safari가 실행 중이면 "새 버전을 불러오려면 Safari를 재시작해야 합니다. 지금 할까요? (y/N)" → 예면 `osascript -e 'quit app "Safari"'` 후 `open -a Safari`. 기본 아니오(탭 손실 우려).
+  8. **마지막 안내**(남은 수동 단계만, 3줄 이내): Safari 설정 › 확장 프로그램에서 SDR HDR 켜기 / 웹사이트 접근에서 www.youtube.com 허용 / 자세한 점검은 열린 SDR HDR 창을 따르기.
+- (b) **옵션**: `--update`(시작 전에 `git pull --ff-only`, 실패 시 중단), `-y`(확인 생략, Safari 재시작은 여전히 하지 않음), `--no-open`(6·7 생략), `--dry-run`(명령을 출력만, 파일 이동·빌드·실행 없음), `--help`.
+- (c) **순수 함수 분리와 테스트**: 버전 비교, `openssl` subject에서 OU 추출, `security find-identity` 출력 파싱은 `scripts/lib/install-lib.sh`의 함수로 분리하고 `tests/unit/install-lib.test.js`(node `child_process`로 `bash -c 'source …; fn …'` 호출, 고정 픽스처 문자열)로 확인. 픽스처에 실제 인증서 이름·이메일을 넣지 않는다(가짜 값).
+- (d) **`.gitignore`**에 `.local/` 추가.
+- (e) **README.md 신설**(저장소 첫 화면, 짧게): 무엇인지 2줄, 요구 환경(macOS 26+, Safari 26+, Xcode, 무료 Apple ID), 빠른 설치 3줄(`git clone` → `cd` → `scripts/install.sh`), 업데이트 1줄(`scripts/install.sh --update`), 남은 수동 단계 3줄, 상세는 `docs/install.md`. W2 절의 "README 만들지 않음"은 이 항목으로 대체한다.
+- (f) **docs/install.md**: 3장을 "자동 설치(권장): `scripts/install.sh`" + "수동 설치(Xcode Run)" 두 절로 나누고, 4장 업데이트를 `scripts/install.sh --update`로 바꾼다. Xcode Run 경로는 DerivedData 사본이 생겨 점검 화면이 정리를 제안한다는 점을 한 줄로 쓴다.
+- (g) **스크립트가 하지 않는 것**: Apple ID 로그인·비밀번호 처리, `sudo`, Safari 설정·`defaults write`·UI 스크립팅, 개발자 메뉴 조작, 로그인 항목 등록, project.xcproj 수정, `rm`으로 앱 삭제, 네트워크 다운로드(`git pull` 제외).
+
+**영향 범위**: `scripts/install.sh`, `scripts/lib/install-lib.sh`, `tests/unit/install-lib.test.js`, `.gitignore`, `README.md`, `docs/install.md` 3·4장, manual-checklist "W 회차 확인"에 W5 항목. 앱·확장 코드 불변.
+
+**재현/검증**
+
+- (1) 로컬(Sonnet → sim-runner): `npm test`(install-lib 파싱·버전 비교), `bash -n`·`shellcheck`(설치돼 있으면) 통과, `scripts/install.sh --dry-run` 출력이 단계 1~8 순서·명령과 맞는지, 환경 점검 실패 분기(가짜 `TEAM_ID`·잘못된 Xcode 경로는 `--dry-run`에서 환경 변수로 주입)의 안내 문구. **실제 설치·사본 이동·Safari 재시작은 Claude가 실행하지 않는다**(사용자 Mac 상태 변경).
+- (2) 사용자 Mac(체크리스트에 추가):
+  1. 깨끗한 클론(다른 폴더에 `git clone`)에서 `scripts/install.sh` → 팀 자동 선택, 빌드 성공, 기존 `/Applications`·DerivedData 사본 휴지통 이동 제안·수행, `/Applications/SDRHDR.app` 1개만 남고 점검 화면이 사본 1개 ✓로 뜨는가.
+  2. Safari 재시작 질문에 예 → 재시작 후 미서명 허용 없이 확장이 켜져 있고 popup `v1.3.2`인가.
+  3. `scripts/install.sh --update` 재실행이 같은 결과로 끝나는가(팀 질문 없음).
+  4. `git status`에 `xcode/` 변경이 생기지 않는가.
+
+### 버전·분할·문서
+
+- `extension/manifest.json` 1.3.2, popup 헤더 버전 동기화. Xcode `MARKETING_VERSION`(현재 1.0)은 이번에 건드리지 않는다(사용자 Xcode 조작 범위를 배포 타깃으로 한정).
+- 순서: ① 사용자에게 Xcode 변경 2건 요청 — W3(a) 배포 타깃 26.0(3곳), W4(b) 앱 타깃 User Selected File Read/Write (이 단계 전 project.xcproj 커밋 금지, `DEVELOPMENT_TEAM` 제외 확인) ② 본 세션: W1+W4 앱 쪽은 같은 파일(`AppDelegate.swift`)을 건드리므로 **한 작업 단위**로 직접 또는 impl-worker 1개(W-A: `AppDelegate.swift`·`ViewController.swift`·`SetupCheck.swift`·`Main.storyboard`·`Resources/*`), 병렬로 impl-worker W-B: `params.js`+상태 문구 테스트(W3(c)) ③ 본 세션: manifest 버전, install.md(W3 요구 환경·W4 설치 순서), manual-checklist "W 회차 확인"(W1·W3·W4), GUIDELINES에 "앱 실행 종류 판정" 한 단락(Opus가 문구 확정 전이면 STATUS에 이슈로 기록), STATUS, 전체 검증 → PR.
+- W5는 W1·W3·W4 구현 뒤 본 세션 단독(파일이 겹치지 않으면 impl-worker 1개: `scripts/*`+테스트, 본 세션: README·install.md·checklist·STATUS).
+- 사용자 결정 대기: W3(d) 안정판 Xcode 재생성 여부(지시 없으면 현행). 배포 타깃은 Xcode에서 26.6으로 저장됨(STATUS 이슈 ③) — 3곳 26.0으로 재설정 요청. W5 스크립트는 명령행으로 26.0을 넘기므로 스크립트 설치본은 이 값과 무관.
+
+### 이번 범위 밖 (변경 금지)
+
+- 로그인 항목 등록 UI, `SMAppService`, 메뉴 막대 아이콘(상주 UI).
+- 사본의 영구 삭제, LaunchServices·pluginkit 등록 조작, 샌드박스 해제·임시 예외 entitlement.
+- Safari 설정·개발자 메뉴 자동 조작, 서명 우회.
+- 렌더 경로·곡선·DRM 감지·진단 스키마.
+
+---
+
 ## V 회차 (2026-10-04, Opus) — `storage.local.set` Disk I/O 오류
 
 > 브랜치 `claude/v-fixes`(base `claude/amazing-hypatia-3rbspr`, 1.3.0). 버전 1.3.0 → 1.3.1. 아래 U 회차 절은 기록으로 남긴다.

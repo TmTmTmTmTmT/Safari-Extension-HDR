@@ -7,7 +7,10 @@
 :root {
     color-scheme: light dark;
 
-    --spacing: 20px;
+    --spacing: 16px;
+    --ok: #1a8f3c;
+    --todo: #c4521a;
+    --manual: #8a8a8e;
 }
 
 html {
@@ -16,30 +19,117 @@ html {
 
 body {
     display: flex;
-    align-items: center;
-    justify-content: center;
     flex-direction: column;
-
     gap: var(--spacing);
-    margin: 0 calc(var(--spacing) * 2);
-    height: 100%;
+    margin: 0;
+    padding: var(--spacing) calc(var(--spacing) * 1.5);
+    box-sizing: border-box;
+    min-height: 100%;
 
     font: -apple-system-short-body;
+}
+
+header {
     text-align: center;
 }
 
-body:not(.state-on, .state-off) :is(.state-on, .state-off) {
-    display: none;
+h1 {
+    margin: 4px 0 0;
+    font: -apple-system-title2;
 }
 
-body.state-on :is(.state-off, .state-unknown) {
-    display: none;
+header p {
+    margin: 2px 0 0;
+    opacity: 0.7;
 }
 
-body.state-off :is(.state-on, .state-unknown) {
-    display: none;
+#notice {
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(128, 128, 128, 0.18);
+}
+
+#steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.step {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.step .mark {
+    flex: 0 0 22px;
+    height: 22px;
+    line-height: 22px;
+    border-radius: 50%;
+    text-align: center;
+    font-weight: bold;
+    color: #fff;
+}
+
+.step.ok .mark {
+    background: var(--ok);
+}
+
+.step.todo .mark {
+    background: var(--todo);
+}
+
+.step.manual .mark {
+    background: var(--manual);
+}
+
+.step .title {
+    font-weight: 600;
+}
+
+.detail {
+    opacity: 0.75;
+    margin-top: 2px;
+}
+
+.copy {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(128, 128, 128, 0.14);
+}
+
+.copy .path {
+    word-break: break-all;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85em;
+}
+
+.row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.check {
+    display: block;
+    margin-top: 6px;
+}
+
+footer {
+    margin-top: auto;
+    text-align: center;
 }
 
 button {
     font-size: 1em;
+}
+
+button.secondary {
+    opacity: 0.8;
 }

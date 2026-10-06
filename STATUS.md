@@ -198,3 +198,16 @@ M2 완료(PR #4 머지, `b29006c`, 2026-10-01). M3 계획 작성 완료(PLAN.md 
 1. (완료) 로컬 Mac 세션 준비
 2. (완료) M3-6 1~3단계
 3. 사용자: 개선된 `scripts/dom-skeleton.js`로 극장·미니플레이어·광고·전체화면 재수집(docs/manual-checklist.md M3 절) → 셀렉터 확정(Sonnet) → M3 체크리스트 7항목
+
+## W 회차 (1.3.2, 브랜치 claude/w-fixes, 2026-10-06) — FIX_GUIDE W 회차
+
+- 구현(W1·W3(c)·W4, 커밋 전): `AppDelegate.swift`(실행 종류 판정 `classifyLaunch`·사본 비교 순수 로직 PureLogic 구간, 시스템 실행 시 `.accessory`·창 없음, reopen 시 창 생성), `ViewController.swift`(점검·사본 목록·휴지통 이동(NSOpenPanel 확인 후 `trashItem`)·Finder 보기·최신 사본 열기·확장 설정 열기(앱 종료 안 함)·재점검), `Main.storyboard`(initialViewController 제거, `MainWindow` 식별자, 창 520×600), `Resources/Main.html·Script.js·Style.css`(한국어 점검 화면), `params.js`(NoWebGPU 안내), manifest·popup 1.3.2, install.md 2·3장, manual-checklist "W 회차 확인"
+- 계획 이탈(이슈, Opus 확인 필요): ① 새 Swift 파일 `SetupCheck.swift`는 만들지 않고 기존 `AppDelegate.swift`·`ViewController.swift`에 넣음(pbxproj 수기 편집 금지로 새 파일 등록 불가). ② JS→Swift 메시지에 `youtube:0|1` 추가(체크박스 저장, 계획의 메시지 목록에 없음). ③ 사용자가 Xcode에서 바꾼 배포 타깃이 **26.6**(프로젝트 기본값, 앱 타깃 상속)이고 확장 타깃은 **12.0 그대로**: 계획은 3곳 모두 26.0. 26.6이면 macOS 26.0~26.5에서 앱이 안 열린다. 사용자 재설정 필요.
+- 로컬 `project.xcproj` 변경은 미커밋: Xcode 저장으로 id 재생성 + `DEVELOPMENT_TEAM`·`CODE_SIGN_IDENTITY[sdk=macosx*]`(커밋 금지) + 앱 타깃 sandbox(network 항목 NO, resource access NO들, `ENABLE_USER_SELECTED_FILES=readwrite`) + 배포 타깃. 커밋 전 팀 관련 줄 제거와 배포 타깃 값 확정 필요
+- → verify: lint 통과, `npm test` 356/356, `test:dom` 24/24(w4-setup 6개 포함), `scripts/test-swift.sh` OK(`classifyLaunch`·`compareVersions`·`isNewer`·`newestIndex` 표 기반 25개), 무서명 Release 빌드 성공(앱 minos 26.6·appex 12.0), 미서명 빌드를 직접 실행해 `launch kind=user launchIsDefault=true`·`setup copies=2 selfIsNewest=true` 로그 확인 후 종료(LaunchServices에 등록하지 않음) / (1) 로컬 Mac
+- 미검증(사용자 Mac): 로그인·재부팅 시 숨김 실행(신호가 실제로 오는지), 샌드박스 앱에서 휴지통 이동·선택 창, 홈 아래 사본의 버전·서명 읽기 불가 시 표시, 개인 팀 서명 시 미서명 허용 없이 로드되는지, Safari 26.x 동작
+- 참고: zsh에서 `log`는 내장 명령이라 로그 조회는 `/usr/bin/log`
+
+- W5 구현(설치 자동화, 커밋 전): `scripts/install.sh`(환경 점검→팀 ID 자동 탐색→명령행 서명 빌드(project.xcproj 수정 안 함)→이전 사본 확인 후 휴지통→/Applications 설치→앱 실행→Safari 재시작 선택, 옵션 `--update -y --no-open --dry-run`), `scripts/lib/install-lib.sh`(순수 함수), `tests/unit/install-lib.test.js`, `README.md`, `docs/install.md` 3·4·5장, manual-checklist W5(12~16), `.gitignore`에 `.local/`
+- → verify: lint 통과, `npm test` 361/361, `bash -n`, `--dry-run -y`로 단계 1~8 출력·사본 2개(DerivedData·/Applications) 탐지·팀 자동 탐색 확인, macOS 15.6·Safari 18.2 주입 시 오류 문구 확인 / (1) 로컬 Mac. shellcheck 미설치로 미실행
+- 미검증(사용자 Mac): 실제 서명 빌드(`-allowProvisioningUpdates`)·`ditto` 설치·`lsregister`·Safari 재시작·팀 여러 개 선택 흐름. 사용자가 Xcode에서 배포 타깃 프로젝트 기본값을 26.0으로 바꿈(확장 타깃은 12.0 그대로, 스크립트 빌드는 명령행으로 둘 다 26.0). `project.xcproj` 로컬 변경은 여전히 미커밋(팀·서명 줄 제외 필요)

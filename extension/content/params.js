@@ -365,6 +365,15 @@
           });
         case 'noGpu': {
           const name = typeof i.errorName === 'string' && i.errorName !== '' ? i.errorName : '?';
+          // WebGPU 자체가 없는 Safari는 오류가 아니라 건너뜀으로 보인다 (FIX_GUIDE W3 (c)).
+          if (name === 'NoWebGPU') {
+            return out(
+              'skip',
+              '이 Safari는 WebGPU를 지원하지 않음: 원본 표시',
+              'Safari 26 이상 필요',
+              { text: '–', color: BADGE_GRAY },
+            );
+          }
           return out(
             'error',
             '렌더 오류(' + name + ')',
