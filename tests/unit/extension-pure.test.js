@@ -1075,6 +1075,11 @@ test('statusOf: 상태별 level·문구·배지 (M8-1)', () => {
   assert.strictEqual(g.text, '렌더 오류(OperationError)');
   assert.strictEqual(g.badge.color, '#ff3b30');
   assert.strictEqual(st({ state: 'skipped', skip: 'noGpu' }).text, '렌더 오류(?)');
+  const nw = st({ state: 'skipped', skip: 'noGpu', errorName: 'NoWebGPU' });
+  assert.strictEqual(nw.level, 'skip');
+  assert.strictEqual(nw.text, '이 Safari는 WebGPU를 지원하지 않음: 원본 표시');
+  assert.ok(nw.hint.includes('Safari 26'));
+  assert.strictEqual(nw.badge.text, '–');
   assert.strictEqual(st({ state: 'idle' }).text, '대상 영상을 찾는 중');
   assert.strictEqual(st({ state: 'skipped', skip: 'nope' }).level, 'wait');
   // 잘못된 입력에도 죽지 않는다. URL·제목 같은 필드는 결과에 나오지 않는다.

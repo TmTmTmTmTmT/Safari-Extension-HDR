@@ -1,0 +1,34 @@
+# GitHub "Download ZIP"·Release 소스 압축본(git archive)에서 개발 전용 파일을 뺀다. git clone 에는 영향이 없다.
+# 설치에 필요한 것: extension/ xcode/ scripts/install.sh scripts/lib/ scripts/make-xcode.sh README.md docs/install.md
+CLAUDE.md export-ignore
+.claude export-ignore
+PLAN.md export-ignore
+GUIDELINES.md export-ignore
+FIX_GUIDE.md export-ignore
+STATUS.md export-ignore
+tests export-ignore
+sim export-ignore
+probe export-ignore
+fixtures export-ignore
+results export-ignore
+eslint.config.js export-ignore
+playwright.config.js export-ignore
+package.json export-ignore
+package-lock.json export-ignore
+.prettierrc.json export-ignore
+.prettierignore export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+docs/archive export-ignore
+docs/local-session.md export-ignore
+docs/manual-checklist.md export-ignore
+docs/ux-review.md export-ignore
+docs/result-schema.json export-ignore
+docs/result-schema-m2.json export-ignore
+scripts/check-fixtures.sh export-ignore
+scripts/dom-skeleton.js export-ignore
+scripts/make-fixtures.sh export-ignore
+scripts/make-icons.py export-ignore
+scripts/parse-result.py export-ignore
+scripts/test-swift.sh export-ignore
+.github export-ignore
