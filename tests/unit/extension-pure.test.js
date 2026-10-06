@@ -78,7 +78,7 @@ test('canvasResolution: min(원본, 표시 x DPR) (probe와 같은 사례)', () 
 
 test('normalizeSettings: 잘못된 값은 기본값', () => {
   const { normalizeSettings, KEYS, MODES } = ns.params;
-  assert.deepStrictEqual(plain(MODES), ['itm', 'identity', 'stripes', 'baseline']);
+  assert.deepStrictEqual(plain(MODES), ['itm', 'sdr', 'identity', 'stripes', 'baseline']);
   const def = {
     enabled: true,
     mode: 'itm',
@@ -778,6 +778,7 @@ test('buildDiag v5: render.cadence와 baseline 모드, 스키마 선언 일치',
   for (const k of Object.keys(d.render.cadence)) assert.ok(k in cp, k);
   assert.deepStrictEqual(schema.properties.render.properties.mode.enum, [
     'itm',
+    'sdr',
     'identity',
     'stripes',
     'baseline',
@@ -1299,4 +1300,15 @@ test('setWithRetry: 실패하면 1초 뒤 1회 재시도, 결과는 true/false, 
     { 'sdrhdr.enabled': false },
   ]);
   assert.deepStrictEqual(plain(ns.params.LEGACY_KEYS), ['sdrhdr.diag', 'sdrhdr.diagRequest']);
+});
+
+test('Z2: sdr 모드는 normalizeSettings를 통과하고 statusOf는 진단 모드로 표시', () => {
+  const n = ns.params.normalizeSettings({
+    [ns.params.KEYS.mode]: 'sdr',
+    [ns.params.KEYS.strength]: 0.7,
+  });
+  assert.strictEqual(n.mode, 'sdr');
+  assert.strictEqual(n.strength, 0.7); // 저장된 강도는 그대로
+  const st = plain(ns.params.statusOf({ enabled: true, mode: 'sdr', state: 'active' }));
+  assert.strictEqual(st.level, 'diag');
 });

@@ -23,8 +23,12 @@
     hs: [0.5, 1.5],
   };
 
+  // ITM 입력 선형화 감마 (FIX_GUIDE Z1). Safari 기본 재생은 BT.709 영상을 순수 거듭제곱 약 1.961로 디코딩한다.
+  // 값의 출처는 이 한 곳이다: WGSL(itm.wgsl.js)은 이 값을 문자열로 조립하고, sim/tonecurve.py INPUT_GAMMA와 같아야 한다.
+  const INPUT_GAMMA = 1.961;
+
   // baseline은 진단용: 캔버스를 숨기고 rAF 루프만 돈다 (FIX_GUIDE S1, GUIDELINES 2.6-3).
-  const MODES = ['itm', 'identity', 'stripes', 'baseline'];
+  const MODES = ['itm', 'sdr', 'identity', 'stripes', 'baseline'];
   const KEYS = {
     enabled: 'sdrhdr.enabled',
     mode: 'sdrhdr.mode',
@@ -424,6 +428,7 @@
     DEFAULT_CUSTOM,
     PRESET_BALANCED,
     RANGES,
+    INPUT_GAMMA,
     MODES,
     KEYS,
     DEFAULTS,

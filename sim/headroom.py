@@ -4,7 +4,7 @@
 출력 휘도가 H 를 넘어 시스템에 잘리는 코드의 수, 입력 코드 범위, 비율을 낸다. 판정은 하지 않고 값만 출력한다.
 
 출력 휘도 정의 (sim/tonecurve.py 와 동일): SDR white = 1.0 기준 선형 상대 휘도.
-  코드 c -> v = c/255 (sRGB 인코딩) -> srgb_eotf(v) -> 밝기 게인 g 곱 -> Y -> curve_f(Y, P, k, n) = 출력 휘도.
+  코드 c -> v = c/255 (sRGB 인코딩) -> input_eotf(v) (v^1.961) -> 밝기 게인 g 곱 -> Y -> curve_f(Y, P, k, n) = 출력 휘도.
 회색은 채도 단계와 709->P3 행렬(행 합 1)에서 휘도가 변하지 않으므로 출력 휘도 = curve_f 값이다.
 
 임의로 정한 사항:
@@ -26,7 +26,7 @@ EPS = 1e-9
 
 def output_luminance(preset, codes=CODES):
     """8bit 회색 코드 -> 출력 휘도 (SDR white=1 기준 선형)."""
-    Y = tc.srgb_eotf(np.asarray(codes, dtype=np.float64) / 255.0) * preset.g
+    Y = tc.input_eotf(np.asarray(codes, dtype=np.float64) / 255.0) * preset.g
     return tc.curve_f(Y, preset.P, preset.k, preset.n)
 
 
@@ -53,7 +53,7 @@ STRENGTHS = (0.25, 0.5, 0.75, 1.0)
 
 def output_luminance_strength(preset, t, codes=CODES):
     """강도 혼합 후 8bit 회색 코드의 출력 휘도: id + t * (itm - id), id 는 게인 없는 선형 휘도 (PLAN D-M4a)."""
-    lin = tc.srgb_eotf(np.asarray(codes, dtype=np.float64) / 255.0)
+    lin = tc.input_eotf(np.asarray(codes, dtype=np.float64) / 255.0)
     itm = tc.curve_f(lin * preset.g, preset.P, preset.k, preset.n)
     return lin + t * (itm - lin)
 

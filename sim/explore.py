@@ -57,7 +57,7 @@ def amp_enc_max(P, k, n, s, t, hs=HS, g=G):
     lin = tc.itm_linear_strength(_GRAY, t, **p)[:, 1]
     enc = tc.srgb_oetf_ext(lin)
     amp = np.diff(enc) * 255.0
-    lin_in = tc.srgb_eotf(_CODES / 255.0)
+    lin_in = tc.input_eotf(_CODES / 255.0)
     hi = (lin_in[:-1] * g) > k
     return float(amp[hi].max()) if hi.any() else 1.0
 

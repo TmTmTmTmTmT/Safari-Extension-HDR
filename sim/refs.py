@@ -37,7 +37,7 @@ def bars_rgb():
 def expected(rgb_enc, name):
     """반환: (입력 선형 709, 출력 선형 P3, 출력 인코딩 P3)."""
     p = PRESETS[name].kwargs()
-    lin_in = tc.srgb_eotf(rgb_enc)
+    lin_in = tc.input_eotf(rgb_enc)
     lin_out = tc.itm_linear(rgb_enc, **p)
     return lin_in, lin_out, tc.srgb_oetf_ext(lin_out)
 

@@ -6,6 +6,8 @@
   const FORMAT = 'rgba16float';
   const COLOR_SPACE = 'display-p3';
   const TONE_MAPPING = { mode: 'extended' };
+  // FIX_GUIDE Z2: sdr 진단 모드는 EDR을 끄고(standard) itm 셰이더를 강도 0으로 그린다.
+  const TONE_MAPPING_SDR = { mode: 'standard' };
   // N1 frameProbe: 64x36 rgba8unorm 되읽기. GPUTextureUsage/GPUBufferUsage 값 (WebGPU 스펙).
   const PROBE_W = 64;
   const PROBE_H = 36;
@@ -185,12 +187,27 @@
       if (destroyed) return;
 
       ctx = canvas.getContext('webgpu');
+      configureCanvas();
+
+      const shaders = globalThis.__sdrhdr.itm;
+      pipelines = {
+        stripes: makePipeline(device.createShaderModule({ code: shaders.STRIPES })),
+        identity: makePipeline(device.createShaderModule({ code: shaders.VIDEO_IDENTITY })),
+        itm: makePipeline(device.createShaderModule({ code: shaders.VIDEO_ITM })),
+      };
+      sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+      uniformBuf = device.createBuffer({ size: UNIFORM_BYTES, usage: BUF_UNIFORM | BUF_COPY_DST });
+      writeParams();
+    }
+
+    // configure·되읽기는 이 함수 한 곳에서만 한다(init, sdr 전환 시 재호출). FIX_GUIDE Z2.
+    function configureCanvas() {
       try {
         ctx.configure({
           device,
           format: FORMAT,
           colorSpace: COLOR_SPACE,
-          toneMapping: TONE_MAPPING,
+          toneMapping: mode === 'sdr' ? TONE_MAPPING_SDR : TONE_MAPPING,
         });
         api.configure = true;
       } catch (e) {
@@ -209,26 +226,19 @@
               : (c && c.toneMapping && c.toneMapping.mode) || null,
         };
       }
-
-      const shaders = globalThis.__sdrhdr.itm;
-      pipelines = {
-        stripes: makePipeline(device.createShaderModule({ code: shaders.STRIPES })),
-        identity: makePipeline(device.createShaderModule({ code: shaders.VIDEO_IDENTITY })),
-        itm: makePipeline(device.createShaderModule({ code: shaders.VIDEO_ITM })),
-      };
-      sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-      uniformBuf = device.createBuffer({ size: UNIFORM_BYTES, usage: BUF_UNIFORM | BUF_COPY_DST });
-      writeParams();
     }
 
     function writeParams() {
       if (!device || !uniformBuf) return;
-      const arr = globalThis.__sdrhdr.params.toUniformArray(shaderSettings);
+      // sdr은 저장된 강도를 건드리지 않고 uniform 값만 0으로 쓴다.
+      const src =
+        mode === 'sdr' ? Object.assign({}, shaderSettings, { strength: 0 }) : shaderSettings;
+      const arr = globalThis.__sdrhdr.params.toUniformArray(src);
       device.queue.writeBuffer(uniformBuf, 0, new Float32Array(arr));
     }
 
     function copyPipeline() {
-      const key = mode === 'identity' ? 'identity' : 'itm';
+      const key = mode === 'identity' ? 'identity' : 'itm'; // sdr은 itm 셰이더
       if (!copyPipelines[key]) {
         const shaders = globalThis.__sdrhdr.itm;
         const code = key === 'identity' ? shaders.VIDEO_IDENTITY_COPY : shaders.VIDEO_ITM_COPY;
@@ -396,7 +406,7 @@
         }
       }
       try {
-        const pipeline = useCopy ? copyPipeline() : pipelines[mode];
+        const pipeline = useCopy ? copyPipeline() : pipelines[mode === 'sdr' ? 'itm' : mode];
         const enc = device.createCommandEncoder();
         const pass = enc.beginRenderPass({
           colorAttachments: [
@@ -422,7 +432,8 @@
             { binding: 0, resource: sampler },
             { binding: 1, resource },
           ];
-          if (mode === 'itm') entries.push({ binding: 2, resource: { buffer: uniformBuf } });
+          if (mode === 'itm' || mode === 'sdr')
+            entries.push({ binding: 2, resource: { buffer: uniformBuf } });
           const bind = device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
             entries,
@@ -919,9 +930,19 @@
     }
 
     function setMode(next) {
-      if (!['itm', 'identity', 'stripes', 'baseline'].includes(next)) return;
+      if (!['itm', 'sdr', 'identity', 'stripes', 'baseline'].includes(next)) return;
       const prev = mode;
       mode = next;
+      // toneMapping이 달라지는 전환(sdr <-> 그 외)만 configure를 다시 한다. 강도 uniform도 모드에 맞춰 다시 쓴다.
+      if ((prev === 'sdr') !== (next === 'sdr') && device && ctx) {
+        try {
+          configureCanvas();
+        } catch (e) {
+          fail(e, 'configure');
+          return;
+        }
+        writeParams();
+      }
       dirty = true;
       if (next === 'baseline' && prev !== 'baseline') enterBaseline();
       updateVisibility();

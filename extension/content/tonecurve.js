@@ -18,7 +18,13 @@
   const mat = (m, v) => [dot(m[0], v), dot(m[1], v), dot(m[2], v)];
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-  // 1단계: sRGB 인코딩 -> 선형. 부호 보존.
+  // 1단계(ITM 입력, FIX_GUIDE Z1): 영상 인코딩 -> 선형 v^INPUT_GAMMA, [0,1]로 클램프(셰이더와 같음).
+  // 감마 값은 params.js INPUT_GAMMA 한 곳에서 읽는다.
+  function inputEotf(v) {
+    return Math.pow(clamp(v, 0, 1), globalThis.__sdrhdr.params.INPUT_GAMMA);
+  }
+
+  // sRGB 인코딩 -> 선형. 부호 보존. ITM에서는 쓰지 않고 OETF 왕복 검증용으로 남긴다.
   function srgbEotf(v) {
     const a = Math.abs(v);
     const lin = a <= 0.04045 ? a / 12.92 : Math.pow((a + 0.055) / 1.055, 2.4);
@@ -47,7 +53,7 @@
 
   // 1~5단계 중 OETF 직전까지. 반환: 선형 Display P3.
   function itmLinear(rgbEnc, p) {
-    const lin = rgbEnc.map((v) => srgbEotf(v) * p.g); // 1, 2
+    const lin = rgbEnc.map((v) => inputEotf(v) * p.g); // 1, 2
     const Y = dot(LUMA_709, lin); // 3
     const sc = curveScale(Y, p.P, p.k, p.n);
     const scaled = lin.map((v) => v * sc); // 4 색상 보존
@@ -58,11 +64,11 @@
     return mat(M709_TO_P3, sa); // 5
   }
 
-  // identity(sRGB EOTF -> 709->P3)와 ITM 결과를 선형 P3에서 t로 섞는다 (PLAN D-M4a).
+  // identity(입력 EOTF -> 709->P3)와 ITM 결과를 선형 P3에서 t로 섞는다 (PLAN D-M4a).
   function itmLinearStrength(rgbEnc, t, p) {
     const id = mat(
       M709_TO_P3,
-      rgbEnc.map((v) => srgbEotf(v)),
+      rgbEnc.map((v) => inputEotf(v)),
     );
     const itm = itmLinear(rgbEnc, p);
     return id.map((v, i) => v + t * (itm[i] - v));
@@ -94,6 +100,7 @@
     M709_TO_P3,
     SHARP_GAIN,
     SHARP_LIMIT,
+    inputEotf,
     srgbEotf,
     srgbOetfExt,
     curveF,

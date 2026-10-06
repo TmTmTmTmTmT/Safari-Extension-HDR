@@ -1321,3 +1321,11 @@ test('내 프리셋: 이름은 textContent로만 들어가고 HTML로 해석되�
   els['up-load'].fire('click');
   assert.ok(els['backup-text'].textContent.includes('「<b>x</b>」'));
 });
+
+test('Z2: 모드 select에 sdr option이 있고 sdr 저장 모드도 진단 모드처럼 잠근다', async () => {
+  const html = read('popup/popup.html');
+  assert.ok(html.includes('<option value="sdr">sdr (EDR 끔, 원본과 비교)</option>'));
+  const { els } = await setup({ 'sdrhdr.mode': 'sdr' });
+  assert.strictEqual(els.mode.value, 'sdr');
+  assert.strictEqual(els['diag-banner'].hidden, false);
+});

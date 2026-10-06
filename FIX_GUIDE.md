@@ -1,9 +1,230 @@
-# FIX_GUIDE.md — Y 회차(보안 보완) · X · W · V · U 회차
+# FIX_GUIDE.md — Z 회차(암부 들뜸) · Y(보안 보완) · X · W · V · U 회차
 
 > 작성: Opus (2026-10-03). 근거: 사용자 보고(2026-10-03), STATUS.md "조사: 메모리 증가·재부팅 후 설정 초기화"(Sonnet 코드 읽기), `extension/content/{renderer,main,params,background}.js`, `extension/popup/popup.js`, `xcode/SDRHDR/SDRHDR Extension/SafariWebExtensionHandler.swift`.
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
 > 이전 회차(T 포함)는 git 이력에 있다. T 회차 판정 보류 항목(TA 깜박임, T2 popup)은 체크리스트 "T 회차 확인" 절로 계속 받는다.
 > 브랜치: `claude/m8-plan`의 PR #14가 머지된 뒤 새 브랜치 `claude/u-fixes`(base는 PR #14가 머지된 브랜치). 버전 1.2.0 → 1.2.1.
+
+## AA 회차 (2026-10-07, Opus) — install.sh 재실행마다 Safari 확장 목록에 SDR HDR가 하나씩 늘어남
+
+> 근거: 사용자 보고·스크린샷(Safari 설정 › 확장에 "SDR HDR" 3개, 2026-10-07). Opus가 사용자 Mac에서 읽기 전용으로 `pluginkit -m -v -A -D -i io.github.tmtmtmtmtmt.SDRHDR.Extension`, `lsregister -dump`, `ls`로 확인했다.
+> 브랜치 `claude/z-input-gamma`에 함께 넣는다(Z와 수정 파일 겹침 없음). 확장 버전 변경 없음. 커밋 trailer 금지(GUIDELINES 7-2).
+
+### 관찰 (사실)
+
+- pluginkit 등록 3개 = Safari 목록 3개와 일치:
+  1. `/Applications/SDRHDR.app/…/SDRHDR Extension.appex` (정상 설치본)
+  2. `$TMPDIR/sdrhdr-build.3DfUMu/Build/Products/Release/SDRHDR.app/…` — install.sh 3단계의 `mktemp -d` 빌드 폴더. **`trap cleanup EXIT`의 `rm -rf` 뒤에도 남아 있다.** `SDRHDR.app` 안은 `Contents/PlugIns/SDRHDR Extension.appex`만 남은 부분 삭제 상태이고, `Release/` 아래 `.dSYM`·`.swiftmodule`·독립 `SDRHDR Extension.appex`도 남아 있다.
+  3. `/private/tmp/claude-501/…/scratchpad/build135/…/SDRHDR.app` — 이전 Claude 세션이 scratchpad에 만든 빌드. install.sh와 무관하지만 같은 증상을 낸다.
+- `lsregister -dump`에는 이미 지워진 임시·scratchpad 경로(`sdrhdr-build.TgorUC`, `…yAo6VC`, scratchpad `dd*`, `exp/dd_*`, `~/.Trash/SDRHDR.app`) 등록이 다수 남아 있다. 이들은 파일이 없어 pluginkit에는 안 잡힌다.
+- 4단계 사본 탐색은 `mdfind`·고정 경로·DerivedData만 본다. Spotlight는 `$TMPDIR`(`/private/var/folders`)·`/private/tmp`를 색인하지 않으므로 2·3번 사본을 찾지 못한다. 자기 `$TMP`는 명시적으로 제외한다.
+
+### 원인
+
+- (확정) xcodebuild가 빌드 산출물(앱·appex)을 LaunchServices/pluginkit에 등록한다. 빌드 위치가 매번 새 `mktemp` 경로이므로 실행마다 새 등록이 생긴다.
+- (확정) 그 임시 폴더가 지워지지 않으면 실제 번들이 남아 Safari 목록에 계속 보인다. install.sh는 남은 임시 사본을 찾지도 못한다(위 4단계 설명).
+- (추정) `rm -rf`가 중간에 실패한다. 남은 것이 서명된 `.appex` 번들이고 `com.apple.provenance` 속성이 붙어 있어, macOS 앱 관리 보호(App Management)로 터미널의 번들 삭제가 막혔을 가능성이 높다. `cleanup`은 오류를 출력하지 않아 사용자도 모른다. 다른 원인(Safari/pluginkit가 appex를 잡고 있음)도 배제하지 못했다 → 검증 1에서 판정.
+
+### 수정 방향 (`scripts/install.sh`, 필요 시 `scripts/lib/install-lib.sh`)
+
+AA1. **빌드 위치 고정**: `mktemp` 대신 저장소 안 고정 경로 `.local/build`(이미 `.local/`은 git 제외)를 `-derivedDataPath`로 쓴다. 매번 같은 경로라 등록이 누적되지 않고, 증분 빌드로 빨라진다. 빌드 전 `.local/build/Build/Products`만 비운다(모듈 캐시는 유지 가능).
+
+AA2. **설치 직후 빌드본 등록 해제·삭제**: `ditto`로 `$DEST`에 복사한 뒤, 6단계 `lsregister -f "$DEST"` 전에
+
+- `pluginkit -r "<빌드본>/Contents/PlugIns/SDRHDR Extension.appex"`와 `lsregister -u "<빌드본>"`(앱과 `Release/` 바로 아래 독립 appex 둘 다)
+- 이어서 `.local/build/Build/Products` 삭제. 삭제 실패는 숨기지 말고 경고 1줄 + 경로 + "시스템 설정 › 개인정보 보호 및 보안 › 앱 관리에서 터미널 허용 후 다시 실행" 안내(실패해도 설치는 성공 처리, 등록은 이미 해제됨).
+- `cleanup` trap은 남기되 stderr를 버리지 말고, 실패 시 같은 경고를 낸다.
+
+AA3. **4단계 사본 탐색 보강**: `mdfind` 결과에 더해 `pluginkit -m -v -A -D -i "$BUNDLE_ID.Extension"` 출력의 경로에서 `…/Contents/PlugIns/…appex` 앞부분(`.app`)을 뽑아 `add_copy` 후보로 넣는다. `Release/` 바로 아래 독립 appex 경로는 앱이 아니므로 사본 목록이 아니라 "등록 해제 대상"으로만 다룬다.
+
+- 휴지통 이동은 지금처럼 확인 후에만. 임시 폴더(`/private/var/folders/*/T/sdrhdr-build.*`, `/private/tmp/*`) 사본도 같은 확인 절차로 휴지통 이동한다(영구 삭제 금지 원칙 유지).
+- `trash_move`는 이동 **후**에도 `lsregister -u "$dest"`를 호출해 휴지통 사본 등록을 지운다(현재는 이동 전 원래 경로만 해제).
+
+AA4. **존재하지 않는 경로의 낡은 등록 정리**: `lsregister -dump`에서 `SDRHDR.app`/`SDRHDR Extension.appex` 경로 중 파일이 없는 것을 `lsregister -u`한다. 파일을 지우지 않으므로 확인 없이 해도 되지만, `--dry-run`에서는 출력만 한다. 출력 파싱은 `install-lib.sh`의 순수 함수(`il_parse_ls_paths` 등)로 분리해 `tests/unit/install-lib.test.js`에 픽스처 테스트를 붙인다.
+
+AA5. **6단계 경고 개선**: 현재 `pluginkit … | grep -c`가 2 이상이면 경고만 한다. AA3·AA4 뒤에도 2 이상이면 남은 경로를 모두 출력한다(홈 경로는 `il_redact_home`).
+
+AA6. **Claude 세션 빌드 규칙(GUIDELINES 7-x에 1줄 추가)**: Claude가 검증용으로 scratchpad에 Release 빌드를 만들면 끝날 때 `pluginkit -r`·`lsregister -u` 후 삭제한다. 가능하면 `CODE_SIGNING_ALLOWED=NO` + `-derivedDataPath`를 쓰고 앱을 실행하지 않는다.
+
+### 영향 범위
+
+- `scripts/install.sh`, `scripts/lib/install-lib.sh`, `tests/unit/install-lib.test.js`, `docs/install.md` 3-1 4번 문구("이전 사본 정리"에 임시 빌드 폴더·낡은 등록 정리 추가), `GUIDELINES.md` 1줄, `.gitignore`(`.local/` 이미 포함인지 확인만).
+- 확장·앱 코드, `xcode/` 프로젝트 변경 없음. 앱의 "사본" 점검(`ViewController.swift`, `urlsForApplications`)은 그대로 둔다.
+
+### 재현·검증
+
+1. (원인 판정, Sonnet) 남은 `$TMPDIR/sdrhdr-build.3DfUMu`에 대해 `rm -rf` 대신 `mv … ~/.Trash/`를 시도하고 stderr를 기록한다. `Operation not permitted`면 앱 관리 보호 추정 확정. 결과를 STATUS.md에 적는다. 사용자 확인 없이 영구 삭제하지 않는다.
+2. `npm run lint`, `npm test`(install-lib 픽스처), `scripts/install.sh --dry-run`에서 새 단계 명령이 출력되는지.
+3. (사용자) 현 상태에서 `scripts/install.sh`를 2회 연속 실행 → `pluginkit -m -v -A -D -i io.github.tmtmtmtmtmt.SDRHDR.Extension`가 `/Applications` 1개만, Safari ⌘Q 후 설정 › 확장에 SDR HDR 1개만. `ls $TMPDIR | grep sdrhdr-build` 없음.
+
+## AB 회차 (2026-10-07, Opus) — 사본 여러 개가 동시에 켜져 동작 오류
+
+> 근거: 사용자 보고("프로그램이 겹치며 동작에 오류")와 스크린샷 2장(2026-10-07): Safari 설정 › 확장에 SDR HDR 3개 모두 체크, YouTube 영상 페이지에서 popup(v1.3.5, 켜짐)이 "이 탭에서는 동작하지 않음"을 표시. 코드 근거 `extension/popup/popup.js:30-34, 546-563`, `extension/content/main.js:435-499, 732-780`, `extension/content/overlay.js`, `extension/content/ns.js`.
+> AA와 같은 브랜치. 확장 버전 1.3.5 → 1.3.6(AB는 확장 코드 변경). Z와 같은 파일(`params.js`)을 만지므로 Z 완료 후 진행.
+
+### 원인
+
+- (확정, Safari 구조) Safari는 앱 번들마다 확장을 별개 인스턴스로 다룬다. 사본 3개 = 확장 3개이며 각자 `storage.local`, 웹사이트 접근 권한, popup, 툴바 버튼을 따로 갖는다. content script는 인스턴스마다 별도 격리 세계에서 돌아 `globalThis.__sdrhdr`를 공유하지 않는다 → 서로의 존재를 모른다.
+- (추정, 코드 읽기) 둘 이상이 youtube 접근을 가진 경우: 각자 `overlay.createOverlay`로 캔버스를 영상 위에 겹쳐 올리고 각자 WebGPU 디바이스·프레임 복사를 돌린다 → 맨 위 캔버스만 보이고 GPU 부하 2배 이상, Option+H·Option+Shift+H·상태 알림이 인스턴스마다 따로 반응, popup에서 바꾼 설정이 화면에 보이는 인스턴스와 다를 수 있다("슬라이더가 안 먹음").
+- (추정) 스크린샷의 "동작하지 않음": 열린 popup이 www.youtube.com 접근이 없는 새 사본의 것이라 그 인스턴스의 content script가 없고 `tabs.sendMessage`가 실패했다. 영상은 다른 인스턴스가 처리 중일 수 있다. popup은 이 경우를 구분하지 못하고 "접근 허용" 안내만 한다.
+- 근본 원인은 AA(사본이 생기고 남는 것). AB는 그래도 사본이 생겼을 때의 방어.
+
+### 수정 방향
+
+AB1. **페이지 단일 소유권(content)**: 격리 세계끼리 공유되는 것은 DOM뿐이므로 DOM 표지로 한 인스턴스만 동작하게 한다.
+
+- `main.js` `start()`에서 attach 전에 `document.documentElement`에 소유 속성(예: `data-sdrhdr-owner`)을 확인한다. 값은 로드마다 만드는 무작위 토큰(확장 id·버전 등 식별 정보 넣지 않음).
+- 비어 있으면 자기 토큰을 쓰고, 짧은 지연(한 프레임) 뒤 다시 읽어 자기 것일 때만 소유자로 확정(동시 쓰기 경합 대비, 마지막 쓴 쪽이 이김).
+- 소유자가 아니면 attach·키 리스너·상태 알림을 시작하지 않는다. `getState` 응답은 새 상태 `other`("다른 SDR HDR 사본이 이 탭을 처리 중")로 답한다. MutationObserver로 속성이 사라지면(소유자 `pagehide`·비활성화 시 제거) 다시 소유 시도.
+- 소유자는 끌 때(`enabled=false`)·`pagehide`에 속성을 지운다. 페이지가 속성을 위조하면 확장이 멈출 뿐이므로 허용(페이지는 원래 영상 자체를 바꿀 수 있음).
+- 판정은 `params.js`(또는 새 순수 모듈)에 순수 함수로 두고(GUIDELINES 2.1), DOM 읽기·쓰기는 `main.js`에서만.
+  AB2. **상태 문구(`params.statusOf`)**: `other` 레벨 추가. 문구 "다른 SDR HDR 사본이 동작 중", hint "Safari 설정 › 확장에 SDR HDR가 여러 개입니다. SDR HDR 앱을 열어 이전 사본을 정리한 뒤 Safari를 재시작하세요". 배지는 "–"와 구분해 "2"(또는 기존 "!") 중 하나로 정하고 표에 적는다.
+  AB3. **popup NONE 안내 보강**: `NONE_STATUS.hint` 끝에 "Safari 설정 › 확장에 SDR HDR가 여러 개 보이면 앱에서 사본을 정리하세요" 1문장 추가. popup은 사본 존재를 직접 알 수 없으므로 추정 문구로 둔다.
+  AB4. **앱 점검 화면(선택, 별도 판단 불필요한 범위만)**: `ViewController.swift`의 사본 탐색은 `urlsForApplications` 기준이다. AA4로 낡은 등록이 정리되면 그대로 둔다. 변경하지 않는다.
+
+### 영향 범위
+
+- `extension/content/main.js`, `extension/content/params.js`(statusOf·MSG), `extension/popup/popup.js`, `extension/manifest.json`(버전), 테스트 `tests/unit/extension-params.test.js`(또는 해당 파일)·`tests/dom/`(소유권 2인스턴스 모의: 같은 페이지에 content 묶음을 두 번 주입해 캔버스 1개·키 반응 1회 확인), `docs/install.md` 6장 상태 문구 목록, `docs/manual-checklist.md`에 AB 항목.
+- 렌더러·셰이더·곡선 변경 없음.
+
+### 재현·검증
+
+1. (단위) 소유권 순수 함수: 비어 있음→획득, 남의 토큰→양보, 자기 토큰→유지, 제거 후 재획득.
+2. (DOM, Playwright WebKit) 같은 픽스처에 content 스크립트 묶음을 격리 없이 두 번 로드하는 대신 토큰 충돌 경로를 모의해 캔버스 1개, `keydown` 처리 1회.
+3. (사용자, `docs/manual-checklist.md`) AA 적용 전 상태(사본 3개, 모두 켬, 둘 이상 youtube 허용)에서 YouTube 재생 → 영상 위 캔버스 1개(웹 속성 검사기로 `canvas` 개수), 각 사본 popup 중 하나는 정상 상태, 나머지는 "다른 SDR HDR 사본이 동작 중". 이후 AA로 정리 → Safari ⌘Q → 확장 1개, popup 정상.
+
+## Z 회차 (2026-10-07, Opus) — 1.3.5: 켜면 암부가 들떠 보임
+
+> 근거: 사용자 보고와 스크린샷 4쌍(2026-10-06~07, YouTube "Visuals - Project Hail Mary", "Visuals - Interstellar", 밝기 최대). 스크린샷 픽셀 측정은 Opus가 수행했다(읽기 전용).
+> 브랜치 `claude/z-input-gamma`(base `main`). 버전 1.3.4 → 1.3.5. 대상: Sonnet. 커밋에 trailer 금지(GUIDELINES 7-2).
+
+### 관찰 (사실)
+
+- 사용자 육안: itm에서 암부가 전체적으로 뜬다. 채도를 낮춰도 같다. **identity 모드에서도 같다.** 영상 밖 페이지 레터박스(값 0)는 켜고 끔에 차이가 없다.
+  - 그러므로 EDR 백라이트 상승(기기 특성)은 아니다. 신호 단계 문제다.
+- identity와 꺼짐 스크린샷 비교(8bit, 영상 영역, 같은 정지 프레임; identity 출력 ≤1이라 스크린샷 축소 없음):
+
+  | 영역            | 꺼짐(Safari 기본 재생) | identity |
+  | --------------- | ---------------------- | -------- |
+  | 하위 0.1%       | 16.0                   | 18.3     |
+  | 지면(평탄 암부) | 19                     | 20       |
+  | 중앙값          | 32.7                   | 28.7     |
+  | 창문 G          | 88.4                   | 76.0     |
+  | 페이지 레터박스 | 0                      | 0        |
+
+  최암부는 identity가 더 밝고, 중간톤 이상은 더 어둡다. 바닥이 뜨고 대비가 눌린 모양이다.
+
+- 모델 대조: 꺼짐 값 ≈ sRGB_OETF(identity값^1.961)으로 4개 지점(20→19.6 vs 19, 28.7→31.1 vs 32.7, 76→86 vs 88.4, 18.3→17.2 vs 16) 모두 1~2코드 안에서 맞는다.
+
+### 원인
+
+Safari는 BT.709로 태그된 영상을 **감마 약 1.961의 순수 거듭제곱**으로 디코딩해 표시한다. Apple 색 관리 관례이며, 위 측정이 이를 뒷받침한다. 확장은 같은 신호를 캔버스에 **sRGB 전송 함수**로 표시한다.
+
+- identity는 값을 그대로 쓰므로 캔버스가 sRGB로 해석한다.
+- itm은 `srgb_eotf` → 처리 → `ext_oetf`로, 강도 0일 때 결과적으로 identity와 같은 sRGB 해석이다.
+
+sRGB는 최암부에 직선 구간이 있다. 그래서 코드 약 20 이하에서는 v^1.961보다 밝고(코드 10에서 약 1.7배), 그 위에서는 어둡다. 결과적으로 "암부가 뜨고 중간톤이 가라앉은" 화면이 된다.
+
+곡선(k 아래 항등), 게인 g(실효 ×1.095, 코드 8에서 +0.4), 채도는 원인이 아니다. 강도 0에서도 증상이 남는다. A5(캔버스 값 = 비선형 확장 sRGB)는 그대로 유효하다. 틀린 것은 **입력 해석**이다.
+
+### Z1. 입력 디코딩을 Safari 기본 재생과 맞춘다 (설계 결정, Opus 확정)
+
+**수정 방향**
+
+- (a) 상수 `INPUT_GAMMA = 1.961`을 도입한다. 정의는 `params.js` 한 곳에 두고, WGSL에는 params 값을 문자열로 조립한다(GUIDELINES 3-5 "값의 출처 한 곳"). sim에는 같은 이름의 상수를 둔다. 사용자 조정 항목이 아니며 uniform에도 넣지 않는다.
+- (b) ITM 경로의 입력 선형화는 `srgb_eotf(v)` 대신 `v^INPUT_GAMMA`를 쓴다. 입력은 [0,1]로 클램프하므로 부호 처리는 필요 없다. 대상은 `itm_lin`과 `itm_mix`의 `idLin` 두 곳이다. 강도 0 출력은 `ext_oetf(M709_TO_P3 · v^γ)`가 되고, 이것이 Safari 기본 재생과 같은 값이 된다.
+- (c) 출력 인코딩 `ext_oetf`(확장 sRGB)는 바꾸지 않는다. 캔버스 해석(A5)이 sRGB이기 때문이다.
+- (d) 선명도 `sharpen`은 인코딩 값에서 동작하므로 바꾸지 않는다.
+- (e) **identity 모드는 바꾸지 않는다.** PLAN의 "probe 셰이더와 같음, 수식 변경 금지"를 지키고, 진단 모드로서 "변환 없이 출력" 의미를 유지한다. 대신 popup 진단 모드 option 설명이나 install.md 진단 절에 "identity는 감마·색역 보정 없는 원시 출력이라 원본보다 암부가 뜨고 채도가 높게 보일 수 있다" 한 줄을 추가한다. 일반 사용자 비교 기준은 itm 강도 0%다.
+- (f) JS 미러 `tonecurve.js`의 `srgbEotf`는 테스트용이므로 남겨 둔다. `itmLinear`·`itmLinearStrength`의 입력 선형화만 (b)와 같게 바꾼다. 필요하면 새 함수 `inputLinear(v)`를 둔다. sim `tonecurve.py`도 같은 방식으로 바꾸고 `tonecurve-ref.json`을 `sim/export_ref.py`로 다시 생성한다.
+
+**부수 효과 (알고 진행)**
+
+- 같은 신호의 선형 휘도가 중간톤에서 올라간다(1.961 < sRGB 실효 약 2.2). 그만큼 곡선 무릎 k를 넘는 픽셀이 늘어 ITM이 조금 더 넓게 걸린다.
+- 흰색(1.0)은 1^γ = 1이라 유효 피크 `effectivePeak`·`peakAdvice`는 변하지 않는다.
+- 프리셋 수치는 바꾸지 않는다. 체감이 달라지면 사용자 회신을 받아 Opus가 다시 판단한다.
+- sim의 S10 헤드룸·밴딩 표는 숫자가 바뀔 수 있다. 다시 실행해 STATUS에 전후를 기록하고, 기준 불통과가 나오면 Opus 단계로 되돌린다.
+
+**영향 범위**: `extension/content/params.js`(상수), `itm.wgsl.js`(ITM_FN·MIX_FN 입력 선형화 2곳; VIDEO_IDENTITY·STRIPES 불변), `tonecurve.js`, `sim/tonecurve.py`와 관련 테스트, `tests/unit/extension-{tonecurve,wgsl}.test.js`, 참조 JSON, popup 진단 option 문구 또는 install.md 한 줄, `docs/manual-checklist.md`. renderer·캔버스 설정·수명주기·detect·probe는 불변.
+
+**재현/검증**
+
+- 자동:
+  - `python3 -m pytest sim`: 새 케이스로 (1) 강도 0 출력 = OETF_sRGB(M709→P3 · v^1.961), (2) v ∈ [0,1] 전 구간 단조·NaN 없음, (3) v=1에서 기존 피크와 같음, (4) 코드 10/255에서 출력이 이전보다 낮음(암부 들뜸 제거 방향)을 추가한다.
+  - `npm test`(JS 미러 대 참조 오차 < 1e-4, WGSL 문자열에 1.961 포함·`srgb_eotf` 호출이 ITM 입력에서 빠졌는지), `npm run lint`.
+- 사용자 Mac (manual-checklist "Z 회차 확인"):
+  1. 같은 정지 프레임(Interstellar 집 장면)에서 **itm 강도 0%**와 **확장 꺼짐**을 번갈아 본다. 암부·중간톤 차이가 없어야 한다. 가능하면 두 스크린샷을 회신한다.
+  2. 강도 40%(현재 사용 값)에서 암부가 꺼짐 대비 뜨지 않는지 본다. 중간톤 이상이 밝아지는 것은 의도된 동작이다.
+  3. 기본 설정의 HDR 체감이 이전보다 과하지 않은지 본다(부수 효과 확인).
+- 판정: 1번에서 차이가 남으면 γ 값이나 709→P3 처리에 다른 원인이 있다는 뜻이다. 수정하지 말고 스크린샷과 함께 Opus 단계로 되돌린다.
+
+### Z2. 1.3.5 회신: 강도 0%에서도 육안으로 암부가 뜸 — EDR 영향 분리 진단 (2026-10-07 추가)
+
+**관찰 (사실)**
+
+- 사용자 육안: 1.3.5, Interstellar 집 장면, 밝기 최대. HDR 강도 0%에서도 확장 꺼짐보다 암부가 더 떠 보인다.
+- 스크린샷(itm 0% / 꺼짐) 측정: 지면 (15, 15, 16.9) / (18.9, 18.9, 18.9), 하늘 G 30.4 / 40.4, 창문 G 36.8 / 47.7.
+  - 켠 쪽이 전반적으로 더 어둡고 회색에 푸른 기가 낀다.
+  - 스크린샷 원본 PNG(데스크톱, 8bit, cICP 12/13 = P3·sRGB 전송, 게인맵 없음)는 EDR 캔버스만 축소해 담고 UI·썸네일은 그대로(255) 담는다. 축소율은 중간톤에서 선형 약 0.60 = 1/1.65이다. popup 유효 피크 ×1.65와 같으므로, 캡처는 **EDR 층 ÷ 헤드룸 H**로 본다.
+- **EDR 매핑 역적용(캡처 × H=1.65)으로 복원한 화면 값 대 꺼짐**(sRGB 코드, 같은 정지 프레임):
+
+  | 꺼짐 휘도 | 강도 0% 차이 (R,G,B) | 강도 40% 차이    |
+  | --------- | -------------------- | ---------------- |
+  | ≈16       | +3.8, +3.6, +4.2     | +6.6, +4.1, +7.3 |
+  | ≈19       | +2.8, +2.7, +5.1     | +4.0, +4.0, +6.4 |
+  | ≈26       | +3.1, +2.5, +4.2     | +3.9, +4.0, +5.3 |
+  | ≈40       | +0.3, +1.4, +3.5     | −0.3, +3.1, +5.5 |
+
+  강도 0%에서도 암부가 약 +3코드(선형 가산 약 0.0013~0.0018) 들리고, 파랑이 더 들린다(암부 푸른 기). 중간톤은 거의 맞는다. 사용자 육안("0%에서도 뜸")과 일치한다.
+
+- 입력 샘플은 정상으로 본다. 헤드룸이 걸리지 않은 상태(H=1, 캡처 축소 없음)의 identity 캡처가 원본 모델(sRGB_OETF(v^1.961))과 1코드 안에서 맞았다. 따라서 들뜸은 **헤드룸이 걸린 EDR 캔버스 합성 단계**에서 생긴다.
+- 디스플레이 프로파일(Color LCD)에는 `bkpt` 태그가 없고 TRC는 0에서 시작한다. 블랙 포인트 보정(BPC) 가설은 프로파일로 뒷받침되지 않는다.
+- Z 회차 앞 단계 identity 측정(sRGB 대 1.961 차이)은 모델과 1~2코드로 맞았으므로 Z1은 유효하다. 되돌리지 않는다.
+
+**원인 가설 (미확정)**
+
+- (C) **헤드룸이 걸린 EDR 캔버스를 macOS가 합성할 때 암부에 가산 오프셋(파랑 쪽이 큼)이 생긴다.** 캡처에도 나타나므로 패널 누설광이 아니라 소프트웨어 합성 단계다(사용자 지적: 미니LED라 누설광으로 전체 암부가 뜨지 않는다). 메커니즘은 미확인이다.
+- (B) 1.961 외에 남은 신호 차이(709→P3 행렬, 색역 태그 해석). H=1 identity 측정과 맞지 않아 가능성은 낮다.
+- 이전 가설 (A) 백라이트·LCD 누설광은 사용자 지적과 캡처 근거로 철회한다.
+
+**수정 방향 (진단 수단만, 화질 변경 없음)**
+
+- (a) 새 진단 모드 `sdr`을 추가한다. popup 표시는 "sdr (EDR 끔, 원본과 비교)"로 한다.
+  - itm 셰이더를 쓰되 uniform 강도를 0으로 고정한다. 저장된 강도는 건드리지 않는다.
+  - 캔버스는 `toneMapping: { mode: 'standard' }`로 설정한다. format·colorSpace는 지금과 같다.
+  - 다른 모드로 바꾸면 기존 `extended`로 다시 설정한다. 모드 전환 시 `configure`를 다시 하는 지점은 `setMode`/configure 흐름에서 한 곳으로 둔다.
+- (b) `params.MODES`에 `sdr`을 추가한다. `normalizeSettings`, `statusOf`(진단 모드 표시), popup 모드 option, 진단 JSON의 `mode`·`config.toneMapping` 되읽기가 이 값을 자연스럽게 다루는지 확인한다. 진단 schemaVersion은 변경이 필요할 때만 올린다.
+- (c) 그 밖의 렌더 경로·수명주기·itm/identity/stripes/baseline 동작은 바꾸지 않는다.
+
+**영향 범위**: `params.js`(MODES), `renderer.js`(모드별 toneMapping 설정, 강도 0 고정 uniform), `popup.html`·`popup.js`(option), 단위 테스트(params·renderer·popup), `docs/install.md` 진단 절 한 줄, manual-checklist "Z 회차 확인"에 Z2 항목 추가. 곡선·감마·sim은 불변.
+
+**재현/검증**
+
+- 자동: `npm test`로 다음을 확인한다.
+  - MODES에 sdr이 있다.
+  - sdr일 때 configure의 toneMapping이 standard이고, 다른 모드로 돌아오면 extended이다.
+  - sdr일 때 uniform 강도가 0이고, 저장된 강도 값은 그대로다.
+  - lint, `test:dom`도 통과해야 한다.
+- 사용자 Mac (같은 정지 프레임, 밝기 최대, 육안):
+  1. 확장 꺼짐 / sdr / itm 강도 0%를 번갈아 본다.
+  2. 판정:
+     - **sdr ≈ 꺼짐이고 itm 0%만 뜬다** → (C) EDR 합성 단계로 확정. 다음 회차에서 Opus가 보정 방식(측정한 가산 오프셋의 셰이더 역보정, 헤드룸·밝기별 의존성 확인 포함)을 정한다.
+  3. 추가 측정(코드 변경 없음): 같은 프레임에서 **페이지 새로고침 직후 강도 0%**(헤드룸이 걸린 적 없음)와 **40%에서 0%로 내린 직후**를 각각 캡처한다. 원본 PNG(데스크톱)를 회신한다. 앞엣것이 꺼짐과 같고 뒤엣것만 뜨면 헤드룸 상태에 의존한다는 근거가 된다.
+     - **sdr도 뜬다** → (B) 신호 문제. 진단 JSON(`config`)을 회신받아 Opus가 다시 분석한다.
+
+### 버전·분할
+
+- Z2는 1.3.6(manifest·popup 헤더·manifest 테스트)으로 한다. Z1과 같은 브랜치 `claude/z-input-gamma`에 이어서 구현한다.
+- 1.3.5(manifest·popup 헤더·manifest 테스트).
+- sim 쪽(`sim/tonecurve.py`·테스트·참조 재생성)이 먼저다. 그다음 확장 쪽(params·itm.wgsl·tonecurve.js·JS 테스트)이 참조 JSON에 의존하므로 순차 진행한다. 문서(체크리스트·진단 문구 한 줄)는 impl-worker 1개로 병렬 가능하다.
+- 본 세션 담당: STATUS, 전체 검증, PR(trailer 없음). 병합은 사용자 지시 후.
+
+### 이번 범위 밖
+
+- identity 모드 수식 변경, 입력 영상 색 태그(`VideoFrame.colorSpace.transfer`)별 분기. 현재 대상인 YouTube SDR은 모두 bt709 태그이고, 분기는 PLAN 개정 사항이다.
+- EDR 백라이트로 인한 물리적 블랙 상승: 이번 관찰에서 레터박스 차이가 없어 해당하지 않는다.
+
+---
 
 ## Y 회차 (2026-10-06, Opus) — 1.3.4: 보안 점검 후속
 

@@ -25,7 +25,7 @@ def test_t0_is_color_converted_sdr(nm):
     p = PRESETS[nm].kwargs()
     rgb = grid()
     out = tc.itm_linear_strength(rgb, 0.0, **p)
-    assert np.allclose(out, tc.srgb_eotf(rgb) @ tc.M709_TO_P3.T, atol=1e-12)
+    assert np.allclose(out, tc.input_eotf(rgb) @ tc.M709_TO_P3.T, atol=1e-12)
 
 
 @pytest.mark.parametrize("nm", list(PRESETS))
