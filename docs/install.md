@@ -249,5 +249,5 @@ Safari의 확장 저장소가 쓰기를 거부한 오류입니다. 1.3.1부터 �
 
 1. 잠시 끄기: popup 헤더의 "HDR 변환"을 끕니다. 저장값은 유지됩니다.
 2. Safari에서 끄기: Safari 설정 → 확장 프로그램에서 "SDR HDR" 체크를 해제합니다.
-3. 제거: Xcode의 Product > Show Build Folder in Finder로 빌드 폴더를 열고 `SDRHDR.app`을 삭제한 뒤 Safari를 완전 종료(⌘Q) 후 재시작합니다. 이 메뉴로 빌드 폴더의 `SDRHDR.app`이 보이는 것은 확인했습니다(2026-10-02). 삭제 뒤 저장값이 남는지는 [확인 필요]입니다.
-4. 앱 다시 열기: 창을 닫으면 앱이 종료되므로, Xcode에서 다시 Run하거나 빌드 폴더의 `SDRHDR.app`을 엽니다.
+3. 제거: `/Applications/SDRHDR.app`(또는 `~/Applications`)을 휴지통으로 옮기고 Safari를 완전 종료(⌘Q) 후 재시작합니다. Xcode로 직접 Run했다면 `~/Library/Developer/Xcode/DerivedData/SDRHDR-*`의 빌드 폴더도 지웁니다. 삭제 뒤 저장값이 남는지는 [확인 필요]입니다.
+4. 앱 다시 열기: 창을 닫으면 앱이 종료되므로 Finder·Launchpad에서 SDR HDR를 다시 엽니다(점검 화면이 뜹니다).
