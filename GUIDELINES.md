@@ -1,7 +1,7 @@
 # GUIDELINES.md — 코딩 규칙
 
 > 작성: Opus(계획 단계). 근거: PLAN.md H절 "GUIDELINES.md 요지". 이 문서와 PLAN.md 범위를 벗어나는 판단은 Sonnet이 하지 않고 STATUS.md "Opus 확인 필요"에 기록한다.
-> 버전: v1.8 (2026-10-06, X 회차: 2.8 컨테이너 앱, 2.9 설치 스크립트, 7-2 trailer 금지 명시, 7-3·7-5 현행화). 이전: v1.7 (2026-10-01, T 회차: 2.5-7 재렌더 생략, 2.6-2 요청 시 진단, 3-1 JS 미러 런타임 미로드). 개정은 Opus만 한다.
+> 버전: v1.9 (2026-10-06, Y 회차: 2.8-3 다른 사본 실행 제안은 같은 서명 팀만). v1.8 (2026-10-06, X 회차: 2.8 컨테이너 앱, 2.9 설치 스크립트, 7-2 trailer 금지 명시, 7-3·7-5 현행화). 이전: v1.7 (2026-10-01, T 회차: 2.5-7 재렌더 생략, 2.6-2 요청 시 진단, 3-1 JS 미러 런타임 미로드). 개정은 Opus만 한다.
 
 규칙 표기: **[필수]** 위반 시 PR 불가, **[권장]** 예외는 PR 본문에 사유 기록.
 
@@ -70,7 +70,7 @@
 ### 2.8 컨테이너 앱 (`xcode/SDRHDR/SDRHDR/`, W 회차 추가)
 1. **[필수]** 새 Swift 파일을 만들지 않는다(프로젝트 파일 등록이 필요해 7-5와 충돌). 앱 코드는 `AppDelegate.swift`·`ViewController.swift`에 둔다. 테스트가 필요한 판정 로직은 `AppDelegate.swift`의 `// MARK: - PureLogic BEGIN`~`END` 구간에 Foundation만 써서 두고 `scripts/test-swift.sh`·`tests/swift/logic_test.swift`로 검사한다.
 2. **[필수]** 실행 종류 판정(`classifyLaunch`): 로그인 항목 Apple Event, 또는 `launchIsDefault == false`이면서 디버거 미연결일 때만 시스템 실행(창 없음, `.accessory`). 애매하면 사용자 실행(창 표시). 판정은 `os_log`(subsystem = 앱 번들 ID)에 신호값과 결과만 남기고 경로·사용자명은 남기지 않는다.
-3. **[필수]** 다른 사본 정리는 휴지통 이동만 한다. `NSOpenPanel`에서 사용자가 그 사본을 직접 고른 경우에만 `trashItem`, 자기 자신·최신 사본·판정 불가 사본은 이동 제안하지 않는다. 영구 삭제, LaunchServices·pluginkit 등록 조작, 샌드박스 해제·임시 예외 entitlement 금지.
+3. **[필수]** 다른 사본을 실행하라고 제안("최신 사본 열기")하는 것은 그 사본의 서명 팀 ID가 실행 중인 앱과 같다고 확인된 경우에만 한다(Y1). 확인할 수 없으면 Finder 보기만 제공한다. 다른 사본 정리는 휴지통 이동만 한다. `NSOpenPanel`에서 사용자가 그 사본을 직접 고른 경우에만 `trashItem`, 자기 자신·최신 사본·판정 불가 사본은 이동 제안하지 않는다. 영구 삭제, LaunchServices·pluginkit 등록 조작, 샌드박스 해제·임시 예외 entitlement 금지.
 4. **[필수]** 점검 화면 브리지: Swift → JS는 `render(state)` 하나, JS → Swift 메시지는 `open-preferences`·`recheck`·`open-newest`·`done`·`youtube:0|1`·`reveal:<id>`·`trash:<id>`로 고정한다. id는 Swift가 만든 인덱스이며 JS가 경로를 보내지 않는다. 페이지 CSP(`default-src 'self'`)를 유지하고 DOM은 `textContent`로만 채운다.
 5. **[필수]** Safari 설정·개발자 메뉴("서명되지 않은 확장 허용")를 자동으로 바꾸는 코드(`defaults write`, AppleScript UI 스크립팅 등)를 넣지 않는다.
 
