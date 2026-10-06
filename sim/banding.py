@@ -24,7 +24,7 @@ def measure(name_or_params):
     p = PRESETS[name_or_params].kwargs() if isinstance(name_or_params, str) else dict(name_or_params)
     v = CODES / 255.0
     rgb = np.repeat(v[:, None], 3, axis=1)
-    lin_in = tc.srgb_eotf(v)
+    lin_in = tc.input_eotf(v)
     lin_out = tc.itm_linear(rgb, **p)[:, 1]
     enc_out = tc.srgb_oetf_ext(lin_out)
     d_enc = np.diff(enc_out)

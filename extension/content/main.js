@@ -37,6 +37,13 @@
   let observer = null;
   let observedPlayer = null;
   let started = false;
+  // 페이지 단일 소유권 (FIX_GUIDE AB1). DOM 읽기·쓰기는 이 파일에서만 하고 판정은 params.ownerAction(순수)이 한다.
+  let ownerToken = null; // 로드마다 만드는 무작위 값. 식별 정보를 넣지 않는다.
+  let owned = false; // 소유자로 확정됨
+  let claiming = false; // 속성을 쓰고 재확인을 기다리는 중
+  let yielded = false; // 다른 사본의 토큰을 보고 양보한 상태
+  let active = false; // 리스너·주기 갱신을 시작했는지(소유자이거나, 꺼진 채 빈 슬롯일 때)
+  let ownerObserver = null;
   let hudState = null; // { container, hud }: attach와 독립 수명 (PLAN M8-3, UX-13)
   let chipState = null; // { container, chip }
   let lastVideo = null; // 마지막으로 본 메인 video. cur가 없을 때 DRM 신호를 읽기만 하려는 용도
@@ -608,6 +615,7 @@
     const prev = settings;
     settings = next;
     if (!next.enabled) {
+      releaseOwner(); // 끌 때 표지를 지워 다른 사본이 이어받게 한다 (FIX_GUIDE AB1)
       if (findTimer !== null) clearTimeout(findTimer);
       findTimer = null;
       stopObserving();
@@ -618,9 +626,11 @@
     if (!prev || !prev.enabled) {
       failVideos = new WeakSet();
       dispatch('enable');
-      scheduleAttach();
+      if (owned) scheduleAttach();
+      else tryAcquire(); // 소유자로 확정되면 becomeOwner가 attach를 시작한다
       return;
     }
+    if (!owned) return; // 소유자가 아닌 인스턴스는 설정만 저장하고 아무것도 하지 않는다
     if (cur) {
       // 셰이더 값(프리셋·강도·선명도·채도)은 바뀐 것만 유니폼으로 보낸다. 재attach 금지.
       const changed = {};
@@ -728,6 +738,158 @@
     };
   }
 
+  function newOwnerToken() {
+    const c = globalThis.crypto;
+    if (c && typeof c.getRandomValues === 'function') {
+      const a = new Uint32Array(4);
+      c.getRandomValues(a);
+      return Array.from(a, (n) => n.toString(36)).join('');
+    }
+    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
+
+  function ownerEl() {
+    return document.documentElement || null;
+  }
+
+  function readOwner() {
+    const el = ownerEl();
+    try {
+      return el && typeof el.getAttribute === 'function'
+        ? el.getAttribute(ns.params.OWNER_ATTR) || ''
+        : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function writeOwner(value) {
+    const el = ownerEl();
+    try {
+      if (el && typeof el.setAttribute === 'function') el.setAttribute(ns.params.OWNER_ATTR, value);
+    } catch (e) {
+      // 쓰기 실패는 재확인에서 양보로 이어진다.
+    }
+  }
+
+  // 내 토큰일 때만 지운다. 남의 표지는 건드리지 않는다.
+  function releaseOwner() {
+    owned = false;
+    claiming = false;
+    const el = ownerEl();
+    try {
+      if (el && typeof el.removeAttribute === 'function' && readOwner() === ownerToken)
+        el.removeAttribute(ns.params.OWNER_ATTR);
+    } catch (e) {
+      // 제거 실패는 무시한다.
+    }
+  }
+
+  function stopOwnerObserver() {
+    if (!ownerObserver) return;
+    ownerObserver.disconnect();
+    ownerObserver = null;
+  }
+
+  // 남이 소유 중이면 속성이 사라질 때(소유자 pagehide·비활성화) 다시 시도한다.
+  function observeOwner() {
+    yielded = true;
+    const el = ownerEl();
+    if (ownerObserver || !el || typeof MutationObserver !== 'function') return;
+    ownerObserver = new MutationObserver(() => {
+      if (!owned && !claiming) tryAcquire();
+    });
+    ownerObserver.observe(el, { attributes: true, attributeFilter: [ns.params.OWNER_ATTR] });
+  }
+
+  function becomeOwner() {
+    owned = true;
+    yielded = false;
+    stopOwnerObserver();
+    if (!active) activate();
+    else if (!cur && settings && settings.enabled) scheduleAttach();
+  }
+
+  // 켜진 인스턴스만 표지를 쓴다. 꺼진 인스턴스는 표지를 쓰지 않고, 남의 표지가 없을 때만 단축키(켜기)를 위해 활성화한다.
+  function tryAcquire() {
+    if (!settings || owned || claiming) return;
+    if (!ownerEl()) {
+      // documentElement가 없는 환경은 소유권 없이 동작한다.
+      if (settings.enabled) becomeOwner();
+      else activate();
+      return;
+    }
+    const act = ns.params.ownerAction(readOwner(), ownerToken);
+    if (!settings.enabled) {
+      if (act === 'yield') observeOwner();
+      else activate();
+      return;
+    }
+    if (act === 'keep') {
+      becomeOwner();
+      return;
+    }
+    if (act === 'yield') {
+      observeOwner();
+      return;
+    }
+    claiming = true;
+    yielded = false;
+    writeOwner(ownerToken);
+    setTimeout(() => {
+      if (!claiming) return; // 그 사이 꺼졌거나 pagehide로 해제됨
+      claiming = false;
+      if (!settings.enabled) {
+        releaseOwner();
+        return;
+      }
+      if (ns.params.ownerAction(readOwner(), ownerToken) === 'keep') becomeOwner();
+      else observeOwner();
+    }, ns.params.OWNER_CONFIRM_MS);
+  }
+
+  // 소유자(또는 꺼진 채 빈 슬롯)가 된 뒤에만 시작하는 리스너·주기 갱신 (FIX_GUIDE AB1).
+  function activate() {
+    if (active) return;
+    active = true;
+    document.addEventListener(ns.detect.NAV_EVENT, onNav);
+    document.addEventListener('fullscreenchange', pollMode);
+    document.addEventListener('webkitfullscreenchange', pollMode);
+    if (settings.enabled) scheduleAttach();
+    else {
+      // 꺼진 채 시작할 때는 '꺼짐' 칩을 띄우지 않는다. 이후 상태 변화부터 알린다.
+      lastChipText = ns.params.statusOf({ enabled: false }).text;
+      dispatch('disable', true); // 꺼진 채 시작하면 idle이 아니라 skipped(disabled)로 기록 (PLAN M7-2)
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') {
+        releaseBypass(); // 탭을 떠나면 원본 보기 해제
+        return;
+      }
+      // 탭이 다시 보이면 배지 상태를 다시 보낸다. 진단은 저장하지 않는다 (FIX_GUIDE V1).
+      lastSentKey = null;
+      try {
+        refreshUi();
+      } catch (e) {
+        // 상태 알림 실패는 무시한다.
+      }
+    });
+    // 단축키는 capture 단계에서 받는다 (PLAN M8-0 (e)). 원본 보기는 keyup·blur·hidden에서 해제한다.
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('keyup', onKeyUp, true);
+    if (typeof globalThis.addEventListener === 'function')
+      globalThis.addEventListener('blur', releaseBypass);
+    setInterval(() => {
+      try {
+        refreshUi(); // HUD 갱신·container 변경 추적·undecided 전환 알림
+      } catch (e) {
+        // HUD 갱신 실패는 무시한다.
+      }
+    }, HUD_INTERVAL_MS);
+    lastSentKey = null;
+    refreshUi(); // 활성화 직후 1회 재전송
+  }
+
   // 유일한 부작용 시작점. 로드 시점 접근을 피하려고 마이크로태스크로 미룬다.
   async function start() {
     if (started) return;
@@ -735,34 +897,8 @@
     try {
       startedAt = performance.now();
       settings = await ns.params.readSettings();
+      ownerToken = newOwnerToken();
       ns.params.subscribe(onSettings);
-      document.addEventListener(ns.detect.NAV_EVENT, onNav);
-      document.addEventListener('fullscreenchange', pollMode);
-      document.addEventListener('webkitfullscreenchange', pollMode);
-      if (settings.enabled) scheduleAttach();
-      else {
-        // 꺼진 채 시작할 때는 '꺼짐' 칩을 띄우지 않는다. 이후 상태 변화부터 알린다.
-        lastChipText = ns.params.statusOf({ enabled: false }).text;
-        dispatch('disable', true); // 꺼진 채 시작하면 idle이 아니라 skipped(disabled)로 기록 (PLAN M7-2)
-      }
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState !== 'visible') {
-          releaseBypass(); // 탭을 떠나면 원본 보기 해제
-          return;
-        }
-        // 탭이 다시 보이면 배지 상태를 다시 보낸다. 진단은 저장하지 않는다 (FIX_GUIDE V1).
-        lastSentKey = null;
-        try {
-          refreshUi();
-        } catch (e) {
-          // 상태 알림 실패는 무시한다.
-        }
-      });
-      // 단축키는 capture 단계에서 받는다 (PLAN M8-0 (e)). 원본 보기는 keyup·blur·hidden에서 해제한다.
-      document.addEventListener('keydown', onKeyDown, true);
-      document.addEventListener('keyup', onKeyUp, true);
-      if (typeof globalThis.addEventListener === 'function')
-        globalThis.addEventListener('blur', releaseBypass);
       try {
         browser.runtime.onMessage.addListener((msg) => {
           if (msg && msg.type === ns.params.MSG.getDiag) {
@@ -776,20 +912,21 @@
           }
           if (!msg || msg.type !== ns.params.MSG.getState) return undefined;
           const input = currentStatusInput();
+          // 다른 사본이 소유 중이면 other로 답한다 (FIX_GUIDE AB1·AB2). 꺼짐은 statusOf가 먼저 판정한다.
+          if (!owned && yielded) input.other = true;
           return Promise.resolve({ status: ns.params.statusOf(input), input });
         });
       } catch (e) {
         // runtime 메시지가 없는 환경에서는 popup 상태 줄만 쓰지 못한다.
       }
-      setInterval(() => {
-        try {
-          refreshUi(); // HUD 갱신·container 변경 추적·undecided 전환 알림
-        } catch (e) {
-          // HUD 갱신 실패는 무시한다.
-        }
-      }, HUD_INTERVAL_MS);
-      lastSentKey = null;
-      refreshUi(); // start 직후 1회 재전송
+      // 소유자는 pagehide에 표지를 지우고, bfcache 복귀(pageshow)에서 다시 소유를 시도한다.
+      if (typeof globalThis.addEventListener === 'function') {
+        globalThis.addEventListener('pagehide', releaseOwner);
+        globalThis.addEventListener('pageshow', () => {
+          if (!owned) tryAcquire();
+        });
+      }
+      tryAcquire();
     } catch (e) {
       // 페이지 재생은 방해하지 않되 원인은 diag errors에 남긴다.
       addError('main.start', e);

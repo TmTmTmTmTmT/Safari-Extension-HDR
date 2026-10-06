@@ -3,7 +3,7 @@
 #
 #   scripts/install.sh [--update] [-y] [--no-open] [--dry-run] [--help]
 #
-# 하는 일: 환경 점검 → 팀 ID 찾기 → 서명 빌드 → 이전 사본 정리(확인 후 휴지통) → /Applications 설치 → 앱 실행 → Safari 재시작(선택).
+# 하는 일: 환경 점검 → 팀 ID 찾기 → 서명 빌드(.local/build 고정) → 이전 사본·낡은 등록 정리(사본은 확인 후 휴지통) → /Applications 설치 → 빌드본 등록 해제·삭제 → 앱 실행 → Safari 재시작(선택).
 # 하지 않는 일: Apple ID 로그인, sudo, Safari 설정·개발자 메뉴 조작, project.xcproj 수정, rm 으로 앱 삭제.
 # 테스트용 환경 변수: TEAM_ID(팀 지정), SDRHDR_SW_VERS·SDRHDR_SAFARI_VERSION(버전 주입, 점검 분기 확인용).
 set -euo pipefail
@@ -19,6 +19,7 @@ MIN_MACOS="26.0"
 MIN_SAFARI="26.0"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 LOCAL_DIR="$ROOT/.local"
+BUILD_DIR="$LOCAL_DIR/build"
 
 UPDATE=0 ASSUME_YES=0 NO_OPEN=0 DRY=0
 for arg in "$@"; do
@@ -183,12 +184,35 @@ echo "  팀 $TEAM"
 
 # ---------------------------------------------------------------- 3. 빌드
 step 3 "빌드 (Release, 서명)"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/sdrhdr-build.XXXXXX")"
-cleanup() { [ -n "${TMP:-}" ] && [ -d "$TMP" ] && rm -rf "$TMP"; }
+PRODUCTS="$BUILD_DIR/Build/Products"
+PURGED=0
+warn_purge() {
+  echo "  경고: 빌드 폴더를 지우지 못했습니다: $(printf '%s' "$PRODUCTS" | il_redact_home "$HOME")" >&2
+  echo "  시스템 설정 › 개인정보 보호 및 보안 › 앱 관리에서 터미널을 허용한 뒤 다시 실행하세요. (설치와 등록 해제는 끝났습니다)" >&2
+}
+# 빌드본(앱·독립 appex)의 pluginkit·LaunchServices 등록을 해제하고 .local/build/Build/Products 를 지운다 (AA2). 모듈 캐시 등은 둔다.
+purge_build() {
+  local ax
+  if [ "$DRY" -eq 0 ] && [ ! -d "$PRODUCTS" ]; then return 0; fi
+  for ax in "$PRODUCTS/Release/SDRHDR.app/Contents/PlugIns/SDRHDR Extension.appex" "$PRODUCTS/Release/SDRHDR Extension.appex"; do
+    run pluginkit -r "$ax" 2>/dev/null || true
+  done
+  for ax in "$PRODUCTS/Release/SDRHDR.app" "$PRODUCTS/Release/SDRHDR Extension.appex"; do
+    [ -x "$LSREGISTER" ] && run "$LSREGISTER" -u "$ax" 2>/dev/null || true
+  done
+  if run rm -rf "$PRODUCTS"; then PURGED=1; else warn_purge; fi
+}
+cleanup() {
+  [ "$PURGED" -eq 0 ] && [ "$DRY" -eq 0 ] && [ -d "$PRODUCTS" ] || return 0
+  purge_build
+}
 trap cleanup EXIT
+run mkdir -p "$BUILD_DIR"
+purge_build
+PURGED=0
 BUILD_LOG="$LOCAL_DIR/build.log"
-APP_BUILT="$TMP/Build/Products/Release/SDRHDR.app"
-build_cmd=(xcodebuild -project "$PROJECT" -scheme SDRHDR -configuration Release -derivedDataPath "$TMP"
+APP_BUILT="$PRODUCTS/Release/SDRHDR.app"
+build_cmd=(xcodebuild -project "$PROJECT" -scheme SDRHDR -configuration Release -derivedDataPath "$BUILD_DIR"
   -allowProvisioningUpdates
   DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic
   MACOSX_DEPLOYMENT_TARGET="$MIN_MACOS"
@@ -219,14 +243,17 @@ copies=()
 add_copy() {
   local p="$1" c
   [ -d "$p" ] || return 0
-  case "$p" in "$TMP"/*) return 0 ;; esac
+  case "$p" in "$BUILD_DIR"/*) return 0 ;; esac
   for c in ${copies[@]+"${copies[@]}"}; do [ "$c" = "$p" ] && return 0; done
   copies+=("$p")
 }
 while IFS= read -r p; do [ -n "$p" ] && add_copy "$p"; done < <(mdfind "kMDItemCFBundleIdentifier == '$BUNDLE_ID'" 2>/dev/null || true)
 add_copy "/Applications/SDRHDR.app"
 add_copy "$HOME/Applications/SDRHDR.app"
-for p in "$HOME"/Library/Developer/Xcode/DerivedData/SDRHDR-*/Build/Products/*/SDRHDR.app; do add_copy "$p"; done
+for p in "$HOME"/Library/Developer/Xcode/DerivedData/SDRHDR-*/Build/Products/*/SDRHDR.app "${TMPDIR:-/tmp}"/sdrhdr-build.*/Build/Products/*/SDRHDR.app; do add_copy "$p"; done
+# Spotlight 가 색인하지 않는 임시 폴더 사본은 pluginkit 등록 경로에서 찾는다 (AA3). 독립 appex 는 사본이 아니라 등록 해제 대상.
+PK_PATHS="$(pluginkit -m -v -A -D -i "$BUNDLE_ID.Extension" 2>/dev/null | il_pluginkit_paths || true)"
+while IFS= read -r p; do [ -n "$p" ] && add_copy "$p"; done < <(printf '%s\n' "$PK_PATHS" | il_app_of_appex)
 
 trash_move() {
   local src="$1" n=0 dest
@@ -237,6 +264,7 @@ trash_move() {
   done
   [ -x "$LSREGISTER" ] && run "$LSREGISTER" -u "$src" 2>/dev/null || true
   run mv "$src" "$dest"
+  [ -x "$LSREGISTER" ] && run "$LSREGISTER" -u "$dest" 2>/dev/null || true
 }
 
 if [ "${#copies[@]}" -eq 0 ]; then
@@ -261,6 +289,23 @@ else
   fi
 fi
 
+# 독립 appex 등록과 파일이 없는 낡은 SDRHDR 등록을 정리한다 (AA3·AA4). 파일은 건드리지 않으므로 확인하지 않는다.
+while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  case "$p" in "$BUILD_DIR"/*) continue ;; esac
+  run pluginkit -r "$p" 2>/dev/null || true
+done < <(printf '%s\n' "$PK_PATHS" | il_standalone_appex)
+if [ -x "$LSREGISTER" ]; then
+  stale=0
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    [ -e "$p" ] && continue
+    run "$LSREGISTER" -u "$p" 2>/dev/null || true
+    stale=$((stale + 1))
+  done < <("$LSREGISTER" -dump 2>/dev/null | il_parse_ls_paths || true)
+  echo "  낡은 등록 정리 ${stale}건"
+fi
+
 # ---------------------------------------------------------------- 5. 설치
 step 5 "설치"
 DEST_DIR="/Applications"
@@ -272,6 +317,8 @@ DEST="$DEST_DIR/SDRHDR.app"
 if [ -e "$DEST" ]; then trash_move "$DEST"; fi
 run ditto "$APP_BUILT" "$DEST"
 echo "  설치 위치: $DEST"
+echo "  빌드본 등록 해제·삭제"
+purge_build
 
 # ---------------------------------------------------------------- 6. 등록·실행
 if [ "$NO_OPEN" -eq 1 ]; then
@@ -282,9 +329,11 @@ else
   run open "$DEST"
   if [ "$DRY" -eq 0 ]; then
     sleep 2
-    reg="$(pluginkit -m -v -i "$BUNDLE_ID.Extension" 2>/dev/null | grep -c "$BUNDLE_ID.Extension" || true)"
+    pk_now="$(pluginkit -m -v -A -D -i "$BUNDLE_ID.Extension" 2>/dev/null | il_pluginkit_paths || true)"
+    reg="$(printf '%s\n' "$pk_now" | grep -c . || true)"
     if [ "${reg:-0}" -gt 1 ]; then
-      echo "  경고: 확장이 ${reg}곳에 등록돼 있습니다. 열린 SDR HDR 창의 '사본' 항목을 따라 정리하세요."
+      echo "  경고: 확장이 ${reg}곳에 등록돼 있습니다. 열린 SDR HDR 창의 '사본' 항목을 따라 정리하세요. 남은 경로:"
+      printf '%s\n' "$pk_now" | il_redact_home "$HOME" | sed 's/^/    /'
     fi
   fi
 fi

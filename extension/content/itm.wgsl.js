@@ -47,7 +47,7 @@ struct ItmParams { ${UNIFORM_FIELDS.map((n) => n + ': f32').join(', ')} };
 @group(0) @binding(2) var<uniform> params: ItmParams;
 `;
 
-  // 곡선·색 수식 (PLAN C-ITM 1~5). sim/tonecurve.py, content/tonecurve.js와 같은 식·계수.
+  // 곡선·색 수식 (PLAN C-ITM 1~5, 1단계는 FIX_GUIDE Z1로 v^1.961). sim/tonecurve.py, content/tonecurve.js와 같은 식·계수.
   const ITM_FN = `
 const LUMA709 = vec3f(0.2126390059, 0.7151686788, 0.0721923154);
 const LUMA_P3 = vec3f(0.2289745641, 0.6917385218, 0.0792869141);
@@ -58,10 +58,10 @@ const M709_TO_P3 = mat3x3f(
   vec3f(0.0, 0.0, 0.910520)
 );
 
-fn srgb_eotf(v: vec3f) -> vec3f {
-  let lo = v / 12.92;
-  let hi = pow((v + vec3f(0.055)) / 1.055, vec3f(2.4));
-  return select(hi, lo, v <= vec3f(0.04045));
+// 입력 선형화(FIX_GUIDE Z1): Safari 기본 재생과 같은 순수 거듭제곱. 출력은 아래 확장 sRGB OETF.
+const INPUT_GAMMA: f32 = ${paramsApi.INPUT_GAMMA.toFixed(3)};
+fn input_lin(v: vec3f) -> vec3f {
+  return pow(clamp(v, vec3f(0.0), vec3f(1.0)), vec3f(INPUT_GAMMA));
 }
 fn srgb_oetf_pos(v: vec3f) -> vec3f {
   let lo = v * 12.92;
@@ -82,7 +82,7 @@ fn curve(y: f32) -> f32 {
 }
 // OETF 직전 선형 Display P3
 fn itm_lin(rgb: vec3f) -> vec3f {
-  let lin = srgb_eotf(clamp(rgb, vec3f(0.0), vec3f(1.0))) * params.g;
+  let lin = input_lin(rgb) * params.g;
   let y = dot(lin, LUMA709);
   var outc = lin;
   var yo = 0.0;
@@ -101,7 +101,7 @@ fn itm_lin(rgb: vec3f) -> vec3f {
   // 강도 혼합(PLAN D-M4a)과 채도 슬라이더(M4-E): 선형 P3에서 identity와 ITM을 섞은 뒤 휘도 기준 채도를 곱하고 OETF.
   const MIX_FN = `
 fn itm_mix(rgb: vec3f, strength: f32, csat: f32) -> vec3f {
-  let idLin = M709_TO_P3 * srgb_eotf(clamp(rgb, vec3f(0.0), vec3f(1.0)));
+  let idLin = M709_TO_P3 * input_lin(rgb);
   var m = mix(idLin, itm_lin(rgb), strength);
   let yp = dot(m, LUMA_P3);
   m = vec3f(yp) + csat * (m - vec3f(yp));

@@ -144,12 +144,17 @@ function setup({
     },
     destroy() {},
   };
+  let lastConfig = { toneMapping: { mode: 'extended' } };
+  state.configures = [];
   const gpuCtx = {
-    configure() {},
+    configure(c) {
+      lastConfig = c;
+      state.configures.push(c);
+    },
     getConfiguration: () => ({
       format: 'rgba16float',
       colorSpace: 'display-p3',
-      toneMapping: { mode: 'extended' },
+      toneMapping: lastConfig.toneMapping,
     }),
     getCurrentTexture: () => {
       state.renders += 1;
@@ -1641,4 +1646,42 @@ test('U2-A(g): busy 생략 중에도 dirty가 유지되어 복귀 첫 렌더가 
   st = s.renderer.getStats();
   assert.deepStrictEqual([st.frames, st.sameFrameSkipped], [3, 1]);
   s.renderer.destroy();
+});
+
+test('Z2: sdr 모드는 toneMapping standard로 configure하고 강도 uniform만 0, 다른 모드로 돌아오면 extended', async () => {
+  const s = setup({
+    readyState: 4,
+    paused: false,
+    hooksSettings: { preset: 'balanced', strength: 0.5, sharpness: 0, saturation: 1 },
+  });
+  s.renderer.setMode('sdr'); // init 전: 첫 configure부터 standard
+  await s.renderer.start();
+  await s.settle();
+  assert.deepStrictEqual(
+    s.configures.map((c) => c.toneMapping.mode),
+    ['standard'],
+  );
+  assert.strictEqual(s.renderer.getStats().api.configRead.toneMapping, 'standard');
+  assert.deepStrictEqual(s.uniforms[0].writes.at(-1), f32([0, 3, 0.45, 2, 1, 1, 1, 0, 1, 0, 0, 0]));
+  // sdr 중 강도 변경은 저장값만 갱신하고 uniform은 계속 0
+  s.renderer.setParams({ strength: 0.8 });
+  assert.strictEqual(s.uniforms[0].writes.at(-1)[0], 0);
+  // itm으로 복귀: extended로 다시 configure, 저장된 강도(0.8)가 uniform에 복원
+  s.renderer.setMode('itm');
+  assert.deepStrictEqual(
+    s.configures.map((c) => c.toneMapping.mode),
+    ['standard', 'extended'],
+  );
+  assert.strictEqual(s.renderer.getStats().api.configRead.toneMapping, 'extended');
+  assert.strictEqual(s.renderer.getStats().api.configure, true);
+  assert.ok(Math.abs(s.uniforms[0].writes.at(-1)[0] - 0.8) < 1e-6);
+  // sdr 아닌 모드 사이 전환은 configure를 다시 하지 않는다
+  s.renderer.setMode('identity');
+  assert.strictEqual(s.configures.length, 2);
+  // 실행 중 itm -> sdr 전환
+  s.renderer.setMode('itm');
+  s.renderer.setMode('sdr');
+  assert.strictEqual(s.configures.at(-1).toneMapping.mode, 'standard');
+  assert.strictEqual(s.uniforms[0].writes.at(-1)[0], 0);
+  assert.strictEqual(s.uniforms.length, 1);
 });

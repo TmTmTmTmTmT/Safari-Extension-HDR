@@ -231,3 +231,28 @@
 - 구현: Y1 `CopyInfo.teamID`·`canOfferOpen`(PureLogic), 점검 시 같은 서명 팀일 때만 `newestOtherIndex`, 아니면 `newestUnverified`(열기 버튼 없이 Finder 보기만), `openNewest`에서 실행 직전 재확인 / Y3 `il_redact_home`로 install.sh 오류 줄의 홈 경로를 `~`로, 이슈 템플릿·실패 안내에 로그 공유 주의 / Y6 점검 화면·README·install.md에 "미서명 허용은 꺼 두기", manifest·popup·테스트 1.3.4
 - → verify: lint 통과, `npm test` 365/365, `test:dom` 26/26, `scripts/test-swift.sh` OK(canOfferOpen 6 케이스 추가), shellcheck 경고 0, 앱 Swift typecheck·무서명 빌드 / (1) 로컬 Mac
 - 미검증(사용자 Mac): 같은 팀/다른 팀/읽기 불가 사본에서 열기 버튼 표시. 샌드박스에서 홈 아래 사본은 팀 ID를 읽을 수 없어 항상 "확인 불가"가 될 가능성이 높음(DerivedData 사본이 더 새로우면 열기 대신 Finder 보기)
+
+## Z 회차 (1.3.5, 브랜치 claude/z-input-gamma, 2026-10-07) — FIX_GUIDE Z 회차
+
+- 원인(Opus 판정): 확장이 입력을 sRGB 곡선으로 디코딩, Safari 기본 재생은 약 1.961 순수 거듭제곱 → 최암부는 뜨고 중간톤은 눌림. 곡선·게인·채도·EDR 백라이트는 원인 아님
+- 구현: `params.js` `INPUT_GAMMA = 1.961`(출처 한 곳), `itm.wgsl.js` ITM 입력 `input_lin`(v^γ, 클램프)으로 교체 2곳·`srgb_eotf` 제거(identity·stripes 불변), `tonecurve.js` `inputEotf`, `sim/tonecurve.py` `input_eotf`·`INPUT_GAMMA`. sim의 ITM 입력 미러 전부(`color`·`refs`·`headroom`·`banding`·`explore`)도 `input_eotf`로 통일(계획 문구는 `tonecurve.py`와 관련 테스트였으나 같은 입력 경로의 미러라 함께 바꿈). 참조 JSON 재생성(`input_gamma` 키 추가). identity 안내 한 줄(install.md), checklist "Z 회차 확인", 버전 1.3.5
+- → verify: lint 통과, `npm test` 367/367, `test:dom` 26/26, `.venv/bin/python -m pytest sim` 164/164(새 케이스: 강도 0 = v^γ 디코딩·단조·흰색 불변·암부 낮아짐), (1) 로컬 Mac
+- S10·S5 전후(sim): 균형 H=2 잘림 코드 16→19(240→237부터), H=3·4 잘림 없음 유지. 선명 H=2 25→28, H=3 11→13, H=4 0 유지. 정확은 0 유지. 밴딩 amp_enc_max 정확 3.33→2.87, 균형 4.35→3.75, 선명 5.29→4.57(하이라이트 계단 완화). 기준 불통과 없음
+- 미검증(사용자 Mac): 강도 0%가 확장 꺼짐과 암부·중간톤이 같아졌는지, 기본 설정 체감(checklist "Z 회차 확인"). WebGPU 컴파일·화면은 확인하지 않음
+- 미실시: 커밋·PR(사용자 지시 대기)
+
+## Z2·AA 회차 (1.3.6, 브랜치 claude/z-input-gamma, 2026-10-07) — FIX_GUIDE Z2·AA
+
+- Z2: 진단 모드 `sdr`(itm 셰이더, uniform 강도 0 고정·저장값 유지, 캔버스 toneMapping standard, 다른 모드 복귀 시 extended). `params.MODES`·popup option·`renderer.configureCanvas`, 결과 스키마 `render.mode` enum에 `sdr`(진단 schemaVersion은 올리지 않음 — 값 추가만), 버전 1.3.6, install.md·checklist "Z2 확인"
+- AA: install.sh 빌드 위치를 `.local/build` 고정, 설치 직후 빌드본 `pluginkit -r`·`lsregister -u`·삭제(실패 시 경고+앱 관리 안내), 사본 탐색에 pluginkit 경로·`$TMPDIR/sdrhdr-build.*` 추가, 파일 없는 낡은 등록 정리(`il_parse_ls_paths` 등), 6단계 경고에 남은 경로, GUIDELINES 7-8(AA6), install.md 3-1
+- → verify: lint 통과, `npm test` 372/372, `test:dom` 26/26, `.venv/bin/python -m pytest sim` 164/164, `bash -n` 통과, `install.sh --dry-run -y --no-open` 새 단계 출력 확인 / (1) 로컬 Mac
+- 미검증(사용자 Mac): `standard` toneMapping이 실제로 EDR을 끄는지·Z2 판정, install.sh 실제 실행 시 등록 해제·삭제, shellcheck(이 Mac에 없음, CI에서 확인)
+- 계획 이탈·해석(Opus 판단 요청): ① GUIDELINES 2.9-2 "rm으로 앱 삭제 금지"와 AA2 `rm -rf .local/build/Build/Products`(빌드 산출물)의 충돌 여부 ② AB 버전이 FIX_GUIDE에 1.3.6으로 적혀 Z2와 충돌 → AB는 1.3.7로 미룸(Z2가 1.3.6 선점) ③ 결과 스키마 enum 추가(MODES 순서와 일치)는 Z2 (b) 해석으로 직접 수정
+- 남음: AB(사본 중복 동작 방어, Z2와 파일 겹쳐 별도), M10(부분 대비, Z 체감 회신 후). 사용자 임시 조치: 임시 빌드 폴더·scratchpad 사본 등록 해제 후 Safari ⌘Q
+
+## AB 회차 (1.3.7, 2026-10-07) — FIX_GUIDE AB
+
+- 구현: 페이지 단일 소유권. `document.documentElement`의 `data-sdrhdr-owner`(무작위 토큰) 확인·획득(50ms 뒤 재확인), 소유자가 아니면 attach·키 리스너·상태 알림 없이 `getState`가 `other`. 속성이 사라지면 MutationObserver로 재시도, 소유자는 끌 때·`pagehide`에 제거, `pageshow`에서 재획득. `params.ownerAction`(순수)·`statusOf` other 레벨, popup 안내 문구, 버전 1.3.7
+- → verify: lint 통과, `npm test` 386/386, `test:dom` 28/28(`ab-owner.spec.js` 신규), pytest sim 164/164 / (1) 로컬 Mac
+- 계획 밖 해석(Opus 확인 요청): ① 꺼진 인스턴스는 표지를 쓰지 않음, 남의 표지가 있으면 popup은 "꺼짐" ② `pageshow` 재획득 추가(bfcache) ③ 양보한 사본은 background에 알리지 않아 툴바 배지 '!'는 표시되지 않음 ④ 소유자가 죽었는데 문서가 살아 있으면(확장 재로드) 표지가 남아 새로고침 전까지 `other`로 보일 수 있음(설계 범위 밖, 체크리스트에 한계로 기재)
+- 미검증(사용자 Mac): 실제 Safari 격리 세계에서 사본 2개 동작, 배지·popup 표시

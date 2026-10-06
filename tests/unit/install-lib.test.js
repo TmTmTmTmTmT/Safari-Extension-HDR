@@ -137,3 +137,46 @@ test('il_redact_home: 홈 경로를 ~ 로', () => {
   assert.strictEqual(sh('il_redact_home "/"', 'x /Users/a\n').out, 'x /Users/a');
   assert.strictEqual(sh('il_redact_home "/a#b"', 'x /a#b/c\n').out, 'x /a#b/c');
 });
+
+const LS_DUMP = `--------------------------------------------------------------------------------
+BundleClass:  kLSBundleClassApplication
+path:         /Applications/SDRHDR.app (0x2c9c)
+name:         SDRHDR
+--------------------------------------------------------------------------------
+path:         /private/var/folders/xx/T/sdrhdr-build.AbCdEf/Build/Products/Release/SDRHDR Extension.appex (0x3a10)
+--------------------------------------------------------------------------------
+path:         /Users/fake/.Trash/SDRHDR.app/Contents/PlugIns/SDRHDR Extension.appex (0x3b00)
+path:         /Applications/Other.app (0x1111)
+path:         /Applications/SDRHDR.app (0x2c9d)
+executable:   Contents/MacOS/SDRHDR
+`;
+
+test('il_parse_ls_paths: SDRHDR 경로만, 표지 제거, 중복 제거', () => {
+  const r = sh('il_parse_ls_paths', LS_DUMP);
+  assert.deepStrictEqual(r.out.split('\n'), [
+    '/Applications/SDRHDR.app',
+    '/private/var/folders/xx/T/sdrhdr-build.AbCdEf/Build/Products/Release/SDRHDR Extension.appex',
+    '/Users/fake/.Trash/SDRHDR.app/Contents/PlugIns/SDRHDR Extension.appex',
+  ]);
+  assert.strictEqual(sh('il_parse_ls_paths', '').out, '');
+});
+
+const PK = `+    io.github.fake.SDRHDR.Extension(1.3.5)\tAAAA-BBBB\t2026-10-07 10:00:00 +0000\t/Applications/SDRHDR.app/Contents/PlugIns/SDRHDR Extension.appex
+     io.github.fake.SDRHDR.Extension(1.3.5)\tCCCC-DDDD\t2026-10-07 10:01:00 +0000\t/private/var/folders/xx/T/sdrhdr-build.AbCdEf/Build/Products/Release/SDRHDR.app/Contents/PlugIns/SDRHDR Extension.appex
+     io.github.fake.SDRHDR.Extension(1.3.5)\tEEEE-FFFF\t2026-10-07 10:02:00 +0000\t/private/var/folders/xx/T/sdrhdr-build.AbCdEf/Build/Products/Release/SDRHDR Extension.appex
+`;
+
+test('il_pluginkit_paths / il_app_of_appex / il_standalone_appex', () => {
+  const paths = sh('il_pluginkit_paths', PK).out.split('\n');
+  assert.strictEqual(paths.length, 3);
+  assert.strictEqual(paths[0], '/Applications/SDRHDR.app/Contents/PlugIns/SDRHDR Extension.appex');
+  const apps = sh('il_app_of_appex', paths.join('\n') + '\n').out.split('\n');
+  assert.deepStrictEqual(apps, [
+    '/Applications/SDRHDR.app',
+    '/private/var/folders/xx/T/sdrhdr-build.AbCdEf/Build/Products/Release/SDRHDR.app',
+  ]);
+  assert.deepStrictEqual(sh('il_standalone_appex', paths.join('\n') + '\n').out.split('\n'), [
+    '/private/var/folders/xx/T/sdrhdr-build.AbCdEf/Build/Products/Release/SDRHDR Extension.appex',
+  ]);
+  assert.strictEqual(sh('il_pluginkit_paths', '').out, '');
+});

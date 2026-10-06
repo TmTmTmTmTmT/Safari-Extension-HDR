@@ -130,7 +130,7 @@
         },
         "mode": {
           "type": ["string", "null"],
-          "enum": ["itm", "identity", "stripes", "baseline", null],
+          "enum": ["itm", "sdr", "identity", "stripes", "baseline", null],
           "description": "baseline은 schemaVersion 5 이상의 진단용: 캔버스를 숨기고 rAF 루프만 돈다(렌더 없음, frames 0, path null)."
         },
         "frames": { "type": ["number", "null"] },

@@ -173,7 +173,7 @@ const flushN = async (n = 5) => {
 };
 const NONE_TEXT = '이 탭에서는 동작하지 않음';
 const NONE_HINT =
-  '대상: www.youtube.com 영상 페이지(임베드·music.youtube.com 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근을 허용한 뒤 새로고침하세요';
+  '대상: www.youtube.com 영상 페이지(임베드·music.youtube.com 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근을 허용한 뒤 새로고침하세요. Safari 설정 › 확장에 SDR HDR가 여러 개 보이면 앱에서 사본을 정리하세요';
 const okStatus = { level: 'ok', text: 'HDR 변환 중', hint: '', badge: null };
 const tabsStub = (res, tabList = [{ id: 7 }]) => {
   const calls = { query: [], send: [] };
@@ -713,6 +713,24 @@ test('상태 줄: 요청 거부·무응답·잘못된 응답은 동작하지 않
     assert.strictEqual(els.status.cls.has('status-none'), true);
     assert.strictEqual(els.status.cls.has('status-off'), false);
   }
+});
+
+test('상태 줄: other 응답은 문구·hint·status-other 클래스로 표시 (AB2)', async () => {
+  const { params } = await setup({}, { tabs: tabsStub({ status: okStatus }) });
+  const st = params.statusOf({ enabled: true, mode: 'itm', other: true });
+  const tabs = tabsStub({ status: st, input: {} });
+  const { els } = await setup({}, { tabs });
+  await flushN();
+  assert.strictEqual(els['status-text'].textContent, '다른 SDR HDR 사본이 동작 중');
+  assert.ok(els['status-hint'].textContent.includes('이전 사본을 정리'));
+  assert.strictEqual(els.status.cls.has('status-other'), true);
+  assert.strictEqual(els.status.cls.has('status-none'), false);
+});
+
+test('상태 줄: NONE 안내 끝에 사본 정리 문장이 있다 (AB3)', () => {
+  assert.ok(
+    NONE_HINT.endsWith('Safari 설정 › 확장에 SDR HDR가 여러 개 보이면 앱에서 사본을 정리하세요'),
+  );
 });
 
 test('상태 줄: 탭 없음·id 없음·browser.tabs 없음에서도 죽지 않음', async () => {
@@ -1320,4 +1338,12 @@ test('내 프리셋: 이름은 textContent로만 들어가고 HTML로 해석되�
   els['up-list'].value = 'u1';
   els['up-load'].fire('click');
   assert.ok(els['backup-text'].textContent.includes('「<b>x</b>」'));
+});
+
+test('Z2: 모드 select에 sdr option이 있고 sdr 저장 모드도 진단 모드처럼 잠근다', async () => {
+  const html = read('popup/popup.html');
+  assert.ok(html.includes('<option value="sdr">sdr (EDR 끔, 원본과 비교)</option>'));
+  const { els } = await setup({ 'sdrhdr.mode': 'sdr' });
+  assert.strictEqual(els.mode.value, 'sdr');
+  assert.strictEqual(els['diag-banner'].hidden, false);
 });

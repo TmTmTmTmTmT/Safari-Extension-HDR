@@ -78,7 +78,7 @@ test('canvasResolution: min(원본, 표시 x DPR) (probe와 같은 사례)', () 
 
 test('normalizeSettings: 잘못된 값은 기본값', () => {
   const { normalizeSettings, KEYS, MODES } = ns.params;
-  assert.deepStrictEqual(plain(MODES), ['itm', 'identity', 'stripes', 'baseline']);
+  assert.deepStrictEqual(plain(MODES), ['itm', 'sdr', 'identity', 'stripes', 'baseline']);
   const def = {
     enabled: true,
     mode: 'itm',
@@ -778,6 +778,7 @@ test('buildDiag v5: render.cadence와 baseline 모드, 스키마 선언 일치',
   for (const k of Object.keys(d.render.cadence)) assert.ok(k in cp, k);
   assert.deepStrictEqual(schema.properties.render.properties.mode.enum, [
     'itm',
+    'sdr',
     'identity',
     'stripes',
     'baseline',
@@ -1299,4 +1300,47 @@ test('setWithRetry: 실패하면 1초 뒤 1회 재시도, 결과는 true/false, 
     { 'sdrhdr.enabled': false },
   ]);
   assert.deepStrictEqual(plain(ns.params.LEGACY_KEYS), ['sdrhdr.diag', 'sdrhdr.diagRequest']);
+});
+
+test('Z2: sdr 모드는 normalizeSettings를 통과하고 statusOf는 진단 모드로 표시', () => {
+  const n = ns.params.normalizeSettings({
+    [ns.params.KEYS.mode]: 'sdr',
+    [ns.params.KEYS.strength]: 0.7,
+  });
+  assert.strictEqual(n.mode, 'sdr');
+  assert.strictEqual(n.strength, 0.7); // 저장된 강도는 그대로
+  const st = plain(ns.params.statusOf({ enabled: true, mode: 'sdr', state: 'active' }));
+  assert.strictEqual(st.level, 'diag');
+});
+
+test('ownerAction: 비어 있음→acquire, 남의 토큰→yield, 자기 토큰→keep, 제거 후 재획득 (AB1)', () => {
+  const f = ns.params.ownerAction;
+  assert.strictEqual(f('', 'me'), 'acquire');
+  assert.strictEqual(f(null, 'me'), 'acquire');
+  assert.strictEqual(f(undefined, 'me'), 'acquire');
+  assert.strictEqual(f('other', 'me'), 'yield');
+  assert.strictEqual(f('me', 'me'), 'keep');
+  // 속성 제거(빈 값) 뒤에는 다시 획득할 수 있다
+  assert.strictEqual(f('other', 'me'), 'yield');
+  assert.strictEqual(f(null, 'me'), 'acquire');
+  // 토큰이 비어 있으면 빈 속성과 일치해도 keep으로 보지 않는다
+  assert.strictEqual(f('x', ''), 'yield');
+  assert.strictEqual(ns.params.OWNER_ATTR, 'data-sdrhdr-owner');
+  assert.ok(ns.params.OWNER_CONFIRM_MS > 0);
+});
+
+test('statusOf: other 레벨 문구·hint·배지, 꺼짐이 other보다 먼저 (AB2)', () => {
+  const o = plain(ns.params.statusOf({ enabled: true, mode: 'itm', other: true }));
+  assert.strictEqual(o.level, 'other');
+  assert.strictEqual(o.text, '다른 SDR HDR 사본이 동작 중');
+  assert.strictEqual(
+    o.hint,
+    'Safari 설정 › 확장에 SDR HDR가 여러 개입니다. SDR HDR 앱을 열어 이전 사본을 정리한 뒤 Safari를 재시작하세요',
+  );
+  assert.strictEqual(o.badge.text, '!');
+  assert.strictEqual(plain(ns.params.statusOf({ enabled: false, other: true })).level, 'off');
+  assert.strictEqual(
+    plain(ns.params.statusOf({ enabled: true, mode: 'baseline', other: true })).level,
+    'other',
+  );
 });

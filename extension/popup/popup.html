@@ -109,6 +109,12 @@
       #status.status-error #status-text {
         color: var(--err);
       }
+      #status.status-other {
+        border-left-color: var(--err);
+      }
+      #status.status-other #status-text {
+        color: var(--err);
+      }
       #status.status-diag {
         border-left-color: var(--diag);
       }
@@ -157,7 +163,7 @@
   <body>
     <header>
       <h1>SDR HDR</h1>
-      <span class="ver" id="version">v1.3.4</span>
+      <span class="ver" id="version">v1.3.7</span>
       <label class="switch"
         ><span id="enabled-state">켜짐</span>
         <input type="checkbox" id="enabled" switch checked aria-label="HDR 변환" />
@@ -293,6 +299,7 @@
         >모드
         <select id="mode">
           <option value="itm">itm (정상)</option>
+          <option value="sdr">sdr (EDR 끔, 원본과 비교)</option>
           <option value="identity">identity (변환 없이 출력)</option>
           <option value="stripes">stripes (밝기 단계 줄무늬)</option>
           <option value="baseline">baseline (렌더 없음, 비교 기준)</option>

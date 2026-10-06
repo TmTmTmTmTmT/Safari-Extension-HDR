@@ -65,6 +65,7 @@ def build():
             "cases": sharp_cases,
         },
         "luma_p3": [round(float(x), 9) for x in tc.LUMA_P3],
+        "input_gamma": tc.INPUT_GAMMA,
     }
 
 

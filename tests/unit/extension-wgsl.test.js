@@ -107,6 +107,20 @@ test('WGSL 계수 = JS 미러 계수 (휘도·709→P3 행렬)', () => {
   }
 });
 
+test('ITM 입력 선형화는 v^INPUT_GAMMA 이고 params.INPUT_GAMMA에서 조립된다 (FIX_GUIDE Z1)', () => {
+  const g = ext.params.INPUT_GAMMA.toFixed(3);
+  for (const code of [ext.itm.VIDEO_ITM, ext.itm.VIDEO_ITM_COPY]) {
+    assert.ok(code.includes(`const INPUT_GAMMA: f32 = ${g};`));
+    assert.ok(code.includes('fn input_lin(v: vec3f)'));
+    assert.ok(!code.includes('srgb_eotf'), 'ITM 경로에 sRGB EOTF 호출 없음');
+    assert.ok(code.includes('input_lin(rgb) * params.g'));
+    assert.ok(code.includes('M709_TO_P3 * input_lin(rgb)'));
+    assert.ok(code.includes('fn ext_oetf'), '출력 인코딩은 확장 sRGB OETF 그대로');
+  }
+  // identity는 변환 없는 원시 출력으로 그대로
+  assert.ok(!ext.itm.VIDEO_IDENTITY.includes('input_lin'));
+});
+
 test('복사 경로 셰이더: 바인딩 타입과 샘플 함수만 외부 텍스처용과 다르고 본문은 같다', () => {
   const EXT_BIND = '@group(0) @binding(1) var tex: texture_external;';
   const COPY_BIND = '@group(0) @binding(1) var tex: texture_2d<f32>;';

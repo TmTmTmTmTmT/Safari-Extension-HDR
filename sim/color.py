@@ -113,7 +113,7 @@ def color_shift(rgb, params):
     """패치별 (ΔE vs 채도조정 없음, 색상각차(도), ΔE vs SDR 측색적)."""
     out = tc.itm_linear(rgb, **params)
     ref = tc.itm_linear(rgb, **_ref_kwargs(params))
-    sdr = tc.srgb_eotf(rgb) @ tc.M709_TO_P3.T
+    sdr = tc.input_eotf(rgb) @ tc.M709_TO_P3.T
     return delta_e_itp(out, ref), hue_diff_deg(out, ref), delta_e_itp(out, sdr)
 
 
@@ -123,7 +123,7 @@ def sat_hs_sweep(base="균형", s_list=(0.8, 1.0, 1.2, 1.5), hs_list=(0.5, 1.0, 
     L0.5 패치 일부도 확장 구간에 들어가므로 이름이 아니라 휘도로 나눈다)."""
     names, rgb = chroma_patches()
     base_p = PRESETS[base].kwargs()
-    y = (tc.srgb_eotf(rgb) * base_p["g"]) @ tc.LUMA_709
+    y = (tc.input_eotf(rgb) * base_p["g"]) @ tc.LUMA_709
     hi = y > base_p["k"]
     rows = []
     for s in s_list:

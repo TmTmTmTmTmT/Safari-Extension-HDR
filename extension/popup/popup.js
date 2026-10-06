@@ -25,12 +25,12 @@
   let userPresets = []; // 내 프리셋 목록(저장 순서)
   const UP_STATUS_MS = 2000; // '저장됨'·'삭제됨' 표시 시간
   let statusSeq = 0; // 늦게 도착한 이전 응답이 새 결과를 덮지 않게 하는 요청 번호
-  const STATUS_LEVELS = ['ok', 'wait', 'skip', 'error', 'off', 'diag', 'none'];
+  const STATUS_LEVELS = ['ok', 'wait', 'skip', 'error', 'off', 'diag', 'none', 'other'];
   // 대상 페이지가 아니거나 content script가 없을 때(응답 없음)의 표시. 이 문구만 popup이 가진다.
   const NONE_STATUS = {
     level: 'none',
     text: '이 탭에서는 동작하지 않음',
-    hint: '대상: www.youtube.com 영상 페이지(임베드·music.youtube.com 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근을 허용한 뒤 새로고침하세요',
+    hint: '대상: www.youtube.com 영상 페이지(임베드·music.youtube.com 제외). 영상 페이지인데 이 문구가 보이면 Safari 설정 › 확장 › SDR HDR에서 www.youtube.com 접근을 허용한 뒤 새로고침하세요. Safari 설정 › 확장에 SDR HDR가 여러 개 보이면 앱에서 사본을 정리하세요',
   };
 
   // 슬라이더(강도·선명도·채도). 표시값은 %이고 저장값은 params 범위의 숫자다.

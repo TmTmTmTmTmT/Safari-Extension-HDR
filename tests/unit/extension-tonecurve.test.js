@@ -95,3 +95,20 @@ test('성질: 강도 0은 색 변환만, 채도 1·선명도 0은 항등, 피크
   const sat = tc.saturateP3([0.3, 0.6, 1.2], 1);
   assert.deepStrictEqual(plain(sat), [0.3, 0.6, 1.2]);
 });
+
+test('입력 감마 (FIX_GUIDE Z1): params·numpy 참조와 같고 강도 0은 v^γ 디코딩 후 색 변환', () => {
+  assert.strictEqual(params.INPUT_GAMMA, ref.input_gamma);
+  assert.strictEqual(params.INPUT_GAMMA, 1.961);
+  const v = [0.04, 0.1, 0.5];
+  const out = tc.itmLinearStrength(v, 0, params.PRESETS.balanced);
+  const lin = v.map((x) => Math.pow(x, 1.961));
+  for (let i = 0; i < 3; i++) {
+    const want =
+      tc.M709_TO_P3[i][0] * lin[0] + tc.M709_TO_P3[i][1] * lin[1] + tc.M709_TO_P3[i][2] * lin[2];
+    assert.ok(Math.abs(out[i] - want) < 1e-12, `ch=${i}`);
+  }
+  // 암부: 코드 10/255는 sRGB 직선 구간보다 낮게 디코딩된다 (암부 들뜸 제거 방향)
+  assert.ok(tc.inputEotf(10 / 255) < tc.srgbEotf(10 / 255) / 1.5);
+  assert.strictEqual(tc.inputEotf(1), 1);
+  assert.strictEqual(tc.inputEotf(-0.5), 0);
+});

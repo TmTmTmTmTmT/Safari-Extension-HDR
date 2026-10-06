@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
 
 const root = path.join(__dirname, '..', '..', 'extension');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
@@ -26,6 +27,38 @@ function emitter() {
   };
 }
 
+// 속성 변화를 동기로 알리는 가짜 documentElement와 MutationObserver (소유권 테스트용).
+function makeDocEl() {
+  const attrs = new Map();
+  const observers = new Set();
+  const notify = () => [...observers].forEach((o) => o.cb([]));
+  return {
+    observers,
+    getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null),
+    setAttribute(k, v) {
+      attrs.set(k, String(v));
+      notify();
+    },
+    removeAttribute(k) {
+      attrs.delete(k);
+      notify();
+    },
+  };
+}
+function makeObserverClass(el) {
+  return class {
+    constructor(cb) {
+      this.cb = cb;
+    }
+    observe() {
+      el.observers.add(this);
+    }
+    disconnect() {
+      el.observers.delete(this);
+    }
+  };
+}
+
 function makeVideo(src) {
   const v = Object.assign(emitter(), { currentSrc: src, mediaKeys: null, webkitKeys: null });
   return v;
@@ -42,7 +75,7 @@ const BASE = {
   notify: true,
 };
 
-async function setup(mode = 'itm', enabled = true) {
+async function setup(mode = 'itm', enabled = true, opts = {}) {
   const calls = [];
   const intervals = [];
   const doc = Object.assign(emitter(), {
@@ -63,7 +96,11 @@ async function setup(mode = 'itm', enabled = true) {
       onMessage: { addListener: (fn) => rt.listeners.push(fn) },
     },
   };
-  const win = emitter(); // window: blur 이벤트용
+  const win = emitter(); // window: blur·pagehide 이벤트용
+  // 소유권 테스트용: docEl을 주면 document.documentElement로 쓴다(여러 인스턴스가 같은 docEl 공유).
+  // 소유 확정 지연 타이머는 기본으로 즉시 실행하고, opts.manual이면 모아 두었다가 t.flushOwner()로 실행한다.
+  const ownerTimers = [];
+  if (opts.docEl) doc.documentElement = opts.docEl;
   const dom = { video: makeVideo('blob:a'), container: { id: 'c' }, player: { id: 'p' } };
   doc.querySelector = (sel) => {
     if (!dom.player) return null;
@@ -88,8 +125,15 @@ async function setup(mode = 'itm', enabled = true) {
     location: { href: 'https://www.youtube.com/watch?v=abc' },
     screen: { width: 1, height: 1 },
     performance: { now: () => 0 },
-    setTimeout: () => 0,
+    setTimeout: (fn, ms) => {
+      if (ctx.__sdrhdr && ms === ctx.__sdrhdr.params.OWNER_CONFIRM_MS) {
+        if (opts.manual) ownerTimers.push(fn);
+        else fn();
+      }
+      return 0;
+    },
     clearTimeout() {},
+    ...(opts.docEl ? { MutationObserver: makeObserverClass(opts.docEl), crypto: webcrypto } : {}),
     setInterval: (fn) => intervals.push(fn),
     Promise,
     browser,
@@ -203,6 +247,8 @@ async function setup(mode = 'itm', enabled = true) {
     win,
     rt,
     sent,
+    ownerTimers,
+    flushOwner: () => ownerTimers.splice(0).forEach((fn) => fn()),
     enabledWrites,
     settings: (s) => settingsCb(s),
   });
@@ -911,4 +957,122 @@ test('진단: devicesCreated는 detach된 renderer까지 누적, gpuBusySkipped�
   assert.strictEqual(t.renderers.length, 2);
   d = await diagOf(t);
   assert.strictEqual(d.render.devicesCreated, 2, '이전 renderer의 1 + 현재 1');
+});
+
+// 페이지 단일 소유권 (FIX_GUIDE AB1). Safari 확장 격리 세계의 실동작 검증이 아니라 stub 환경 검사다.
+const OWNER = 'data-sdrhdr-owner';
+
+test('소유권: 비어 있으면 자기 토큰을 쓰고 확정 뒤에 attach한다(지연 중에는 attach 안 함)', async () => {
+  const el = makeDocEl();
+  const t = await setup('itm', true, { docEl: el, manual: true });
+  assert.ok(el.getAttribute(OWNER), '토큰을 썼다');
+  assert.strictEqual(t.calls.filter((c) => c === 'start').length, 0);
+  assert.strictEqual(t.ownerTimers.length, 1);
+  t.flushOwner();
+  assert.strictEqual(t.calls.filter((c) => c === 'start').length, 1);
+  assert.strictEqual(t.renderers.length, 1);
+});
+
+test('소유권: 이미 다른 토큰이 있으면 attach·키 리스너·상태 알림 없이 getState는 other', async () => {
+  const el = makeDocEl();
+  el.setAttribute(OWNER, 'someone-else');
+  const t = await setup('itm', true, { docEl: el });
+  assert.strictEqual(t.renderers.length, 0);
+  assert.strictEqual(t.doc.l.keydown, undefined);
+  assert.strictEqual(t.doc.l.keyup, undefined);
+  assert.strictEqual(t.intervals.length, 0);
+  assert.strictEqual(t.sent.length, 0);
+  assert.strictEqual(el.getAttribute(OWNER), 'someone-else', '남의 표지를 건드리지 않는다');
+  const r = plain(await getState(t));
+  assert.strictEqual(r.status.level, 'other');
+  assert.strictEqual(r.status.text, '다른 SDR HDR 사본이 동작 중');
+  assert.strictEqual(r.input.other, true);
+  assert.ok(!JSON.stringify(r).includes('watch'));
+});
+
+test('소유권: 두 번째 인스턴스는 attach하지 않고 키 반응도 소유자 1개뿐', async () => {
+  const el = makeDocEl();
+  const a = await setup('itm', true, { docEl: el });
+  const b = await setup('itm', true, { docEl: el });
+  assert.strictEqual(a.renderers.length, 1);
+  assert.strictEqual(b.renderers.length, 0);
+  assert.strictEqual(b.doc.l.keydown, undefined);
+  assert.ok(a.doc.l.keydown && a.doc.l.keydown.size === 1);
+  assert.strictEqual(plain(await getState(a)).status.level !== 'other', true);
+  assert.strictEqual(plain(await getState(b)).status.level, 'other');
+});
+
+test('소유권: 동시 쓰기 경합은 마지막에 쓴 쪽만 소유자가 된다', async () => {
+  const el = makeDocEl();
+  const a = await setup('itm', true, { docEl: el, manual: true });
+  const tokenA = el.getAttribute(OWNER);
+  el.setAttribute(OWNER, 'late-writer'); // 다른 사본이 이어서 씀
+  a.flushOwner();
+  assert.strictEqual(a.renderers.length, 0);
+  assert.strictEqual(plain(await getState(a)).status.level, 'other');
+  assert.notStrictEqual(tokenA, 'late-writer');
+});
+
+test('소유권: 속성이 사라지면 재시도해 소유자가 된다', async () => {
+  const el = makeDocEl();
+  el.setAttribute(OWNER, 'someone-else');
+  const t = await setup('itm', true, { docEl: el });
+  assert.strictEqual(t.renderers.length, 0);
+  el.removeAttribute(OWNER);
+  assert.strictEqual(t.renderers.length, 1);
+  assert.ok(el.getAttribute(OWNER));
+  assert.notStrictEqual(plain(await getState(t)).status.level, 'other');
+});
+
+test('소유권: 끄면 표지를 지우고 다른 사본이 이어받으며, 다시 켜면 남이 있을 때 양보한다', async () => {
+  const el = makeDocEl();
+  const a = await setup('itm', true, { docEl: el });
+  const b = await setup('itm', true, { docEl: el });
+  assert.strictEqual(b.renderers.length, 0);
+  a.settings({ ...BASE, enabled: false });
+  assert.strictEqual(b.renderers.length, 1, 'b가 이어받는다');
+  const tokenB = el.getAttribute(OWNER);
+  assert.ok(tokenB);
+  a.settings({ ...BASE, enabled: true });
+  assert.strictEqual(a.renderers.length, 1, 'a는 다시 attach하지 않는다');
+  assert.strictEqual(el.getAttribute(OWNER), tokenB);
+  assert.strictEqual(plain(await getState(a)).status.level, 'other');
+});
+
+test('소유권: 남의 표지가 있을 때 꺼진 인스턴스는 표지를 쓰지 않고 상태는 꺼짐', async () => {
+  const el = makeDocEl();
+  el.setAttribute(OWNER, 'someone-else');
+  const t = await setup('itm', false, { docEl: el });
+  assert.strictEqual(el.getAttribute(OWNER), 'someone-else');
+  assert.strictEqual(t.doc.l.keydown, undefined);
+  assert.strictEqual(plain(await getState(t)).status.level, 'off');
+});
+
+test('소유권: 꺼진 채 시작해도 표지는 쓰지 않는다. 켜면 획득한다', async () => {
+  const el = makeDocEl();
+  const t = await setup('itm', false, { docEl: el });
+  assert.strictEqual(el.getAttribute(OWNER), null);
+  assert.ok(t.doc.l.keydown, '꺼진 빈 슬롯은 단축키로 켤 수 있게 활성화');
+  t.settings({ ...BASE, enabled: true });
+  assert.ok(el.getAttribute(OWNER));
+  assert.strictEqual(t.renderers.length, 1);
+});
+
+test('소유권: pagehide에 표지를 지우고(자기 것만), pageshow에서 다시 얻는다', async () => {
+  const el = makeDocEl();
+  const t = await setup('itm', true, { docEl: el });
+  assert.ok(el.getAttribute(OWNER));
+  t.win.fire('pagehide');
+  assert.strictEqual(el.getAttribute(OWNER), null);
+  t.win.fire('pageshow');
+  assert.ok(el.getAttribute(OWNER));
+  assert.strictEqual(t.renderers.length, 1, 'cur가 남아 있으면 다시 attach하지 않는다');
+  const other = await setup('itm', true, { docEl: el });
+  other.win.fire('pagehide'); // 소유자가 아닌 쪽의 pagehide는 남의 표지를 지우지 않는다
+  assert.ok(el.getAttribute(OWNER));
+});
+
+test('소유권: documentElement가 없는 환경은 소유권 없이 기존대로 동작', async () => {
+  const t = await setup();
+  assert.strictEqual(t.renderers.length, 1);
 });

@@ -38,6 +38,16 @@ LUMA_709 = M709_TO_XYZ[1]  # BT.709 휘도 계수 (0.2126, 0.7152, 0.0722)
 LUMA_P3 = M_P3_TO_XYZ[1]  # Display P3 휘도 계수 (0.2290, 0.6917, 0.0793), 채도 슬라이더(PLAN D-M4 M4-E)에서 사용
 
 
+# PLAN/FIX_GUIDE Z1: Safari 기본 재생은 BT.709 영상을 감마 약 1.961 순수 거듭제곱으로 디코딩한다.
+# 확장 ITM 경로의 입력 선형화가 같은 값을 쓴다. 정의의 출처는 extension/content/params.js INPUT_GAMMA.
+INPUT_GAMMA = 1.961
+
+
+def input_eotf(v):
+    """1단계(ITM 입력): 영상 인코딩 -> 선형, v^INPUT_GAMMA. 셰이더와 같이 [0,1]로 클램프."""
+    return np.power(np.clip(np.asarray(v, dtype=np.float64), 0.0, 1.0), INPUT_GAMMA)
+
+
 def srgb_eotf(v):
     """1단계: sRGB 인코딩 -> 선형. 음수 입력은 부호 보존."""
     v = np.asarray(v, dtype=np.float64)
@@ -70,16 +80,16 @@ def curve_scale(Y, P, k, n):
 
 
 def itm_linear_strength(rgb_enc, t, P, k, n, g, s, hs):
-    """PLAN D-M4a: 선형 P3에서 identity(sRGB EOTF -> 709->P3, 곡선·게인·채도 없음)와 ITM 결과를 t로 섞는다.
+    """PLAN D-M4a: 선형 P3에서 identity(입력 EOTF -> 709->P3, 곡선·게인·채도 없음)와 ITM 결과를 t로 섞는다.
     t=0 은 색 변환만 한 SDR, t=1 은 itm_linear 와 같다. 혼합 후 OETF 는 호출자가 적용한다."""
-    id_lin = srgb_eotf(rgb_enc) @ M709_TO_P3.T
+    id_lin = input_eotf(rgb_enc) @ M709_TO_P3.T
     itm_lin = itm_linear(rgb_enc, P, k, n, g, s, hs)
     return id_lin + t * (itm_lin - id_lin)
 
 
 def itm_linear(rgb_enc, P, k, n, g, s, hs):
     """1~5단계 중 OETF 직전까지. 반환: 선형 Display P3 (음수/초과 가능)."""
-    rgb = srgb_eotf(rgb_enc) * g  # 1, 2
+    rgb = input_eotf(rgb_enc) * g  # 1, 2
     Y = rgb @ LUMA_709  # 3
     rgb = rgb * curve_scale(Y, P, k, n)[..., None]  # 4 색상 보존
     Yo = (rgb @ LUMA_709)[..., None]
