@@ -28,7 +28,7 @@ for arg in "$@"; do
     --no-open) NO_OPEN=1 ;;
     --dry-run) DRY=1 ;;
     --help | -h)
-      sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+      awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
       exit 0
       ;;
     *)
@@ -67,6 +67,16 @@ ask() {
   case "$ans" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac
 }
 
+# 되돌리기 어려운 동작(사본 휴지통 이동)은 -y 가 없으면 터미널에서 직접 확인받는다. 비대화형이면 하지 않는다.
+ask_destructive() {
+  if [ "$ASSUME_YES" -eq 1 ]; then return 0; fi
+  if [ ! -t 0 ]; then
+    echo "  비대화형 실행이라 사본을 정리하지 않습니다. -y 를 붙여 다시 실행하면 정리합니다."
+    return 1
+  fi
+  ask "$1" y
+}
+
 [ -f extension/manifest.json ] && [ -d "$PROJECT" ] || die "저장소가 완전하지 않습니다." "extension/manifest.json 과 $PROJECT 가 필요합니다."
 
 # ---------------------------------------------------------------- 0. 업데이트
@@ -96,7 +106,7 @@ if ! xcodebuild -checkFirstLaunchStatus >/dev/null 2>&1; then
   die "Xcode 최초 실행 구성이 끝나지 않았습니다." "직접 실행하세요: sudo xcodebuild -runFirstLaunch (또는 Xcode 를 한 번 열어 라이선스에 동의)"
 fi
 if ! xcodebuild -list -project "$PROJECT" >/dev/null 2>&1; then
-  die "이 Xcode 가 $PROJECT 를 열지 못했습니다." "저장소의 프로젝트는 Xcode 베타 형식이라 같은 형식을 여는 Xcode(27 베타 이상 [추정])가 필요합니다."
+  die "이 Xcode 가 $PROJECT 를 열지 못했습니다 ($(xcodebuild -version 2>/dev/null | head -n 1))." "저장소의 프로젝트는 Xcode 베타 형식이라 같은 형식을 여는 Xcode(27 베타 이상 [추정])가 필요합니다."
 fi
 VERSION="$(plutil -extract version raw -o - extension/manifest.json)"
 BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
@@ -106,18 +116,42 @@ echo "  확장 버전 $VERSION (빌드 $BUILD_NUM)"
 step 2 "서명 팀 찾기"
 mkdir -p "$LOCAL_DIR"
 TEAM="${TEAM_ID:-}"
-if [ -z "$TEAM" ] && [ -f "$LOCAL_DIR/team-id" ]; then TEAM="$(tr -d '[:space:]' <"$LOCAL_DIR/team-id")"; fi
+TEAM_FROM_CACHE=0
+TEAM_FROM_XCODE=0
+
+# 키체인의 Apple Development 인증서에서 팀 ID 목록을 구한다(공백 구분).
+teams=""
+shas="$(security find-identity -v -p codesigning 2>/dev/null | il_parse_identities || true)"
+if [ -n "$shas" ]; then
+  pems="$(security find-certificate -a -Z -p 2>/dev/null || true)"
+  while IFS= read -r sha; do
+    [ -n "$sha" ] || continue
+    ou="$(printf '%s\n' "$pems" | il_cert_pem_for_sha1 "$sha" | openssl x509 -noout -subject 2>/dev/null | il_ou_from_subject || true)"
+    [ -n "$ou" ] || continue
+    il_list_contains "$teams" "$ou" || teams="$teams $ou"
+  done <<<"$shas"
+fi
+
+if [ -z "$TEAM" ] && [ -f "$LOCAL_DIR/team-id" ]; then
+  cached="$(tr -d '[:space:]' <"$LOCAL_DIR/team-id")"
+  if [ -z "$teams" ] || il_list_contains "$teams" "$cached"; then
+    TEAM="$cached"
+    TEAM_FROM_CACHE=1
+  else
+    echo "  저장된 팀 $cached 가 이 Mac 의 인증서 목록에 없어 다시 고릅니다."
+  fi
+fi
+
 if [ -z "$TEAM" ]; then
-  shas="$(security find-identity -v -p codesigning 2>/dev/null | il_parse_identities || true)"
-  teams=""
-  if [ -n "$shas" ]; then
-    pems="$(security find-certificate -a -Z -p 2>/dev/null || true)"
-    while IFS= read -r sha; do
-      [ -n "$sha" ] || continue
-      ou="$(printf '%s\n' "$pems" | il_cert_pem_for_sha1 "$sha" | openssl x509 -noout -subject 2>/dev/null | il_ou_from_subject || true)"
-      [ -n "$ou" ] || continue
-      case " $teams " in *" $ou "*) ;; *) teams="$teams $ou" ;; esac
-    done <<<"$shas"
+  # 인증서가 없으면 Xcode 에 로그인된 계정의 팀 ID 를 후보로 쓴다(읽기 전용). 자동 서명이 인증서를 만들 것으로 기대한다 [미확인].
+  if [ -z "$teams" ]; then
+    xteams="$(defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier 2>/dev/null | il_teams_from_xcode_defaults || true)"
+    if [ -n "$xteams" ]; then
+      # shellcheck disable=SC2086
+      teams="$(echo $xteams)"
+      TEAM_FROM_XCODE=1
+      echo "  인증서가 아직 없습니다. Xcode 에 로그인된 팀으로 빌드해 자동 서명이 인증서를 만들게 합니다 [미확인]."
+    fi
   fi
   # shellcheck disable=SC2086
   set -- $teams
@@ -166,7 +200,10 @@ else
   if ! "${build_cmd[@]}" >"$BUILD_LOG" 2>&1; then
     echo "  마지막 오류:" >&2
     grep -E "error:" "$BUILD_LOG" | tail -n 5 | sed 's/^/    /' >&2 || true
-    die "빌드에 실패했습니다." "자세한 내용: $BUILD_LOG" "서명 오류면 Xcode › 설정 › 계정에서 Apple ID 로그인 상태를 확인하세요."
+    hints=("자세한 내용: $BUILD_LOG" "서명 오류면 Xcode › 설정 › 계정에서 Apple ID 로그인 상태를 확인하세요.")
+    if [ "$TEAM_FROM_CACHE" -eq 1 ]; then hints+=("저장된 팀 $TEAM 이 이 Mac 과 맞지 않을 수 있습니다. rm .local/team-id 후 다시 실행하세요."); fi
+    if [ "$TEAM_FROM_XCODE" -eq 1 ]; then hints+=("인증서가 없는 상태의 자동 서명이 실패했습니다. $PROJECT 를 Xcode 로 열어 SDRHDR·SDRHDR Extension 의 Team 을 한 번 지정한 뒤 다시 실행하세요."); fi
+    die "빌드에 실패했습니다." "${hints[@]}"
   fi
   for target in "$APP_BUILT" "$APP_BUILT/Contents/PlugIns/SDRHDR Extension.appex"; do
     info="$(codesign -dv "$target" 2>&1 || true)"
@@ -216,7 +253,7 @@ else
     run osascript -e "quit app id \"$BUNDLE_ID\"" || die "SDR HDR 를 종료하지 못했습니다." "직접 종료한 뒤 다시 실행하세요."
     [ "$DRY" -eq 1 ] || sleep 2
   fi
-  if ask "  위 사본을 모두 휴지통으로 옮길까요? (새 버전을 설치하기 전에 정리합니다)" y; then
+  if ask_destructive "  위 사본을 모두 휴지통으로 옮길까요? (새 버전을 설치하기 전에 정리합니다)"; then
     for c in "${copies[@]}"; do trash_move "$c"; done
     echo "  휴지통으로 이동 완료"
   else

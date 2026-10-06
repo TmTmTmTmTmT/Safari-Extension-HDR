@@ -8,3 +8,4 @@ xcode/**/build/
 *.xcuserstate
 .DS_Store
 .local/
+.venv/

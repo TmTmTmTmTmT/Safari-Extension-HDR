@@ -1,6 +1,6 @@
 # 설치·사용·문제 해결 가이드
 
-SDR 영상을 실시간으로 확장해 EDR(HDR 밝기)로 보여 주는 Safari 확장입니다. 처음 설치할 때와 7일 만료 후 다시 설치할 때 이 문서를 따릅니다. 확인하지 못한 내용은 `[확인 필요]`로 표시했습니다.
+SDR 영상을 실시간으로 확장해 EDR(HDR 밝기)로 보여 주는 Safari 확장입니다. 처음 설치할 때, 업데이트할 때, 서명이 만료돼 다시 설치할 때 이 문서를 따릅니다. 확인하지 못한 내용은 `[확인 필요]`로 표시했습니다.
 
 ## 1. 개요와 한계
 
@@ -27,7 +27,7 @@ SDR 영상을 실시간으로 확장해 EDR(HDR 밝기)로 보여 주는 Safari 
 ### 3-1. 자동 설치 (권장)
 
 ```bash
-git clone https://github.com/TmTmTmTmTmT/Safari_Extention-HDR.git && cd Safari_Extention-HDR
+git clone https://github.com/TmTmTmTmTmT/Safari-Extension-HDR.git && cd Safari-Extension-HDR
 scripts/install.sh
 ```
 
@@ -48,7 +48,7 @@ scripts/install.sh
 
 ### 3-2. 수동 설치 (Xcode에서 Run)
 
-1. 저장소를 받습니다: `git clone https://github.com/TmTmTmTmTmT/Safari_Extention-HDR.git` 후 해당 폴더로 이동.
+1. 저장소를 받습니다: `git clone https://github.com/TmTmTmTmTmT/Safari-Extension-HDR.git` 후 해당 폴더로 이동.
 2. Xcode 프로젝트는 저장소의 `xcode/`에 이미 있습니다. `scripts/make-xcode.sh`는 `xcode/`가 없을 때만 쓰며, 있는 상태에서 실행하면 덮어쓰지 않고 오류로 중단합니다.
 3. `xcode/SDRHDR/SDRHDR.xcodeproj`를 Xcode로 엽니다(저장소의 프로젝트는 Xcode 베타 형식이라 같은 형식을 여는 Xcode가 필요합니다. 안정판 호환은 [확인 필요]).
 4. **SDRHDR와 SDRHDR Extension 두 타깃 모두** Signing & Capabilities에서 Team을 개인 팀(Apple ID, 무료)으로 지정합니다. `DEVELOPMENT_TEAM` 변경은 커밋하지 않습니다. 이 단계가 빠지면 Safari가 확장을 서명되지 않은 것으로 보고 재시작마다 "서명되지 않은 확장 허용"을 요구합니다.
@@ -73,11 +73,11 @@ scripts/install.sh --update
 
 수동(Xcode) 설치를 쓰는 경우에는 `git pull` → Xcode에서 다시 Run → Safari ⌘Q 후 재시작 순서입니다. `make-xcode.sh`는 다시 실행하지 않습니다. 이 경로는 DerivedData 사본이 생기므로 앱의 점검 화면이 사본 정리를 제안합니다.
 
-## 5. 7일 만료와 재서명
+## 5. 서명 만료와 재서명
 
-- 무료 개인 팀으로 서명한 앱은 약 7일 뒤 만료되어 확장이 꺼지거나 사라질 수 있습니다. 이것은 Apple 정책에 대한 일반 지식이며 이 환경에서의 정확한 기간·증상은 [확인 필요]입니다.
-- 만료되면 `scripts/install.sh`를 다시 실행하거나(권장) Xcode에서 다시 Run해 재서명합니다. 코드 변경이 없으면 `git pull`은 필요 없습니다.
-- 이후 Safari를 완전 종료(⌘Q) 후 재시작하고, 개발자 메뉴의 "서명되지 않은 확장 허용"과 설정의 확장 켜기·youtube.com 허용을 다시 확인합니다.
+- 무료 개인 팀으로 서명한 앱은 일정 기간(Apple 정책상 약 7일로 알려져 있으나 이 환경에서의 정확한 기간·증상은 [확인 필요]) 뒤 만료되어 확장이 꺼지거나 사라질 수 있습니다.
+- 확장이 사라졌다면 `scripts/install.sh`를 다시 실행하거나(권장) Xcode에서 다시 Run해 재서명합니다. 코드 변경이 없으면 `git pull`은 필요 없습니다.
+- 이후 Safari를 완전 종료(⌘Q) 후 재시작하고, 열린 SDR HDR 점검 화면이 서명 확인(✓)이면 개발자 메뉴의 "서명되지 않은 확장 허용"은 필요 없습니다. 서명이 확인되지 않는 경우에만 3-2의 6번을 참고하세요. 설정의 확장 켜기·youtube.com 허용은 다시 확인합니다.
 - 설정값(프리셋·슬라이더)이 재서명 뒤에도 유지되는지는 [확인 필요]입니다. 같은 Safari 세션에서 popup을 닫았다 열거나 Safari를 재시작해도 유지되는 것은 확인 대상으로 정해져 있습니다(체크리스트 M5, `docs/archive/manual-checklist-m1-m6.md`).
 
 ## 6. popup 사용법

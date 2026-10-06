@@ -816,7 +816,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 | impl-worker | sonnet | Sonnet | PLAN.md에 분리된 독립 단위(probe↔sim, detect↔overlay, popup↔hud) 병렬 구현 |
 
 ### 브랜치/PR 규칙
-- `main` 보호. 작업은 `claude/<milestone>-<topic>` 브랜치에서 한다(현재 지정 브랜치는 `claude/amazing-hypatia-3rbspr`로, D0·M0을 여기서 진행).
+- `main` 보호. 작업은 `claude/<milestone>-<topic>` 브랜치에서 한다(초기에는 `claude/amazing-hypatia-3rbspr`에서 D0·M0을 진행했다. 2026-10-06부터 기본 브랜치는 `main`이고 작업 브랜치는 `main`으로 PR한다. 저장소 이름은 `Safari-Extension-HDR`).
 - 마일스톤당 draft PR 1개. 본문에 verify 결과를 (1)/(2)/(3)으로 구분하고, 수동 미완 항목은 "미검증"으로 명시한다.
 - 머지 조건: CI green. 게이트 마일스톤(M1, M2)은 사용자 회신 JSON + Opus 판정(PLAN.md 기록)까지 필요하다.
 - Xcode 프로젝트 변경은 사용자 Mac에서 push한 커밋만 인정한다(클라우드에서 pbxproj 수기 편집 금지).
@@ -853,7 +853,7 @@ popup에는 프리셋 선택과 "상세 설정"(위 6개 슬라이더)을 두고
 - 저장소 이름 변경에 따른 D0 선행 작업:
   1. `git remote -v`를 확인하고, 필요하면 `git remote set-url`로 새 이름을 지정한다(GitHub 리다이렉트가 있어도 명시적으로 교체).
   2. 이 세션의 GitHub MCP 권한 범위는 옛 이름(`tmtmtmtmtmt/claude`)이다. PR 생성이 거부되면 `add_repo`로 새 이름을 추가한다.
-  3. 푸시는 지정 브랜치 `claude/amazing-hypatia-3rbspr`로 한다.
+  3. 푸시는 작업 브랜치로 하고 `main`으로 PR한다(초기 지정 브랜치 `claude/amazing-hypatia-3rbspr`는 삭제됨).
 
 남은 질문 없음.
 

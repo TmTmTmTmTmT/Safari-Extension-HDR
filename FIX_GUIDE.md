@@ -1,9 +1,88 @@
-# FIX_GUIDE.md — 저장소 쓰기 오류 (V 회차) · U 회차 (설정 초기화·메모리)
+# FIX_GUIDE.md — X 회차(공개 저장소 정리) · W · V · U 회차
 
 > 작성: Opus (2026-10-03). 근거: 사용자 보고(2026-10-03), STATUS.md "조사: 메모리 증가·재부팅 후 설정 초기화"(Sonnet 코드 읽기), `extension/content/{renderer,main,params,background}.js`, `extension/popup/popup.js`, `xcode/SDRHDR/SDRHDR Extension/SafariWebExtensionHandler.swift`.
 > 대상: Sonnet. 이 문서 범위 밖 설계 변경 금지. 수정 코드는 포함하지 않는다(.claude/rules/handoff.md).
 > 이전 회차(T 포함)는 git 이력에 있다. T 회차 판정 보류 항목(TA 깜박임, T2 popup)은 체크리스트 "T 회차 확인" 절로 계속 받는다.
 > 브랜치: `claude/m8-plan`의 PR #14가 머지된 뒤 새 브랜치 `claude/u-fixes`(base는 PR #14가 머지된 브랜치). 버전 1.2.0 → 1.2.1.
+
+## X 회차 (2026-10-06, Opus) — 1.3.3: 공개 저장소 정리
+
+> 근거: GitHub 저장소 점검(`gh` 읽기 전용: 설정·브랜치·CI·community profile) + Haiku 저장소 감사(추적 파일 읽기 전용) + Opus 확인. 감사 결과 중 사실이 아닌 것(install.md "8장" 참조는 8장이 실제로 있어 정상, 앱 배포 타깃 26.6은 이미 26.0으로 수정됨)은 제외했다.
+> 브랜치: `main`에서 `claude/x-fixes`. 버전 1.3.2 → 1.3.3. 대상: Sonnet. 사용자 결정 항목(X0)이 정해진 뒤 시작한다. PR #21(README 주소)은 이 회차 전에 병합한다.
+
+### 현재 상태 (사실)
+
+- 기본 브랜치 `main`(=`56825df`, v1.3.2 태그), 병합 후 자동 삭제 켜짐, 설명·토픽 설정됨. 브랜치 보호 없음. 원격 브랜치 22개(모두 병합된 `claude/*` 21개 + PR #21).
+- community profile: README만 있음. LICENSE·CONTRIBUTING·이슈/PR 템플릿 없음. 공개(PUBLIC) 저장소인데 라이선스가 없어 법적으로는 "모든 권리 보유"다.
+- 개인정보: 추적 파일에 팀 ID·이메일·`/Users/` 절대경로 없음(감사 확인).
+- CI(`ci.yml`): push·PR 전부에서 ubuntu(lint·`npm test`·pytest·DOM)와 macos(러너 converter 임시 프로젝트 무서명 빌드). 커밋된 `project.xcproj`(베타 형식)는 러너에서 빌드하지 않아 **W1·W4의 Swift·storyboard 변경은 CI에서 한 번도 컴파일되지 않는다**. `scripts/test-swift.sh`·`install.sh`도 CI에 없다.
+- v1.3.2 릴리스 소스 압축본의 README·install.md에는 `<저장소 주소>`가 남아 있다(PR #21 이전 커밋).
+
+### X0. 사용자 결정 (2026-10-06 확정)
+
+- 라이선스: **넣지 않음**(모든 권리 보유 유지). X2의 LICENSE·README 라이선스 줄·`package.json` license 필드는 하지 않는다.
+- 병합된 `claude/*` 브랜치 21개: **삭제**.
+- `main` 브랜치 보호: **켬**(필수 체크 `ubuntu`·`macos`, 강제 push·삭제 금지, 관리자 우회 허용, 리뷰 필수 없음).
+- 저장소 이름: **`Safari_Extention-HDR` → `Safari-Extension-HDR`로 변경**. README·install.md·릴리스 노트의 주소, `scripts/install.sh` 안내 문구(있다면), `git clone` 뒤 폴더명(`cd Safari-Extension-HDR`), 로컬 `git remote set-url`을 함께 바꾼다. 로컬 작업 폴더 이름(`~/Safari_Extention-HDR`)은 바꾸지 않는다(Claude 메모리·세션 경로가 이 경로에 묶여 있음).
+- 안정판 Xcode 재생성: 보류.
+- 순서: PR #21 병합 → 계획 push → (Sonnet) X5 GitHub 작업 중 **이름 변경과 브랜치 삭제를 먼저**, 보호 규칙은 X 회차 PR 병합 **후**(X4 CI 스텝이 확정된 뒤) 설정.
+
+### X1. 문서 최신화 (Sonnet, 코드 영향 없음)
+
+- `docs/install.md`
+  - 머리말(3행) "7일 만료 후 다시 설치할 때" → "처음 설치·업데이트·재서명할 때".
+  - 5장 "7일 만료와 재서명": 3번째 항목의 "개발자 메뉴의 '서명되지 않은 확장 허용'… 다시 확인"을 "앱 점검 화면 1번이 서명 확인이면 필요 없음, 아니면 3-2의 6번 참조"로 바꾼다. 기간은 [확인 필요] 유지(Apple Development 인증서 자체는 1년, 무료 팀 프로비저닝 기간은 미확인 — 문구를 "만료되어 확장이 사라지면"으로 일반화).
+  - 6장 툴바 배지 항목의 "Safari 27.2에서 [확인 필요]"는 M8 이후 사용자 확인 결과가 STATUS에 있으면 반영, 없으면 유지(Sonnet이 STATUS·체크리스트 회신 기록을 확인).
+- `docs/local-session.md` 11행 `pip install --user` → `.venv` 절차(STATUS에 이미 기록된 방식: `python3 -m venv .venv && .venv/bin/pip install pytest numpy`, 실행 `.venv/bin/python -m pytest sim`). `.venv`가 `.gitignore`에 있는지 확인, 없으면 추가.
+- `STATUS.md` "현재 단계"(M2 시점에 멈춤)를 현재로 갱신: "1.3.2 릴리스(PR #20, `56825df`). 다음: 사용자 Mac W 회차 체크리스트 회신, X 회차". 아래 기록은 그대로 두고 완료 항목은 규칙대로 한 줄 요약.
+- `PLAN.md` 16·819·856행의 `claude/amazing-hypatia-3rbspr` 언급: 기본 브랜치가 `main`으로 바뀌었다는 한 줄을 819행 근처에 추가하고 856행 "푸시는 지정 브랜치…"는 "작업 브랜치 → `main`으로 PR"로 바꾼다. 16행은 역사 기록이라 유지. PLAN.md 문구 변경은 Opus 권한이지만 이 항목은 사실 갱신이라 이 지침으로 위임한다.
+- FIX_GUIDE·STATUS의 과거 절 참조(install.md 3-3 등)는 기록이므로 고치지 않는다.
+
+### X2. 공개 저장소 기본 파일
+
+- `LICENSE`: 넣지 않음(X0). `package.json`의 `"private": true` 유지 확인.
+- `.github/ISSUE_TEMPLATE/bug_report.md`(한국어): 환경(macOS·Safari·디스플레이), 설치 방법(install.sh/Xcode), popup 상태 줄 문구, 진단 JSON 첨부 안내("복사" 버튼, URL·제목은 포함되지 않음), 재현 절차. `config.yml`로 빈 이슈 허용.
+- `.gitattributes`: 새로 추가하는 `.github/ISSUE_TEMPLATE`은 이미 `.github export-ignore`에 포함됨.
+- `package.json` `version` "0.0.0"은 개발 도구용이라 유지하되 `description`에 "개발 도구(확장 버전은 extension/manifest.json)" 명시(이미 그렇다면 생략).
+
+### X3. 설치 스크립트 보완 (`scripts/install.sh`, `scripts/lib/install-lib.sh`)
+
+- (a) **비대화형에서 휴지통 이동 금지**: 현재 `ask`는 stdin이 터미널이 아니면 기본값을 쓰므로, 파이프 실행 시 사본 정리(기본 y)가 확인 없이 실행된다. 확인이 필요한 파괴적 동작(사본 정리)은 `-y`가 없고 비대화형이면 **아니오**로 처리하고 "-y로 다시 실행하면 정리합니다"를 출력. Safari 재시작은 현재대로(기본 n).
+- (b) **팀 캐시 갱신**: `.local/team-id`의 팀으로 빌드가 서명 오류로 실패하면 "저장된 팀 <ID>가 이 Mac의 인증서와 맞지 않을 수 있습니다. `rm .local/team-id` 후 다시 실행" 안내. 또한 캐시된 팀이 현재 키체인 인증서 팀 목록에 없으면(목록을 구할 수 있을 때) 경고 후 목록에서 다시 고른다.
+- (c) **인증서 없는 첫 사용자**(지난 대화의 미해결 틈): 키체인에 Apple Development 인증서가 없을 때 `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier`에서 `teamID`를 읽어 후보로 쓴다(읽기 전용, 팀 ID·팀 유형만 사용, 이름·Apple ID 출력 금지). 후보로 빌드하면 `-allowProvisioningUpdates`가 인증서를 만들 것으로 기대 [추정]. 실패하면 기존 안내("Xcode에서 Team 한 번 지정")로 종료. 파싱 함수는 install-lib에 두고 가짜 픽스처로 테스트. **사용자 확인 필수 항목**: 깨끗한 macOS 사용자 계정에서 Xcode에 Apple ID만 추가한 상태로 `scripts/install.sh` 실행 결과 회신.
+- (d) **요구 Xcode 명시**: 1단계 프로젝트 열기 실패 문구에 감지한 `xcodebuild -version` 첫 줄을 함께 출력. README·install.md 요구 환경에 "저장소 프로젝트를 만든 Xcode: 27.2 베타. 안정판 호환 [확인 필요]" 명시.
+- (e) `--help` 출력에 테스트용 환경 변수(`TEAM_ID`, `SDRHDR_SW_VERS`, `SDRHDR_SAFARI_VERSION`) 설명 포함 여부 확인(현재 주석 9행까지만 출력 — 범위 조정).
+
+### X4. CI 보강 (`.github/workflows/ci.yml`)
+
+- ubuntu: `bash -n scripts/install.sh scripts/lib/install-lib.sh scripts/test-swift.sh` + `shellcheck`(러너 기본 설치) 실행. 기존 경고는 고치거나 해당 줄에 사유 주석으로 비활성.
+- macos: `scripts/test-swift.sh`(Swift 순수 로직) 실행. 앱 Swift 전체 컴파일은 커밋 프로젝트가 베타 형식이라 러너에서 불가 — 대신 `swiftc -typecheck`로 `AppDelegate.swift`·`ViewController.swift`를 macOS SDK에 대해 타입체크하는 단계 추가(storyboard 불포함, `@main`/`@IBOutlet` 때문에 실패하면 이 단계는 넣지 않고 STATUS에 기록).
+- macos: `SDRHDR_SAFARI_VERSION=26.0 scripts/install.sh --dry-run -y --no-open`은 러너 Xcode가 프로젝트를 못 열어 1단계에서 멈출 수 있다. 멈추면 그 실패 문구가 X3(d) 형식인지만 확인하는 스텝으로 둔다(`|| true` 후 출력 grep). 서명·설치는 CI에서 하지 않는다.
+
+### X5. GitHub 설정 (사용자 결정 반영, 본 세션이 `gh`로 실행 — 실행 전 사용자에게 목록 확인)
+
+- 병합된 브랜치 삭제(X0에서 삭제 선택 시): `claude/*` 21개 중 `main`에 포함된 것만, 삭제 전 `git merge-base --is-ancestor`로 재확인.
+- `main` 보호(선택 시): 필수 상태 체크 `ubuntu`·`macos`, 강제 push·삭제 금지, 관리자 우회 허용(1인).
+- v1.3.2 릴리스 노트에 "README의 저장소 주소는 1.3.3에서 수정" 한 줄 추가, 태그는 옮기지 않는다. 1.3.3 릴리스는 X 회차 병합 후 생성.
+- 저장소 이름 변경(선택 시): `gh repo rename`, 이후 README·install.md·릴리스 노트 주소와 로컬 `git remote set-url` 갱신.
+
+### X6. 기록만 (이번에 하지 않음)
+
+- Xcode 프로젝트 `MARKETING_VERSION` 1.0·확장 타깃 배포 타깃 12.0·표시 이름 "SDRHDR": 스크립트 설치는 명령행으로 덮어쓰므로 사용자 영향 없음. Xcode GUI로만 고칠 수 있어 안정판 재생성 회차에 함께.
+- 개발 문서(PLAN·GUIDELINES·FIX_GUIDE·STATUS)를 `docs/internal/`로 옮기는 안: 훅·규칙·세션 스킬이 루트 경로를 참조하므로 하지 않는다. 압축본에서는 이미 제외됨.
+- `results/`·`probe/`·`fixtures/` 공개 유지(개인정보 없음, 개발 근거 자료).
+
+### 재현/검증
+
+- (1) 로컬(Sonnet → sim-runner): lint, `npm test`(install-lib 새 테스트: 비대화형 정리 거부, Xcode defaults 파싱), `test:dom`, pytest, `scripts/test-swift.sh`, `bash -n`, `install.sh --dry-run`(대화형/비대화형 `</dev/null` 두 경우: 비대화형에서 mv 줄이 출력되지 않아야 함), `git archive HEAD | tar -t`에 개발 파일 제외 유지, README·install.md 주소가 새 이름.
+- (2) CI: PR에서 새 스텝 모두 통과.
+- (3) 사용자: X3(c) 깨끗한 계정 시험, X5 설정 결과 확인(브랜치 목록·보호 규칙 화면).
+
+### 분할
+
+- 사용자 X0 결정 → impl-worker 2개 병렬: X-A `scripts/*`·`tests/unit/install-lib.test.js`·`.github/workflows/ci.yml`(X3·X4), X-B 문서·`.github/ISSUE_TEMPLATE`·`package.json`·저장소 주소 갱신(X0·X1·X2). 본 세션: STATUS, 검증, PR, X5(`gh` 실행은 사용자 확인 후).
+
+---
 
 ## W 회차 (2026-10-06, Opus) — 1.3.2: 부팅 시 숨김 실행 · 사본 정리·설치 안내 · 설치 자동화 · 지원 대상 macOS 26/Safari 26
 

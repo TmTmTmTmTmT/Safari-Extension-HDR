@@ -80,3 +80,50 @@ test('il_valid_team_id', () => {
   assert.strictEqual(sh('il_valid_team_id SHORT').rc, 1);
   assert.strictEqual(sh('il_valid_team_id "A;rm -rf x"').rc, 1);
 });
+
+test('il_teams_from_xcode_defaults: teamID 만, 중복 제거, 이름·계정은 무시', () => {
+  const input = `{
+    "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" =     (
+                {
+            isFreeProvisioningTeam = 1;
+            teamID = TEAM123456;
+            teamName = "Fake (Personal Team)";
+            teamType = "Personal Team";
+        },
+                {
+            isFreeProvisioningTeam = 0;
+            teamID = "TEAMABCDE9";
+            teamName = "Other";
+        }
+    );
+    "FFFFFFFF-BBBB-CCCC-DDDD-EEEEEEEEEEEE" =     (
+                {
+            teamID = TEAM123456;
+        }
+    );
+}`;
+  assert.deepStrictEqual(sh('il_teams_from_xcode_defaults', input).out.split('\n'), [
+    'TEAM123456',
+    'TEAMABCDE9',
+  ]);
+  assert.strictEqual(sh('il_teams_from_xcode_defaults', 'The domain does not exist\n').out, '');
+});
+
+test('il_list_contains', () => {
+  assert.strictEqual(sh('il_list_contains " AAA BBB" BBB').rc, 0);
+  assert.strictEqual(sh('il_list_contains " AAA BBB" BB').rc, 1);
+  assert.strictEqual(sh('il_list_contains "" AAA').rc, 1);
+});
+
+test('install.sh --help 에 테스트용 환경 변수가 나온다', () => {
+  const r = spawnSync(
+    'bash',
+    [path.join(__dirname, '..', '..', 'scripts', 'install.sh'), '--help'],
+    {
+      encoding: 'utf8',
+    },
+  );
+  assert.strictEqual(r.status, 0);
+  assert.ok(r.stdout.includes('TEAM_ID'));
+  assert.ok(r.stdout.includes('SDRHDR_SAFARI_VERSION'));
+});

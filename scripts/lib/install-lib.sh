@@ -47,3 +47,14 @@ il_cert_pem_for_sha1() {
 il_valid_team_id() {
   printf '%s' "$1" | grep -q '^[A-Z0-9]\{10\}$'
 }
+
+# il_teams_from_xcode_defaults : stdin 은 `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier` 출력.
+# 로그인된 계정의 팀 ID(10자리)를 한 줄에 하나씩, 중복 없이 출력한다. 팀 이름·Apple ID 는 읽지 않는다.
+il_teams_from_xcode_defaults() {
+  sed -n 's/^[[:space:]]*teamID[[:space:]]*=[[:space:]]*"\{0,1\}\([A-Z0-9]\{10\}\)"\{0,1\};.*$/\1/p' | awk '!seen[$0]++'
+}
+
+# il_list_contains "a b c" x : 공백 구분 목록에 x 가 있으면 0.
+il_list_contains() {
+  case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac
+}
