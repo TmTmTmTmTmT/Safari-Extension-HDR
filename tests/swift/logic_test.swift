@@ -47,4 +47,13 @@ check(newestIndex([copy("1.3.2", t0), copy(nil, t1)]) == 1, "unreadable newer by
 check(newestIndex([copy("1.3.2", t0), copy(nil, nil)]) == nil, "ambiguous")
 check(newestIndex([copy("1.3.2", t1), copy("1.0.1", t0), copy(nil, t0)]) == 0, "three copies")
 
+// canOfferOpen (Y1)
+check(canOfferOpen(selfTeam: "TEAM123456", otherTeam: "TEAM123456") == true, "same team")
+check(canOfferOpen(selfTeam: "TEAM123456", otherTeam: "OTHER12345") == false, "different team")
+check(canOfferOpen(selfTeam: nil, otherTeam: "TEAM123456") == false, "self adhoc")
+check(canOfferOpen(selfTeam: "TEAM123456", otherTeam: nil) == false, "other unreadable")
+check(canOfferOpen(selfTeam: nil, otherTeam: nil) == false, "both nil")
+check(canOfferOpen(selfTeam: "", otherTeam: "") == false, "empty team")
+check(CopyInfo(path: "/x", version: nil, builtAt: nil, signing: .signed, teamID: "T").teamID == "T", "teamID field")
+
 if failures == 0 { print("OK") } else { print("\(failures) failure(s)"); exit(1) }

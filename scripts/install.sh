@@ -199,8 +199,8 @@ else
   echo "  로그: $BUILD_LOG"
   if ! "${build_cmd[@]}" >"$BUILD_LOG" 2>&1; then
     echo "  마지막 오류:" >&2
-    grep -E "error:" "$BUILD_LOG" | tail -n 5 | sed 's/^/    /' >&2 || true
-    hints=("자세한 내용: $BUILD_LOG" "서명 오류면 Xcode › 설정 › 계정에서 Apple ID 로그인 상태를 확인하세요.")
+    grep -E "error:" "$BUILD_LOG" | tail -n 5 | il_redact_home "$HOME" | sed 's/^/    /' >&2 || true
+    hints=("자세한 내용: $BUILD_LOG (이슈에 공유할 때는 error: 줄만, 경로를 가려서 붙이세요. 로그 전체에는 사용자 경로·팀 ID가 있습니다)" "서명 오류면 Xcode › 설정 › 계정에서 Apple ID 로그인 상태를 확인하세요.")
     if [ "$TEAM_FROM_CACHE" -eq 1 ]; then hints+=("저장된 팀 $TEAM 이 이 Mac 과 맞지 않을 수 있습니다. rm .local/team-id 후 다시 실행하세요."); fi
     if [ "$TEAM_FROM_XCODE" -eq 1 ]; then hints+=("인증서가 없는 상태의 자동 서명이 실패했습니다. $PROJECT 를 Xcode 로 열어 SDRHDR·SDRHDR Extension 의 Team 을 한 번 지정한 뒤 다시 실행하세요."); fi
     die "빌드에 실패했습니다." "${hints[@]}"

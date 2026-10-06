@@ -26,6 +26,8 @@ class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHan
     private var others: [(url: URL, info: CopyInfo)] = []
     private var selfIsNewest = false
     private var newestOtherIndex: Int?
+    /// 더 새로워 보이는 다른 사본이 있지만 같은 서명 팀임을 확인할 수 없는 경우 (FIX_GUIDE Y1).
+    private var newestUnverified = false
     private var notice: String?
     private var pageLoaded = false
 
@@ -95,7 +97,15 @@ class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHan
         let all = [selfCopy] + found.map { $0.info }
         let newest = newestIndex(all)
         selfIsNewest = (newest == 0) || found.isEmpty
-        newestOtherIndex = (newest != nil && newest! > 0) ? newest! - 1 : nil
+        newestOtherIndex = nil
+        newestUnverified = false
+        if let n = newest, n > 0 {
+            if canOfferOpen(selfTeam: selfCopy.teamID, otherTeam: found[n - 1].info.teamID) {
+                newestOtherIndex = n - 1
+            } else {
+                newestUnverified = true
+            }
+        }
         log.notice("setup copies=\(found.count, privacy: .public) selfIsNewest=\(self.selfIsNewest, privacy: .public) ambiguous=\(newest == nil && !found.isEmpty, privacy: .public)")
 
         SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier: extensionBundleIdentifier) { [weak self] (state, error) in
@@ -119,6 +129,7 @@ class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHan
             "selfIsNewest": selfIsNewest,
             "ambiguous": ambiguous,
             "newestOtherIndex": newestOtherIndex.map { $0 as Any } ?? NSNull(),
+            "newestUnverified": newestUnverified,
             "copies": others.enumerated().map { (i, c) -> [String: Any] in
                 [
                     "id": i,
@@ -151,21 +162,23 @@ class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHan
         let exe = appURL.appendingPathComponent("Contents/MacOS/SDRHDR")
         let builtAt = (try? FileManager.default.attributesOfItem(atPath: exe.path))?[.modificationDate] as? Date
 
-        let a = signing(of: appURL)
-        let e = signing(of: appex)
+        let (a, aTeam) = signingInfo(of: appURL)
+        let (e, eTeam) = signingInfo(of: appex)
         let combined: Signing = (a == .signed && e == .signed) ? .signed : ((a == .adhoc || e == .adhoc) ? .adhoc : .unknown)
-        return CopyInfo(path: appURL.path, version: version, builtAt: builtAt, signing: combined)
+        let team: String? = (combined == .signed && aTeam != nil && aTeam == eTeam) ? aTeam : nil
+        return CopyInfo(path: appURL.path, version: version, builtAt: builtAt, signing: combined, teamID: team)
     }
 
-    private static func signing(of url: URL) -> Signing {
+    private static func signingInfo(of url: URL) -> (Signing, String?) {
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let sc = code else { return .unknown }
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let sc = code else { return (.unknown, nil) }
         var infoRef: CFDictionary?
         guard SecCodeCopySigningInformation(sc, SecCSFlags(rawValue: kSecCSSigningInformation), &infoRef) == errSecSuccess,
-              let info = infoRef as? [String: Any] else { return .unknown }
+              let info = infoRef as? [String: Any] else { return (.unknown, nil) }
         let flags = (info[kSecCodeInfoFlags as String] as? UInt32) ?? 0
-        if flags & 0x2 != 0 { return .adhoc } // kSecCodeSignatureAdhoc
-        return (info[kSecCodeInfoTeamIdentifier as String] as? String) != nil ? .signed : .adhoc
+        if flags & 0x2 != 0 { return (.adhoc, nil) } // kSecCodeSignatureAdhoc
+        if let team = info[kSecCodeInfoTeamIdentifier as String] as? String { return (.signed, team) }
+        return (.adhoc, nil)
     }
 
     // MARK: - 조치
@@ -200,6 +213,14 @@ class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHan
 
     private func openNewest() {
         guard let i = newestOtherIndex, others.indices.contains(i) else { return }
+        // 실행 직전에 다시 확인한다. 사본이 바뀌었을 수 있다 (FIX_GUIDE Y1 (e)).
+        let selfTeam = Self.describe(appURL: Bundle.main.bundleURL).teamID
+        let target = Self.describe(appURL: others[i].url)
+        guard canOfferOpen(selfTeam: selfTeam, otherTeam: target.teamID) else {
+            notice = "같은 개발자 서명인지 확인할 수 없어 열지 않았습니다. Finder에서 확인해 주세요."
+            recheck()
+            return
+        }
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(at: others[i].url, configuration: config) { _, error in

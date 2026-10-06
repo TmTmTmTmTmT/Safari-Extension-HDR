@@ -31,4 +31,4 @@ popup의 "진단" 영역을 펼쳐 [복사]한 JSON을 붙여 주세요. 영상 
 
 ## 설치 문제라면
 
-`scripts/install.sh`의 출력(오류 문구)을 붙여 주세요. 빌드 로그는 `.local/build.log`에 있습니다.
+`scripts/install.sh` 화면 출력의 오류 줄만 붙여 주세요. 빌드 로그 `.local/build.log` 전체에는 사용자 경로(/Users/이름)와 팀 ID가 들어 있으니 올리지 마세요. 필요하면 `error:` 줄만, 경로를 가려서 붙여 주세요.

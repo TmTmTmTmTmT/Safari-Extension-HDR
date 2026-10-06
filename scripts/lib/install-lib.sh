@@ -58,3 +58,12 @@ il_teams_from_xcode_defaults() {
 il_list_contains() {
   case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac
 }
+
+# il_redact_home HOME : stdin 의 HOME 경로를 ~ 로 바꿔 출력한다 (공개 이슈에 붙일 로그용). HOME 이 비었거나 / 이거나 sed 구분자 # 를 포함하면 그대로 출력.
+il_redact_home() {
+  local home="$1"
+  case "$home" in
+    '' | / | *'#'*) cat ;;
+    *) sed "s#${home}#~#g" ;;
+  esac
+}
